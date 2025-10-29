@@ -6,9 +6,12 @@
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
-    "elysia": "latest"
+    "elysia": "latest",
+    "nodemailer": "^7.0.10",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/nodemailer": "^7.0.3",
     "bun-types": "latest"
   },
   "module": "src/index.js"
