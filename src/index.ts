@@ -1,7 +1,10 @@
+const DRY_RUN = false; // set false kalau sudah yakin mau kirim beneran
+
 import nodemailer, { Transporter } from "nodemailer";
 import fs from "fs";
 import path from "path";
 import * as XLSX from "xlsx";
+import cliProgress from "cli-progress";
 
 interface Recipient {
   name: string;
@@ -14,7 +17,7 @@ function createTransporter(): Transporter {
     service: "gmail",
     auth: {
       user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS, // App Password
+      pass: process.env.SMTP_PASS, // gunakan App Password Gmail
     },
   });
 }
@@ -31,7 +34,7 @@ function loadRecipientsFromExcel(filePath: string): Recipient[] {
     .map((r, idx) => {
       const name = String(r.name ?? "").trim();
       const email = String(r.email ?? "").trim();
-      const fileCell = String(r.file ?? "").trim(); // nama file dari Excel
+      const fileName = String(r.file ?? "").trim(); // cukup nama file: Surat_Rama.pdf
 
       if (!name || !email) {
         console.warn(
@@ -41,14 +44,14 @@ function loadRecipientsFromExcel(filePath: string): Recipient[] {
       }
 
       let fileAbs: string | undefined;
-      if (fileCell) {
-        const candidate = path.resolve("./attachments", fileCell);
-        if (!fs.existsSync(candidate)) {
+      if (fileName) {
+        const resolved = path.resolve("./attachments", fileName);
+        if (!fs.existsSync(resolved)) {
           console.warn(
-            `⚠️  Lampiran tidak ditemukan untuk ${email}: ${candidate} — lanjut tanpa attachment.`
+            `⚠️  Lampiran tidak ditemukan untuk ${email}: ${resolved} — lanjut tanpa attachment.`
           );
         } else {
-          fileAbs = candidate; // simpan path absolut siap pakai
+          fileAbs = resolved; // absolute path siap kirim
         }
       }
 
@@ -62,14 +65,16 @@ function loadRecipientsFromExcel(filePath: string): Recipient[] {
 async function sendEmail(
   transporter: Transporter,
   recipient: Recipient
-): Promise<void> {
+): Promise<string> {
+  if (DRY_RUN) {
+    // console.log(
+    //   `(TEST) Email ke ${recipient.email} tidak dikirim (dry run mode)`
+    // );
+    return "<dry-run>";
+  }
+
   const attachments = recipient.file
-    ? [
-        {
-          filename: path.basename(recipient.file),
-          path: recipient.file, // sudah absolut
-        },
-      ]
+    ? [{ filename: path.basename(recipient.file), path: recipient.file }]
     : [];
 
   const html = `
@@ -92,38 +97,89 @@ async function sendEmail(
     attachments,
   });
 
-  console.log(
-    `✅ Terkirim ke ${recipient.email}: ${info.messageId || info.response}`
-  );
+  return (info.messageId || info.response || "").toString();
+}
+
+// ── Progress & ETA helper
+function formatEta(msRemaining: number) {
+  const s = Math.max(0, Math.round(msRemaining / 1000));
+  const mm = Math.floor(s / 60);
+  const ss = s % 60;
+  return mm ? `${mm}m ${ss}s` : `${ss}s`;
 }
 
 async function sendBulkFromExcel(excelPath: string, delayMs = 600) {
   const transporter = createTransporter();
 
-  // Verifikasi kredensial/akses SMTP dulu
   try {
     await transporter.verify();
-    console.log("📮 SMTP siap (verify OK).");
+    console.log("📮 SMTP siap (verifikasi berhasil).");
   } catch (e) {
     console.error(
-      "❌ SMTP verify gagal. Cek SMTP_USER/SMTP_PASS (App Password) dan akses Gmail:",
+      "❌ SMTP gagal diverifikasi. Cek SMTP_USER/SMTP_PASS (App Password) dan akses akun Gmail:",
       (e as Error).message
     );
     process.exit(1);
   }
 
   const recipients = loadRecipientsFromExcel(excelPath);
-
-  console.log(`📄 Total penerima valid: ${recipients.length}`);
-  for (const r of recipients) {
-    try {
-      await sendEmail(transporter, r);
-    } catch (err) {
-      console.error(`❌ Gagal kirim ke ${r.email}:`, (err as Error).message);
-    }
-    await new Promise((res) => setTimeout(res, delayMs)); // rate limit friendly
+  const total = recipients.length;
+  if (!total) {
+    console.log("ℹ️  Tidak ada penerima valid di Excel.");
+    return;
   }
-  console.log("🏁 Selesai.");
+  console.log(`📄 Total penerima valid: ${total}`);
+
+  const bar = new cliProgress.SingleBar(
+    {
+      format:
+        "📤 {bar} {percentage}% | {value}/{total} | ETA: {etaStr} | OK:{ok} Fail:{fail}",
+      barCompleteChar: "█",
+      barIncompleteChar: "░",
+      hideCursor: true,
+      fps: 30,
+    },
+    cliProgress.Presets.shades_classic
+  );
+
+  let ok = 0;
+  let fail = 0;
+  const start = Date.now();
+  bar.start(total, 0, { etaStr: "—", ok, fail });
+  const logStream = fs.createWriteStream("emails.log", { flags: "a" });
+
+  for (let i = 0; i < total; i++) {
+    const r = recipients[i];
+    try {
+      const msgId = await sendEmail(transporter, r);
+      ok++;
+      logStream.write(
+        `✅ ${new Date().toISOString()} - ${r.email}: ${msgId}\n`
+      );
+    } catch (err) {
+      fail++;
+      logStream.write(
+        `❌ ${new Date().toISOString()} - ${r.email}: ${
+          (err as Error).message
+        }\n`
+      );
+    }
+
+    const done = i + 1;
+    const elapsed = Date.now() - start;
+    const avgPerEmail = elapsed / done;
+    const remaining = (total - done) * avgPerEmail + delayMs * (total - done);
+    bar.update(done, { etaStr: formatEta(remaining), ok, fail });
+
+    await new Promise((res) => setTimeout(res, delayMs)); // hindari rate limit
+  }
+
+  bar.stop();
+  logStream.end();
+
+  const durationSec = ((Date.now() - start) / 1000).toFixed(1);
+  console.log(`\n🏁 Selesai dalam ${durationSec}s | OK:${ok} Fail:${fail}`);
+  console.log("📄 Detail log tersimpan di file: emails.log");
 }
 
 // Jalankan: ts-node sendEmailsFromExcel.ts recipients.xlsx

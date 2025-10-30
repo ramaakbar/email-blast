@@ -6,11 +6,13 @@
     "dev": "bun run --watch src/index.ts"
   },
   "dependencies": {
+    "cli-progress": "^3.12.0",
     "elysia": "latest",
     "nodemailer": "^7.0.10",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@types/cli-progress": "^3.11.6",
     "@types/nodemailer": "^7.0.3",
     "bun-types": "latest"
   },
