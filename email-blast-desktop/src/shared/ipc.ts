@@ -27,11 +27,40 @@ export const PingResponse = Schema.Struct({
 export type PingResponse = Schema.Schema.Type<typeof PingResponse>;
 
 /**
- * The contextBridge-exposed API skeleton (`window.api`).
- * Domains and methods are added additively as later tickets land.
+ * `system.getAppInfo` response - the static identity of the app,
+ * shown in the Settings About section.
+ */
+export const GetAppInfoResponse = Schema.Struct({
+  name: Schema.String,
+  version: Schema.String,
+});
+export type GetAppInfoResponse = Schema.Schema.Type<typeof GetAppInfoResponse>;
+
+/**
+ * Renderer-to-main payloads, decoded at the main boundary (malformed calls
+ * become typed ParseErrors). Single-argument calls carry the bare value;
+ * multi-argument calls carry a tuple, mirroring `ipcRenderer.invoke(...args)`.
+ */
+export const SettingsGetPayload = Schema.String;
+export const SettingsSetPayload = Schema.Tuple([Schema.String, Schema.String]);
+export type SettingsSetPayload = Schema.Schema.Type<typeof SettingsSetPayload>;
+
+/**
+ * The contextBridge-exposed API (`window.api`). Domains and methods are
+ * added additively as later tickets land.
  */
 export interface Api {
   system: {
     ping(): Promise<PingResponse>;
+    /** Path of a usable `soffice` binary, or null when LibreOffice is missing. */
+    checkLibreOffice(): Promise<string | null>;
+    /** Opens a native folder picker; the chosen path, or null when cancelled. */
+    pickFolder(): Promise<string | null>;
+    getAppInfo(): Promise<GetAppInfoResponse>;
+  };
+  settings: {
+    /** Raw setting value by key (persisted in SQLite), or null when unset. */
+    get(key: string): Promise<string | null>;
+    set(key: string, value: string): Promise<void>;
   };
 }

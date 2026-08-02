@@ -1,12 +1,24 @@
-import { app, shell, BrowserWindow, ipcMain } from "electron";
+import { app, shell, BrowserWindow, ipcMain, dialog } from "electron";
 import { join } from "path";
+import { homedir } from "os";
 import assert from "node:assert";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import { Effect, Schema } from "effect";
-import { API_VERSION, IPC, PingResponse } from "../shared/ipc";
-import { registerWindowHandler } from "./ipc";
-import { rootLayer } from "./runtime";
+import { Effect, Layer, Option, Schema } from "effect";
+import {
+  API_VERSION,
+  GetAppInfoResponse,
+  IPC,
+  PingResponse,
+  SettingsGetPayload,
+  SettingsSetPayload,
+} from "../shared/ipc";
+import { decodePayload, registerWindowHandler } from "./ipc";
+import { rootLayer, type AppServices } from "./runtime";
 import { AppInfo } from "./services/app-info";
+import { defaultPathsForHome } from "./services/default-paths";
+import { findLibreOffice } from "./services/libreoffice";
+import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
+import { Settings } from "./services/settings";
 
 // The only origins the app may ever display: the Vite dev server in dev,
 // the local packaged file in production. Everything else is a navigation
@@ -89,18 +101,63 @@ function registerApiVersionAssertion(): void {
   });
 }
 
-// Skeleton IPC surface. Responses are Schema-encoded at the boundary;
-// later tickets add the full domain surface with payload decoding.
-function registerIpcHandlers(): void {
+/**
+ * The full IPC surface. Renderer-to-main payloads are decoded at the
+ * boundary (malformed calls become typed ParseErrors); every handler that
+ * needs a service runs an Effect program provided with the root layer.
+ */
+function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
+  const run = <A, E>(program: Effect.Effect<A, E, AppServices>): Promise<A> =>
+    Effect.runPromise(program.pipe(Effect.provide(layer)));
+
   registerWindowHandler(IPC["system:ping"], () => {
     return Schema.encodeSync(PingResponse)({ pong: true, apiVersion: API_VERSION });
+  });
+
+  registerWindowHandler(IPC["system:check-libreoffice"], () => {
+    return findLibreOffice();
+  });
+
+  registerWindowHandler(IPC["system:pick-folder"], () => {
+    return dialog
+      .showOpenDialog({ properties: ["openDirectory"] })
+      .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+  });
+
+  registerWindowHandler(IPC["system:get-app-info"], () => {
+    return run(
+      Effect.gen(function* () {
+        // Schema-encoded at the boundary like every other response.
+        return Schema.encodeSync(GetAppInfoResponse)(yield* AppInfo);
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["settings:get"], (payload) => {
+    const key = decodePayload(SettingsGetPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const repo = yield* SqliteRepo;
+        return Option.getOrNull(yield* repo.getSetting(key));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["settings:set"], (payload) => {
+    const [key, value] = decodePayload(SettingsSetPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const repo = yield* SqliteRepo;
+        yield* repo.setSetting(key, value);
+      }),
+    );
   });
 }
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId("com.emailblast.desktop");
 
@@ -110,22 +167,29 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
-  registerIpcHandlers();
+  // Boot the Effect layer before any window exists: the database is opened
+  // (schema applied, defaults seeded) and the configured templates/output
+  // directories are ensured. The DB handle stays open for the app lifetime.
+  const db = openDatabase(join(app.getPath("userData"), "email-blast.db"));
+  const layer = rootLayer(db, defaultPathsForHome(homedir()));
+  app.on("will-quit", () => db.close());
+
+  // Awaited before window creation, so the first paint always sees the
+  // finished first-run state (directories exist, defaults seeded).
+  await Effect.runPromise(
+    Effect.gen(function* () {
+      const settings = yield* Settings;
+      yield* settings.ensureDirectories();
+      const info = yield* AppInfo;
+      console.log(`[boot] Effect layer ready: ${info.name} v${info.version}`);
+    }).pipe(Effect.provide(layer)),
+  );
+
+  registerIpcHandlers(layer);
   // Dev-only: assert the preload's API_VERSION matches ours (stale-bundle guard).
   // Registered before window creation so it catches the first webContents too.
   if (is.dev) registerApiVersionAssertion();
   createWindow();
-
-  // Seam A: boot the main-process Effect layer (the composition root that
-  // later tickets grow into the full service graph).
-  void Effect.runPromise(
-    Effect.gen(function* () {
-      const info = yield* AppInfo;
-      return info;
-    }).pipe(Effect.provide(rootLayer)),
-  ).then((info) => {
-    console.log(`[boot] Effect layer ready: ${info.name} v${info.version}`);
-  });
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the

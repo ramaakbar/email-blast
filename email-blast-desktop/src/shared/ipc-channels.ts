@@ -14,6 +14,11 @@ export const API_VERSION = 1;
  */
 export const IPC = {
   "system:ping": "system:ping",
+  "system:check-libreoffice": "system:check-libreoffice",
+  "system:pick-folder": "system:pick-folder",
+  "system:get-app-info": "system:get-app-info",
+  "settings:get": "settings:get",
+  "settings:set": "settings:set",
   "dev:api-version-check": "dev:api-version-check",
   "dev:api-version-report": "dev:api-version-report",
 } as const;

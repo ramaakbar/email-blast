@@ -1,5 +1,9 @@
+import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet, createRootRoute } from "@tanstack/react-router";
 import { FileText, History, Send, Settings, Upload, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { WelcomeScreen } from "@/components/welcome-screen";
+import { SETTING_KEYS } from "../../../shared/settings";
 
 const NAV_ITEMS = [
   { to: "/import", label: "Import", icon: Upload },
@@ -14,7 +18,60 @@ export const Route = createRootRoute({
   component: RootLayout,
 });
 
+/**
+ * Setup gate: a fresh profile (`libreoffice_checked` unset/false) shows the
+ * welcome screen instead of the app shell; once the user has gone through
+ * setup the setting is true and every later launch goes straight to the app.
+ */
 function RootLayout() {
+  const [setupDone, setSetupDone] = useState<boolean | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.api.settings
+      .get(SETTING_KEYS.libreofficeChecked)
+      .then((value) => {
+        if (!cancelled) setSetupDone(value === "true");
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  const retry = useCallback(() => {
+    setLoadError(false);
+    setSetupDone(null);
+    setReloadKey((key) => key + 1);
+  }, []);
+
+  if (loadError) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background p-8">
+        <p className="text-sm text-muted-foreground">
+          Could not reach the app backend. The database may not be ready yet.
+        </p>
+        <Button onClick={retry}>Retry</Button>
+      </div>
+    );
+  }
+
+  if (setupDone === null) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <p className="animate-pulse text-sm font-semibold tracking-tight">Email Blast</p>
+      </div>
+    );
+  }
+
+  if (!setupDone) {
+    return <WelcomeScreen onComplete={() => setSetupDone(true)} />;
+  }
+
   return (
     <div className="flex h-screen bg-background text-foreground">
       <aside className="flex w-60 shrink-0 flex-col border-r bg-sidebar">

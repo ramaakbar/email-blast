@@ -9,6 +9,13 @@ import type { Api } from "../shared/ipc";
 const api: Api = {
   system: {
     ping: () => ipcRenderer.invoke(IPC["system:ping"]),
+    checkLibreOffice: () => ipcRenderer.invoke(IPC["system:check-libreoffice"]),
+    pickFolder: () => ipcRenderer.invoke(IPC["system:pick-folder"]),
+    getAppInfo: () => ipcRenderer.invoke(IPC["system:get-app-info"]),
+  },
+  settings: {
+    get: (key) => ipcRenderer.invoke(IPC["settings:get"], key),
+    set: (key, value) => ipcRenderer.invoke(IPC["settings:set"], key, value),
   },
 };
 
