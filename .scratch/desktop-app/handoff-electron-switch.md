@@ -1,5 +1,7 @@
 # Handoff: Email Blast Desktop App — Stack Switch Tauri → Electron
 
+> **SUPERSEDED 2026-08-02 (charting session complete).** The stack decisions below were re-derived and resolved the same day. See `map.md` (current) for the Electron-era chart: decisions 01-05 resolved (scaffold, officecli, libraries, Effect, fidelity prototype), tickets 06-07 (IPC surface, process model) open. The open questions and next steps in this file are historical.
+
 **Date:** 2026-08-02
 **Decision:** User chose **Electron** (not Tauri). Also interested in **Effect v4** for the TypeScript backend and **OfficeCLI** as a possible LibreOffice replacement. This invalidates the Rust/Tauri-specific parts of the existing map, spec, and tickets. The new session should re-derive the stack decisions, then re-run `/to-spec` + `/to-tickets`.
 
