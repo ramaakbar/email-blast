@@ -1,0 +1,30 @@
+appId: com.emailblast.desktop
+productName: Email Blast
+directories:
+  buildResources: build
+files:
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!electron.vite.config.{js,ts,mjs,cjs}"
+  - "!{.oxlintrc.json,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{.env,.env.*,.npmrc,pnpm-lock.yaml,pnpm-workspace.yaml}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json,vitest.config.ts}"
+asarUnpack:
+  - resources/**
+win:
+  executableName: email-blast-desktop
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+# Unsigned local builds (ad-hoc identity, no hardened runtime) - code
+# signing and notarization are deferred until distribution starts.
+mac:
+  identity: "-"
+  hardenedRuntime: false
+  category: public.app-category.productivity
+  extendInfo:
+    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
+    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
+npmRebuild: false

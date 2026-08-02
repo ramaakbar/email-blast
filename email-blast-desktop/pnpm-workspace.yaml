@@ -1,0 +1,5 @@
+allowBuilds:
+  electron: true
+  esbuild: true
+  msgpackr-extract: false
+  electron-winstaller: false

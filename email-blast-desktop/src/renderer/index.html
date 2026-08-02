@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Email Blast</title>
+    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP
+         ws://localhost:* is only used by the Vite HMR websocket in dev; the
+         dev server itself is covered by 'self'. In packaged builds the page
+         is file:// and 'self' is sufficient, so no dev-only origins ship. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws://localhost:*"
+    />
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
