@@ -1,61 +1,46 @@
-# Map: Email Blast Desktop App
+# Map: Email Blast Desktop App (Electron era)
 
 ## Destination
 
-A Tauri v2 desktop app (React + TanStack + Tailwind + shadcn, pnpm, oxlint/oxfmt) that lets a non-dev import an Excel file, preview recipients in a table, generate PDF letters from DOCX templates and certificates from image templates, bulk-send emails via Gmail SMTP, and view send logs.
-All business logic in Rust.
+An Electron desktop app (React + TanStack + Tailwind + shadcn, pnpm) that lets a non-dev import an Excel file, preview recipients in a table, generate PDF letters from DOCX templates and certificates from image templates, bulk-send emails via Gmail SMTP, and view send logs.
+All business logic lives in the Electron main process, written in TypeScript (Effect v4 candidate - ticket 04).
 Mixed Mac + Windows, local-only (no server, no multi-user).
 Architecture leaves a seam for WhatsApp sending later.
 
 ## Notes
 
-- Skills to consult: `/grill-with-docs`, `/domain-modeling`, `/tdd`, `/code-review`, `/prototype`
-- Tech stack: Tauri v2, React, TanStack Router/Query/Table, Tailwind CSS v4, shadcn/ui, Vite, pnpm, oxlint, oxfmt
-- Current codebase is a Bun CLI with three tools (generate-attachment, generate-certif, send-email) — reference for behavior but not code to port
-- DOCX to PDF pipeline: own zip XML string replace for fill, then LibreOffice headless for DOCX→PDF (`soffice --headless --convert-to pdf`). Same approach as existing CLI. Certificate images → PDF via `printpdf` (no LibreOffice needed for that path)
-- Template editing remains in Word/Photoshop/Figma for v1; built-in editor is out of scope
+- Skills to consult: `/research`, `/grilling`, `/domain-modeling`, `/prototype`, `/tdd`, `/code-review`
+- User's `officecli` skill (`~/.claude/skills/officecli`, binary installed at `/opt/homebrew/bin/officecli` v1.0.143) covers DOCX/XLSX/PPTX editing + PDF export - central to tickets 02/05
+- Stack (user-confirmed 2026-08-02): Electron + electron-vite (plain Vite — not the Vite+ toolchain), React, TanStack Router/Query/Table, Tailwind CSS v4, shadcn/ui, pnpm, oxlint + oxfmt (standalone packages), vitest for tests
+- Existing Bun CLI in `src/` is the PRIMARY code reference (nodemailer, pdf-lib, xlsx, PizZip + docxtemplater) - read it, don't re-derive
+- DOCX to PDF: LibreOffice headless (`soffice --headless --convert-to pdf`) is the incumbent (~200MB prereq, check on first launch); officecli `view pdf` exporter is the candidate to displace it (tickets 02/05)
+- Tauri-era map/spec/tickets archived at `archive/tauri-era/` - history, not frontier
 
 ## Decisions so far
 
-- [01: Rust crate survey](./issues/01-rust-crate-survey.md) — All-MIT/Apache-2.0 stack. Excel: `calamine`. SMTP: `lettre`. DB: `rusqlite` (bundled). PDF from image: `printpdf`. DOCX fill: own zip XML string replace (not `docx-template` — `{{}}` delimiter incompatible with existing `{placeholder}` templates). DOCX→PDF: LibreOffice headless (rdocx-html + webview print-to-PDF proved insufficient — no header/footer support).
-- [02: Tauri v2 + React + Vite + pnpm scaffold](./issues/02-tauri-scaffold.md) — `pnpm create tauri-app@latest` with React + TypeScript + pnpm works out of the box. Tailwind v4 + shadcn/ui fully compatible with Tauri webview (CSS-first config, no `tailwind.config.ts`). TanStack Router/Query/Table integrate cleanly via Vite plugin. oxlint stable v1.x, oxfmt alpha v0.x. Full step-by-step recipe in the answer file.
-- [04: Data model & domain glossary](./issues/04-data-model-and-glossary.md) — Wrote `CONTEXT.md`. Recipient = name + channel addresses + metadata bag (dumb pipe from Excel to template). Template = user-declared slots, not auto-discovered. Generate Job and Send Job are independent actions. Send status: pending → sent | failed | skipped. Per-job SMTP config (not global). Channel seam for WhatsApp v2.
-- [05: App screens & navigation](./issues/05-app-screens-and-navigation.md) — Sidebar + compose wizard hybrid. Six routes: Import, Recipients, Templates, Compose (6-step wizard: recipients → template → message → SMTP → generate & review → send), Logs (with per-recipient drill-down and retry), Settings (SMTP profiles, rate limit delay slider, default paths). Import auto-maps Excel columns with manual override, skips duplicate emails. Live progress bar + scrolling log during send with pause/cancel. Message body supports `{slot}` interpolation from template + metadata keys.
-- [06: Error handling & batch resilience](./issues/06-error-handling-and-resilience.md) — Per-recipient failure: continue batch, mark failed, retryable. SMTP disconnect: 3 retries with exponential backoff (1s/2s/4s), then pause with resume from cursor. Rate limiting: 1 email/second default, simple sleep between dispatches. App quit: cursor persisted to SQLite after each send, resume on restart. Generation failure: skip recipient, continue, only send to confirmed-good attachments. Validate everything during Generate step + SMTP pre-flight at Send time. Defined Rust error types (GenerateError, SendError), JobStatus enum, and SendCursor struct.
-- [03: DOCX-to-PDF pipeline prototype](./issues/03-docx-pdf-pipeline-prototype.md) — rdocx-html + webview path **failed** (no header/footer support — letterhead dropped). Revised to **LibreOffice headless** (`soffice --headless --convert-to pdf`), same as existing CLI. Fill: own zip XML string replace (~25 lines). Certificate images: `printpdf` (LibreOffice not needed). LibreOffice is a prerequisite (~200MB on macOS/Windows); app should check on first launch and link to download if missing.
-
-## Implementation tickets (from /to-tickets)
-
-Tracer-bullet tickets with blocking edges. Work blockers-first. Each ticket is `ready-for-agent`.
-
-- [07: Scaffold Tauri v2 + React + Vite + pnpm](./issues/07-scaffold-tauri-project.md)
-- [08: Database schema and Rust model types](./issues/08-database-schema-and-models.md) — blocked by 07
-- [09: Excel import pipeline (calamine)](./issues/09-excel-import-pipeline.md) — blocked by 08
-- [10: DOCX fill and DOCX-to-PDF pipeline](./issues/10-docx-fill-and-convert-pipeline.md) — blocked by 08
-- [11: Image to PDF pipeline (printpdf)](./issues/11-image-to-pdf-pipeline.md) — blocked by 08
-- [12: SMTP email sender (lettre)](./issues/12-smtp-email-sender.md) — blocked by 08
-- [13: Recipient and template CRUD + Tauri commands](./issues/13-recipient-and-template-crud.md) — blocked by 08, 09
-- [14: Job CRUD and cursor persistence](./issues/14-job-crud-and-cursor.md) — blocked by 08
-- [15: Compose — Generate job Tauri command](./issues/15-compose-generate-command.md) — blocked by 10, 11, 13, 14
-- [16: Compose — Send job Tauri command](./issues/16-compose-send-command.md) — blocked by 12, 14
-- [17: Settings and SMTP profile Tauri commands](./issues/17-settings-and-logs-commands.md) — blocked by 08
-- [18: App shell — Tauri setup and React routing](./issues/18-app-shell-and-routing.md) — blocked by 07
-- [19: Import screen](./issues/19-import-screen.md) — blocked by 09, 13, 18
-- [20: Recipients screen](./issues/20-recipients-screen.md) — blocked by 13, 18
-- [21: Templates screen](./issues/21-templates-screen.md) — blocked by 13, 18
-- [22: Compose wizard (all 6 steps)](./issues/22-compose-wizard.md) — blocked by 15, 16, 17, 18
-- [23: Logs screen and job detail](./issues/23-logs-screen.md) — blocked by 16, 18
-- [24: Settings screen](./issues/24-settings-screen.md) — blocked by 17, 18
-- [25: First-launch experience and restart resilience](./issues/25-first-launch-and-resilience.md) — blocked by 15, 16, 18
-- [26: End-to-end integration test and final verification](./issues/26-end-to-end-integration.md) — blocked by 22, 23, 24, 25
+- [Stack switch: Tauri → Electron](handoff-electron-switch.md) - user confirmed 2026-08-02 while charting this map. Rust/Tauri dropped; business logic moves to the Electron main process (TypeScript). Tauri-era artifacts archived at `archive/tauri-era/`.
+- [04: Data model & glossary (archived)](archive/tauri-era/issues/04-data-model-and-glossary.md) - transfers as-is. Recipient = name + channel addresses + metadata bag (dumb pipe); Template = user-declared slots + file + type + output pattern; Generate Job and Send Job are independent; send status pending → sent | failed | skipped; per-job SMTP config (not global); WhatsApp channel seam. Glossary lives in `CONTEXT.md`.
+- [05: Screens & navigation (archived)](archive/tauri-era/issues/05-app-screens-and-navigation.md) - transfers nearly wholesale. Sidebar + 6-step compose wizard; routes Import, Recipients, Templates, Compose, Logs (+ /logs/:jobId), Settings. Only IPC calls change: Tauri `invoke` → Electron IPC (ticket 06).
+- [06: Batch resilience (archived)](archive/tauri-era/issues/06-error-handling-and-resilience.md) - concepts transfer. Per-recipient failure continues batch; 3x retry exponential backoff (1s/2s/4s) then pause with resume; cursor persisted to SQLite after each send, resume on restart; rate limit 1 email/sec default (500ms–5000ms); generate-then-send (only send confirmed-good attachments); SMTP pre-flight before Send. Rust error types replaced by Effect (ticket 04).
+- [03: DOCX-to-PDF pipeline (archived)](archive/tauri-era/issues/03-docx-pdf-pipeline-prototype.md) - LibreOffice headless stands as the incumbent. Fill was own zip XML string replace (~25 lines); docxtemplater (existing CLI) is the incumbent library. officecli is the candidate to displace both (tickets 02/05).
+- Image → PDF: pdf-lib + fontkit (existing CLI, `src/generate-certif.ts`) - transfers as-is.
+- [01/02: crate survey + Tauri scaffold (archived)](archive/tauri-era/issues/) - superseded by tickets 01/03 in this chart.
+- [05: OfficeCLI fill + convert fidelity prototype](issues/05-officecli-fidelity-prototype.md) — verified on the real template (`templates/ff.docx`, acceptance letter with letterhead): fill via docxtemplater 0.007s/doc; convert via LibreOffice headless ~0.21s/doc in one batch invocation (100 in 20.7s) → ~0.22s/recipient total, ~3.7min/1000. Fidelity: all 8 embedded letterhead images byte-identical between baseline and filled PDF (md5), 1-page layout stable, `{no}`/`{name}` land correctly. Pipeline is production-safe as-is; batch conversions per job (one soffice invocation, not one per recipient); spot-check pf-*/sf-* templates when wired in; re-test officecli `view pdf` only if an official plugin ships.
+- [02: OfficeCLI evaluation](issues/02-officecli-evaluation.md) — officecli v1.0.143 verified end-to-end. Fill: keep docxtemplater — officecli `set --find/--replace` verifiably handles split-run/header/footer/table cells and is delimiter-agnostic (kills the `{{key}}` vs `{placeholder}` concern), but adds a 17.4MB native binary + ~0.2-0.8s process spawn per recipient for no functional win; raw zip string-replace rejected (Word's run-splitting). Caveat: cross-run replace collapses to first-run formatting — uniform-format placeholders fine. Convert: officecli CANNOT replace LibreOffice today — `view pdf` fails ("No exporter plugin found"), v1.0.143 ships no `plugins install`, the plugin registry is down (HTTP 522), and the only official exporter example wraps `soffice --headless --convert-to pdf` itself. License Apache-2.0 confirmed (github.com/iOfficeAI/OfficeCLI). Ticket 05 narrows to convert-fidelity verification only.
+- [01: Electron scaffold — Vite+ or electron-vite](issues/01-electron-scaffold-vite-plus.md) — "vite-plus" resolves to two things, neither scaffolds Electron: Vite+ (voidzero-dev) is a general web toolchain with no Electron story (`vp pack` = Node SEA executables, not Electron; its vite-core override conflicts with electron-vite's `vite` peer dep); the @tiara-stack fork is irrelevant. Most plausible user intent: electron-vite = "Vite for Electron". Recipe: `pnpm create @quick-start/electron@latest` (react-ts template) → `pnpm approve-builds` (pnpm 10 blocks Electron postinstall) → bump `electron` to ^43 (template pins EOL ^39) → remove the template's `sandbox: false` → electron-vite 5.0.0 stable (v6 beta, skip) + electron-builder 26.15.3; code signing deferred (local single-user app). Bonus: better-sqlite3 v13 is Node-API (`gypfile: false`) — loads in Electron without @electron/rebuild in the common case. oxlint/oxfmt available as standalone packages if the toolchain doesn't provide them. Open for the user: electron-vite over literal Vite+ (they asked for "vite-plus"), Electron 43 bump.
+- [03: JS library survey](issues/03-js-library-survey.md) — Adopt `@e965/xlsx` (CVE-patched SheetJS fork; npm `xlsx` frozen at 0.18.5 with unpatchable CVEs), `node:sqlite` for the DB (Electron 43 ships Node 24.18, unflagged RC; better-sqlite3 13.0.2 as fallback only). Confirm as-is: docxtemplater + PizZip (single-brace `{}` default matches the `{placeholder}` decision), pdf-lib + @pdf-lib/fontkit, LibreOffice headless, nodemailer (upgrade to 9.0.3, no impact on this app). Plain `{slot}` replace helper for the HTML body.
+- [04: Effect v4 vs v3 + main-process architecture](issues/04-effect-v4-architecture.md) — USER DECISION (2026-08-02): pin the **Effect v4 beta** (beta.102; exact version locked at implementation) despite the churn — no stable ETA, API still renaming; v3 (3.22.1) is the documented fallback. Sketch (v4 syntax): `Context.Service` layers (SmtpSender/nodemailer, SqliteRepo, TemplatePipeline, JobRunner, ProgressHub) in one main-process Layer; retry `Schedule.exponential("1 second", 2).pipe(Schedule.times(3))` then persisted `paused` state; progress via Hub + bounded queue (256, drop-oldest) → `webContents.send("job-progress")`; tagged SendError/GenerateError as a curated Schema envelope over IPC; quit via before-quit Latch with uninterruptible per-send cursor persist (at most one in-flight recipient lost). Open for the user: Effect vs plain TS; hand-rolled SqliteRepo vs `@effect/sql-sqlite-node`; backpressure policy (feeds ticket 07).
+- [06: IPC surface & typed channels](issues/06-ipc-surface.md) — contextBridge API object `window.api.<domain>.<method>` (no raw invoke strings in renderer); Effect Schema as the single source of truth for ALL payloads in `src/shared/ipc.ts`, decoded at the main boundary; 4 event channels (generate-progress, send-progress, job-paused, job-completed with `kind` tag) with unsubscribe subscriptions, events are deltas not source of truth; hardened baseline (sandbox on, senderFrame check, minimal preload); additive-only versioning + API_VERSION constant. Full surface (27 methods + 4 events) in the ticket - becomes the spec's IPC section.
+- [07: Process model & quit resilience](issues/07-process-model.md) — Jobs run in the **main process** as a clean Effect Layer (utility process rejected; seam kept for WhatsApp v2). Rate limiting: job runner owns `Effect.sleep(interval)` pacing gate read live per iteration (default 1/s, 500–5000ms slider live-applies; nodemailer pool limiter unused). Pause/cancel checkpoint only between sends (in-flight send completes); pause → `paused` state, resume from cursor; cancel → confirm dialog, remainder pending→`skipped`, job `cancelled`, terminal. Quit mid-send: uniform dialog [Quit & Pause]/[Keep Sending], quitting never cancels, no background continue in v1. Resume: launch treats `running`-stuck jobs as paused (cursor authoritative); Logs shows "Paused — N of M sent" + Resume; one-time launch banner; resume re-runs SMTP pre-flight; **one active job at a time**. Becomes the spec's Process model + Quit/Resume sections.
 
 ## Not yet specified
 
-- WhatsApp architecture — depends on the SMTP/email/job model from ticket 04. Likely a Baileys-based sidecar or pure Rust implementation; revisit after 04 is resolved
-- Template editor — v2 only; v1 templates are edited externally (Word, Figma, Photoshop)
+- WhatsApp v2 - channel seam is decided; actual sending architecture (Baileys sidecar or similar) hangs on the job/channel model; belongs to a future map
+- Template editor - v2 only; v1 templates are edited externally (Word, Figma, Photoshop)
 
 ## Out of scope
 
 - Multi-user / team features
-- Server/cloud backend — app runs entirely locally
-- WhatsApp sending (this map only sets up the architecture seam; actual WhatsApp belongs to a future map)
+- Server/cloud backend - app runs entirely locally
+- WhatsApp sending (this map only sets up the seam; actual sending belongs to a future map)
+- In-app template editor for v1
