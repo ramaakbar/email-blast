@@ -18,9 +18,15 @@ import {
   RecipientDeletePayload,
   RecipientDeleteResponse,
   RecipientListPayload,
+  ScanSlotsResponse,
   SettingsGetPayload,
   SettingsSetPayload,
+  Template,
+  TemplateCreatePayload,
+  TemplateDeleteResponse,
+  TemplateUpdatePayload,
 } from "../shared/ipc";
+import { TEMPLATE_EXTENSIONS } from "../shared/template-validation";
 import { decodePayload, registerWindowHandler } from "./ipc";
 import { rootLayer, type AppServices } from "./runtime";
 import { AppInfo } from "./services/app-info";
@@ -30,6 +36,7 @@ import { findLibreOffice } from "./services/libreoffice";
 import { RecipientsService } from "./services/recipients";
 import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
+import { TemplatesService } from "./services/templates";
 
 // The only origins the app may ever display: the Vite dev server in dev,
 // the local packaged file in production. Everything else is a navigation
@@ -144,6 +151,20 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
   });
 
+  registerWindowHandler(IPC["system:pick-template-file"], () => {
+    // The accepted extensions come from the shared template domain so the
+    // dialog filter and the renderer's type detection can never drift apart.
+    const extensions = Object.values(TEMPLATE_EXTENSIONS)
+      .flat()
+      .map((ext) => ext.slice(1));
+    return dialog
+      .showOpenDialog({
+        properties: ["openFile"],
+        filters: [{ name: "Template", extensions }],
+      })
+      .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+  });
+
   registerWindowHandler(IPC["system:get-app-info"], () => {
     return run(
       Effect.gen(function* () {
@@ -228,6 +249,67 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       Effect.gen(function* () {
         const service = yield* RecipientsService;
         return Schema.encodeSync(Schema.Array(ImportBatch))(yield* service.listBatches());
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:list"], () => {
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        return Schema.encodeSync(Schema.Array(Template))(yield* service.list());
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:get"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        return Option.getOrNull(yield* service.get(id));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:create"], (payload) => {
+    const draft = decodePayload(TemplateCreatePayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        return Schema.encodeSync(Template)(yield* service.create(draft));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:update"], (payload) => {
+    const { id, name, slots, outputPattern } = decodePayload(TemplateUpdatePayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        return Schema.encodeSync(Template)(
+          yield* service.update(id, { name, slots, outputPattern }),
+        );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:delete"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        return Schema.encodeSync(TemplateDeleteResponse)({ deleted: yield* service.delete(id) });
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:scan-slots"], (payload) => {
+    const docxPath = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        return Schema.encodeSync(ScanSlotsResponse)({ slots: yield* service.scanSlots(docxPath) });
       }),
     );
   });

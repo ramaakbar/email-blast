@@ -12,6 +12,7 @@ const api: Api = {
     checkLibreOffice: () => ipcRenderer.invoke(IPC["system:check-libreoffice"]),
     pickFolder: () => ipcRenderer.invoke(IPC["system:pick-folder"]),
     pickExcelFile: () => ipcRenderer.invoke(IPC["system:pick-excel-file"]),
+    pickTemplateFile: () => ipcRenderer.invoke(IPC["system:pick-template-file"]),
     getPathForFile: (file) => webUtils.getPathForFile(file),
     getAppInfo: () => ipcRenderer.invoke(IPC["system:get-app-info"]),
   },
@@ -28,6 +29,14 @@ const api: Api = {
     get: (id) => ipcRenderer.invoke(IPC["recipients:get"], id),
     delete: (ids) => ipcRenderer.invoke(IPC["recipients:delete"], ids),
     listBatches: () => ipcRenderer.invoke(IPC["recipients:list-batches"]),
+  },
+  templates: {
+    list: () => ipcRenderer.invoke(IPC["templates:list"]),
+    get: (id) => ipcRenderer.invoke(IPC["templates:get"], id),
+    create: (payload) => ipcRenderer.invoke(IPC["templates:create"], payload),
+    update: (payload) => ipcRenderer.invoke(IPC["templates:update"], payload),
+    delete: (id) => ipcRenderer.invoke(IPC["templates:delete"], id),
+    scanSlots: (docxPath) => ipcRenderer.invoke(IPC["templates:scan-slots"], docxPath),
   },
 };
 

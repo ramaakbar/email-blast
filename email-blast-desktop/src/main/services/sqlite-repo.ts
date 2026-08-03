@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option } from "effect";
 import { DatabaseSync } from "node:sqlite";
-import type { ImportBatch, Recipient, RecipientListPayload } from "../../shared/ipc";
+import type { ImportBatch, Recipient, RecipientListPayload, Template } from "../../shared/ipc";
 
 /**
  * The SQLite database of the app. Owns the schema (spec decision 7, verbatim)
@@ -151,6 +151,41 @@ export interface SqliteRepoShape {
   readonly deleteRecipients: (ids: readonly string[]) => Effect.Effect<number>;
   /** Every distinct import batch, newest first, with its stamp and size. */
   readonly listImportBatches: () => Effect.Effect<ImportBatch[]>;
+  /** Every registered template, newest first. Slots round-trip through JSON. */
+  readonly listTemplates: () => Effect.Effect<Template[]>;
+  /** A single template by id, or none when no such row exists. */
+  readonly getTemplate: (id: string) => Effect.Effect<Option.Option<Template>>;
+  /** Inserts a template; the id is assigned here. */
+  readonly insertTemplate: (draft: TemplateDraft) => Effect.Effect<Template>;
+  /**
+   * Updates the mutable template fields (name, slots, output pattern).
+   * Returns the updated template, or none when no such row exists.
+   */
+  readonly updateTemplate: (
+    id: string,
+    patch: TemplatePatch,
+  ) => Effect.Effect<Option.Option<Template>>;
+  /** Deletes a template and returns how many rows were removed. */
+  readonly deleteTemplate: (id: string) => Effect.Effect<number>;
+}
+
+/**
+ * A template ready to be persisted: the fields from the registration form,
+ * without the id (assigned here) or the created stamp.
+ */
+export interface TemplateDraft {
+  readonly name: string;
+  readonly filePath: string;
+  readonly type: "docx" | "image";
+  readonly slots: readonly string[];
+  readonly outputPattern: string;
+}
+
+/** The mutable template fields; the file path and type never change. */
+export interface TemplatePatch {
+  readonly name: string;
+  readonly slots: readonly string[];
+  readonly outputPattern: string;
 }
 
 function normalizeEmail(email: string | null): string | null {
@@ -176,6 +211,29 @@ interface RecipientRow {
   metadata: string;
   import_batch: string;
   created_at: string;
+}
+
+/** A templates row as stored: the slots array still serialized as JSON. */
+interface TemplateRow {
+  id: string;
+  name: string;
+  file_path: string;
+  type: "docx" | "image";
+  slots: string;
+  output_pattern: string;
+  created_at: string;
+}
+
+function toTemplate(row: TemplateRow): Template {
+  return {
+    id: row.id,
+    name: row.name,
+    filePath: row.file_path,
+    type: row.type,
+    slots: JSON.parse(row.slots) as string[],
+    outputPattern: row.output_pattern,
+    createdAt: row.created_at,
+  };
 }
 
 function toRecipient(row: RecipientRow): Recipient {
@@ -294,6 +352,62 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
             "SELECT import_batch AS id, MIN(created_at) AS createdAt, COUNT(*) AS count FROM recipients GROUP BY import_batch ORDER BY createdAt DESC, id",
           )
           .all() as ImportBatch[];
+      }),
+    listTemplates: () =>
+      Effect.sync(() => {
+        const rows = db
+          .prepare(
+            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates ORDER BY created_at DESC, name COLLATE NOCASE ASC, id ASC",
+          )
+          .all() as unknown as TemplateRow[];
+        return rows.map(toTemplate);
+      }),
+    getTemplate: (id) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates WHERE id = ?",
+          )
+          .get(id) as TemplateRow | undefined;
+        return row === undefined ? Option.none() : Option.some(toTemplate(row));
+      }),
+    insertTemplate: (draft) =>
+      Effect.sync(() => {
+        const id = crypto.randomUUID();
+        db.prepare(
+          "INSERT INTO templates (id, name, file_path, type, slots, output_pattern) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(
+          id,
+          draft.name,
+          draft.filePath,
+          draft.type,
+          JSON.stringify(draft.slots),
+          draft.outputPattern,
+        );
+        const row = db
+          .prepare(
+            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates WHERE id = ?",
+          )
+          .get(id) as TemplateRow | undefined;
+        // The insert above just landed, so the row must exist.
+        return toTemplate(row as TemplateRow);
+      }),
+    updateTemplate: (id, patch) =>
+      Effect.sync(() => {
+        const result = db
+          .prepare("UPDATE templates SET name = ?, slots = ?, output_pattern = ? WHERE id = ?")
+          .run(patch.name, JSON.stringify(patch.slots), patch.outputPattern, id);
+        if (Number(result.changes) === 0) return Option.none();
+        const row = db
+          .prepare(
+            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates WHERE id = ?",
+          )
+          .get(id) as TemplateRow | undefined;
+        return row === undefined ? Option.none() : Option.some(toTemplate(row));
+      }),
+    deleteTemplate: (id) =>
+      Effect.sync(() => {
+        return Number(db.prepare("DELETE FROM templates WHERE id = ?").run(id).changes);
       }),
   };
 }

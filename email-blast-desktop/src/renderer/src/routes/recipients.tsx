@@ -8,8 +8,9 @@ import {
   useReactTable,
   type RowSelectionState,
 } from "@tanstack/react-table";
-import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Search, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { ErrorBanner } from "@/components/error-banner";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import type { ImportBatch, Recipient } from "../../../shared/ipc";
@@ -400,24 +401,6 @@ function RecipientsPage() {
           onCancel={() => setConfirmOpen(false)}
           onConfirm={() => deleteMutation.mutate(Object.keys(rowSelection))}
         />
-      )}
-    </div>
-  );
-}
-
-function ErrorBanner({ message, onDismiss }: { message: string; onDismiss?: () => void }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <span className="flex-1">{message}</span>
-      {onDismiss !== undefined && (
-        <button
-          type="button"
-          className="text-xs underline-offset-2 hover:underline"
-          onClick={onDismiss}
-        >
-          Dismiss
-        </button>
       )}
     </div>
   );

@@ -26,7 +26,9 @@
   "dependencies": {
     "@e965/xlsx": "0.20.3",
     "@electron-toolkit/utils": "^4.0.0",
-    "effect": "4.0.0-beta.102"
+    "docxtemplater": "3.69.3",
+    "effect": "4.0.0-beta.102",
+    "pizzip": "3.2.0"
   },
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
