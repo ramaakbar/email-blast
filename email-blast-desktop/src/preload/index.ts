@@ -23,6 +23,12 @@ const api: Api = {
     read: (excelPath) => ipcRenderer.invoke(IPC["import:read"], excelPath),
     commit: (payload) => ipcRenderer.invoke(IPC["import:commit"], payload),
   },
+  recipients: {
+    list: (payload) => ipcRenderer.invoke(IPC["recipients:list"], payload),
+    get: (id) => ipcRenderer.invoke(IPC["recipients:get"], id),
+    delete: (ids) => ipcRenderer.invoke(IPC["recipients:delete"], ids),
+    listBatches: () => ipcRenderer.invoke(IPC["recipients:list-batches"]),
+  },
 };
 
 if (process.contextIsolated) {

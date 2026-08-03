@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Option } from "effect";
 import { DatabaseSync } from "node:sqlite";
+import type { ImportBatch, Recipient, RecipientListPayload } from "../../shared/ipc";
 
 /**
  * The SQLite database of the app. Owns the schema (spec decision 7, verbatim)
@@ -132,12 +133,61 @@ export interface SqliteRepoShape {
    * stored value can never drift apart.
    */
   readonly insertRecipients: (recipients: RecipientDraft[]) => Effect.Effect<void>;
+  /**
+   * One page of recipients, newest first. `search` matches case-insensitively
+   * across name, email, phone, and the serialized metadata bag (so custom
+   * field values are searchable too); `importBatch` narrows to one batch.
+   */
+  readonly listRecipients: (
+    filter: RecipientListPayload,
+  ) => Effect.Effect<{ readonly items: Recipient[]; readonly total: number }>;
+  /** A single recipient by id, or none when no such row exists. */
+  readonly getRecipient: (id: string) => Effect.Effect<Option.Option<Recipient>>;
+  /**
+   * Deletes the given ids and returns how many rows were removed. Historical
+   * job rows keep referencing the deleted ids (foreign keys are not
+   * enforced by default in SQLite) so past job outcomes survive.
+   */
+  readonly deleteRecipients: (ids: readonly string[]) => Effect.Effect<number>;
+  /** Every distinct import batch, newest first, with its stamp and size. */
+  readonly listImportBatches: () => Effect.Effect<ImportBatch[]>;
 }
 
 function normalizeEmail(email: string | null): string | null {
   if (email === null) return null;
   const trimmed = email.trim();
   return trimmed === "" ? null : trimmed.toLowerCase();
+}
+
+/**
+ * Escapes LIKE wildcards so user search text matches literally - a search
+ * for "100%" finds only recipients whose field contains a literal "%".
+ */
+function escapeLike(term: string): string {
+  return term.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/** A recipients row as stored: the metadata bag still serialized. */
+interface RecipientRow {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  metadata: string;
+  import_batch: string;
+  created_at: string;
+}
+
+function toRecipient(row: RecipientRow): Recipient {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    metadata: JSON.parse(row.metadata) as Record<string, string>,
+    importBatch: row.import_batch,
+    createdAt: row.created_at,
+  };
 }
 
 export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
@@ -183,6 +233,67 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
           db.exec("ROLLBACK");
           throw error;
         }
+      }),
+    listRecipients: ({ search, importBatch, page, pageSize }) =>
+      Effect.sync(() => {
+        const clauses: string[] = [];
+        const params: string[] = [];
+        if (search !== null && search.trim() !== "") {
+          const pattern = `%${escapeLike(search.trim())}%`;
+          // The metadata bag is searched as its serialized JSON text: values
+          // match literally, and so do field names (searching "instansi"
+          // finds every row that has the field). JSON punctuation can match
+          // too - a degenerate query like "," - which is the accepted
+          // tradeoff for keeping the search index-free.
+          clauses.push(
+            "(name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\')",
+          );
+          params.push(pattern, pattern, pattern, pattern);
+        }
+        if (importBatch !== null) {
+          clauses.push("import_batch = ?");
+          params.push(importBatch);
+        }
+        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
+
+        const total = (
+          db.prepare(`SELECT COUNT(*) AS n FROM recipients${where}`).get(...params) as {
+            n: number;
+          }
+        ).n;
+        // Newest imports first; same-second rows tiebreak by name, then id.
+        const rows = db
+          .prepare(
+            `SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients${where} ORDER BY created_at DESC, name COLLATE NOCASE ASC, id ASC LIMIT ? OFFSET ?`,
+          )
+          .all(...params, pageSize, (page - 1) * pageSize) as unknown as RecipientRow[];
+        return { items: rows.map(toRecipient), total };
+      }),
+    getRecipient: (id) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            "SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients WHERE id = ?",
+          )
+          .get(id) as RecipientRow | undefined;
+        return row === undefined ? Option.none() : Option.some(toRecipient(row));
+      }),
+    deleteRecipients: (ids) =>
+      Effect.sync(() => {
+        if (ids.length === 0) return 0;
+        const placeholders = ids.map(() => "?").join(", ");
+        const result = db
+          .prepare(`DELETE FROM recipients WHERE id IN (${placeholders})`)
+          .run(...ids);
+        return Number(result.changes);
+      }),
+    listImportBatches: () =>
+      Effect.sync(() => {
+        return db
+          .prepare(
+            "SELECT import_batch AS id, MIN(created_at) AS createdAt, COUNT(*) AS count FROM recipients GROUP BY import_batch ORDER BY createdAt DESC, id",
+          )
+          .all() as ImportBatch[];
       }),
   };
 }

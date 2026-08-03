@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { errorMessage } from "@/lib/error-message";
 import type {
   ColumnMapping,
   ColumnRole,
@@ -52,17 +53,6 @@ type ImportState =
 
 function isExcelFile(fileName: string): boolean {
   return EXCEL_FILE_PATTERN.test(fileName);
-}
-
-/**
- * Extracts a user-facing message from an IPC rejection. Electron prefixes
- * rejected invokes with "Error invoking remote method '<channel>': Error: ",
- * which is internal noise for the error banner.
- */
-function errorMessage(err: unknown, fallback: string): string {
-  if (!(err instanceof Error)) return fallback;
-  const stripped = err.message.replace(/^Error invoking remote method '[^']+': Error: /, "");
-  return stripped === "" ? fallback : stripped;
 }
 
 function ImportPage() {

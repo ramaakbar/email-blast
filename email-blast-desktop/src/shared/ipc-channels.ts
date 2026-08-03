@@ -22,6 +22,10 @@ export const IPC = {
   "settings:set": "settings:set",
   "import:read": "import:read",
   "import:commit": "import:commit",
+  "recipients:list": "recipients:list",
+  "recipients:get": "recipients:get",
+  "recipients:delete": "recipients:delete",
+  "recipients:list-batches": "recipients:list-batches",
   "dev:api-version-check": "dev:api-version-check",
   "dev:api-version-report": "dev:api-version-report",
 } as const;

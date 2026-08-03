@@ -7,12 +7,17 @@ import { Effect, Layer, Option, Schema } from "effect";
 import {
   API_VERSION,
   GetAppInfoResponse,
+  ImportBatch,
   ImportCommitPayload,
   ImportCommitResponse,
   ImportPreview,
   ImportReadPayload,
   IPC,
+  PaginatedRecipients,
   PingResponse,
+  RecipientDeletePayload,
+  RecipientDeleteResponse,
+  RecipientListPayload,
   SettingsGetPayload,
   SettingsSetPayload,
 } from "../shared/ipc";
@@ -22,6 +27,7 @@ import { AppInfo } from "./services/app-info";
 import { defaultPathsForHome } from "./services/default-paths";
 import { ImportService } from "./services/import";
 import { findLibreOffice } from "./services/libreoffice";
+import { RecipientsService } from "./services/recipients";
 import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
 
@@ -183,6 +189,45 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       Effect.gen(function* () {
         const service = yield* ImportService;
         return Schema.encodeSync(ImportCommitResponse)(yield* service.commit(rows, columnMapping));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["recipients:list"], (payload) => {
+    const filter = decodePayload(RecipientListPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* RecipientsService;
+        return Schema.encodeSync(PaginatedRecipients)(yield* service.list(filter));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["recipients:get"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* RecipientsService;
+        return Option.getOrNull(yield* service.get(id));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["recipients:delete"], (payload) => {
+    const ids = decodePayload(RecipientDeletePayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* RecipientsService;
+        return Schema.encodeSync(RecipientDeleteResponse)({ deleted: yield* service.delete(ids) });
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["recipients:list-batches"], () => {
+    return run(
+      Effect.gen(function* () {
+        const service = yield* RecipientsService;
+        return Schema.encodeSync(Schema.Array(ImportBatch))(yield* service.listBatches());
       }),
     );
   });

@@ -114,6 +114,67 @@ export const ImportCommitResponse = Schema.Struct({
 });
 export type ImportCommitResponse = Schema.Schema.Type<typeof ImportCommitResponse>;
 
+// ---- Recipients domain (ticket 11) ----
+
+/**
+ * A recipient as stored: the address fields, the metadata bag, and the
+ * import batch it arrived in. `createdAt` is the SQLite `YYYY-MM-DD HH:MM:SS`
+ * UTC stamp, formatted for display by the renderer.
+ */
+export const Recipient = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  email: Schema.Union([Schema.Null, Schema.String]),
+  phone: Schema.Union([Schema.Null, Schema.String]),
+  metadata: Schema.Record(Schema.String, Schema.String),
+  importBatch: Schema.String,
+  createdAt: Schema.String,
+});
+export type Recipient = Schema.Schema.Type<typeof Recipient>;
+
+/**
+ * `recipients.list` payload: optional search text (matched across name,
+ * email, phone, and metadata values) and optional import-batch filter
+ * (null = all batches), plus the 1-based page and its size.
+ */
+export const RecipientListPayload = Schema.Struct({
+  search: Schema.Union([Schema.Null, Schema.String]),
+  importBatch: Schema.Union([Schema.Null, Schema.String]),
+  page: Schema.Number,
+  pageSize: Schema.Number,
+});
+export type RecipientListPayload = Schema.Schema.Type<typeof RecipientListPayload>;
+
+/** `recipients.list` response: one page of recipients plus the total that matched. */
+export const PaginatedRecipients = Schema.Struct({
+  items: Schema.Array(Recipient),
+  total: Schema.Number,
+  page: Schema.Number,
+  pageSize: Schema.Number,
+});
+export type PaginatedRecipients = Schema.Schema.Type<typeof PaginatedRecipients>;
+
+/**
+ * `recipients.listBatches` response: one entry per distinct import batch,
+ * labeled by its earliest import stamp and carrying its size.
+ */
+export const ImportBatch = Schema.Struct({
+  id: Schema.String,
+  createdAt: Schema.String,
+  count: Schema.Number,
+});
+export type ImportBatch = Schema.Schema.Type<typeof ImportBatch>;
+
+/** `recipients.delete` payload: the ids to delete. */
+export const RecipientDeletePayload = Schema.Array(Schema.String);
+export type RecipientDeletePayload = Schema.Schema.Type<typeof RecipientDeletePayload>;
+
+/** `recipients.delete` response: how many rows were actually deleted. */
+export const RecipientDeleteResponse = Schema.Struct({
+  deleted: Schema.Number,
+});
+export type RecipientDeleteResponse = Schema.Schema.Type<typeof RecipientDeleteResponse>;
+
 /**
  * The contextBridge-exposed API (`window.api`). Domains and methods are
  * added additively as later tickets land.
@@ -141,5 +202,15 @@ export interface Api {
     read(excelPath: string): Promise<ImportPreview>;
     /** Applies the column mapping, dedupes against existing recipients, and persists the batch. */
     commit(payload: ImportCommitPayload): Promise<ImportCommitResponse>;
+  };
+  recipients: {
+    /** One page of recipients matching the search text and import-batch filter. */
+    list(payload: RecipientListPayload): Promise<PaginatedRecipients>;
+    /** A single recipient by id, or null when no such id exists. */
+    get(id: string): Promise<Recipient | null>;
+    /** Deletes the given recipients and returns how many rows were removed. */
+    delete(ids: string[]): Promise<RecipientDeleteResponse>;
+    /** Every distinct import batch, newest first, with its size and stamp. */
+    listBatches(): Promise<ImportBatch[]>;
   };
 }
