@@ -52,6 +52,15 @@ const api: Api = {
       };
     },
   },
+  smtp: {
+    list: () => ipcRenderer.invoke(IPC["smtp:list"]),
+    get: (id) => ipcRenderer.invoke(IPC["smtp:get"], id),
+    create: (payload) => ipcRenderer.invoke(IPC["smtp:create"], payload),
+    update: (payload) => ipcRenderer.invoke(IPC["smtp:update"], payload),
+    delete: (id) => ipcRenderer.invoke(IPC["smtp:delete"], id),
+    test: (payload) => ipcRenderer.invoke(IPC["smtp:test"], payload),
+    testProfile: (id) => ipcRenderer.invoke(IPC["smtp:test-profile"], id),
+  },
 };
 
 if (process.contextIsolated) {

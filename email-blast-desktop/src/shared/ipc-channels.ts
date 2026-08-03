@@ -39,6 +39,13 @@ export const IPC = {
   "generate:get-status": "generate:get-status",
   "generate:get-recipient-pdf": "generate:get-recipient-pdf",
   "generate-progress": "generate-progress",
+  "smtp:list": "smtp:list",
+  "smtp:get": "smtp:get",
+  "smtp:create": "smtp:create",
+  "smtp:update": "smtp:update",
+  "smtp:delete": "smtp:delete",
+  "smtp:test": "smtp:test",
+  "smtp:test-profile": "smtp:test-profile",
   "dev:api-version-check": "dev:api-version-check",
   "dev:api-version-report": "dev:api-version-report",
 } as const;

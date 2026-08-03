@@ -7,6 +7,7 @@ import { ImportService } from "./services/import";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
 import { Settings } from "./services/settings";
+import { SmtpService } from "./services/smtp";
 import type { SqliteRepo } from "./services/sqlite-repo";
 import { TemplatesService } from "./services/templates";
 
@@ -17,6 +18,7 @@ export type AppServices =
   | RecipientsService
   | TemplatesService
   | GenerateJobService
+  | SmtpService
   | ProgressHub
   | AppInfo;
 
@@ -32,5 +34,6 @@ export const rootLayer = (db: DatabaseSync, defaults: DefaultPaths): Layer.Layer
     RecipientsService.Live(db),
     TemplatesService.Live(db),
     GenerateJobService.Live(db, defaults),
+    SmtpService.Live(db),
     AppInfo.Live,
   );

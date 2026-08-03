@@ -27,6 +27,11 @@ import {
   ScanSlotsResponse,
   SettingsGetPayload,
   SettingsSetPayload,
+  SmtpDeleteResponse,
+  SmtpProfile,
+  SmtpProfileCreatePayload,
+  SmtpProfileUpdatePayload,
+  SmtpTestPayload,
   Template,
   TemplateCreatePayload,
   TemplateDeleteResponse,
@@ -42,6 +47,7 @@ import { ImportService } from "./services/import";
 import { findLibreOffice } from "./services/libreoffice";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
+import { SmtpService } from "./services/smtp";
 import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
 import { TemplatesService } from "./services/templates";
@@ -376,6 +382,84 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
             .getRecipientPdf(jobId, recipientId)
             .pipe(Effect.map(Option.map((pdf) => Schema.encodeSync(GeneratePdfResponse)(pdf)))),
         );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:list"], () => {
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        return Schema.encodeSync(Schema.Array(SmtpProfile))(yield* service.list());
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:get"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        return Option.getOrNull(
+          yield* service
+            .get(id)
+            .pipe(Effect.map(Option.map((profile) => Schema.encodeSync(SmtpProfile)(profile)))),
+        );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:create"], (payload) => {
+    const draft = decodePayload(SmtpProfileCreatePayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        return Schema.encodeSync(SmtpProfile)(yield* service.create(draft));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:update"], (payload) => {
+    const { id, name, host, port, username, password } = decodePayload(
+      SmtpProfileUpdatePayload,
+      payload,
+    );
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        return Schema.encodeSync(SmtpProfile)(
+          yield* service.update(id, { name, host, port, username, password }),
+        );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:delete"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        return Schema.encodeSync(SmtpDeleteResponse)({ deleted: yield* service.delete(id) });
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:test"], (payload) => {
+    const { host, port, username, password } = decodePayload(SmtpTestPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        yield* service.test({ host, port, username, password });
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["smtp:test-profile"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SmtpService;
+        yield* service.testProfile(id);
       }),
     );
   });

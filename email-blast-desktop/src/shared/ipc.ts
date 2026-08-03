@@ -320,6 +320,69 @@ export const GeneratePdfResponse = Schema.Struct({
 });
 export type GeneratePdfResponse = Schema.Schema.Type<typeof GeneratePdfResponse>;
 
+// ---- SMTP domain (ticket 14) ----
+
+/**
+ * A saved SMTP profile as returned to the renderer. The password never
+ * crosses the bridge - `hasPassword` tells the UI to show a mask, and the
+ * main process resolves the stored credential for `testProfile` and for
+ * the send pipeline (future ticket) on its own side.
+ */
+export const SmtpProfile = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  host: Schema.String,
+  port: Schema.Number,
+  username: Schema.String,
+  hasPassword: Schema.Boolean,
+  createdAt: Schema.String,
+});
+export type SmtpProfile = Schema.Schema.Type<typeof SmtpProfile>;
+
+/** `smtp.create` payload: every field is required, validated in the main process. */
+export const SmtpProfileCreatePayload = Schema.Struct({
+  name: Schema.String,
+  host: Schema.String,
+  port: Schema.Number,
+  username: Schema.String,
+  password: Schema.String,
+});
+export type SmtpProfileCreatePayload = Schema.Schema.Type<typeof SmtpProfileCreatePayload>;
+
+/**
+ * `smtp.update` payload. `password` null keeps the stored password - the
+ * edit dialog never sees the stored value, so "leave blank to keep" is the
+ * only safe way to change one field without re-entering the credential.
+ */
+export const SmtpProfileUpdatePayload = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  host: Schema.String,
+  port: Schema.Number,
+  username: Schema.String,
+  password: Schema.Union([Schema.Null, Schema.String]),
+});
+export type SmtpProfileUpdatePayload = Schema.Schema.Type<typeof SmtpProfileUpdatePayload>;
+
+/** `smtp.delete` response: how many rows were actually deleted. */
+export const SmtpDeleteResponse = Schema.Struct({
+  deleted: Schema.Number,
+});
+export type SmtpDeleteResponse = Schema.Schema.Type<typeof SmtpDeleteResponse>;
+
+/**
+ * `smtp.test` payload: the credentials of an inline profile (the compose
+ * wizard's SMTP step tests before saving). For a saved profile the renderer
+ * calls `testProfile(id)` instead - it does not hold the password.
+ */
+export const SmtpTestPayload = Schema.Struct({
+  host: Schema.String,
+  port: Schema.Number,
+  username: Schema.String,
+  password: Schema.String,
+});
+export type SmtpTestPayload = Schema.Schema.Type<typeof SmtpTestPayload>;
+
 /** `recipients.listAll` payload: the same filters as `list`, without pagination. */
 export const RecipientListAllPayload = Schema.Struct({
   search: Schema.Union([Schema.Null, Schema.String]),
@@ -420,5 +483,29 @@ export interface Api {
      * `getGenerateStatus` stays the source of truth.
      */
     onGenerateProgress(cb: (event: GenerateProgressEvent) => void): () => void;
+  };
+  smtp: {
+    /** Every saved SMTP profile, newest first. Passwords never leave the main process. */
+    list(): Promise<SmtpProfile[]>;
+    /** A single profile by id, or null when no such id exists. */
+    get(id: string): Promise<SmtpProfile | null>;
+    /** Saves a new profile; validates the name, host, port, username, and password. */
+    create(payload: SmtpProfileCreatePayload): Promise<SmtpProfile>;
+    /** Edits a profile; a null password keeps the stored one. */
+    update(payload: SmtpProfileUpdatePayload): Promise<SmtpProfile>;
+    /** Deletes a profile; returns how many rows were removed. */
+    delete(id: string): Promise<SmtpDeleteResponse>;
+    /**
+     * Connects and authenticates against the given SMTP server - the
+     * inline test for unsaved credentials. Resolves when the server
+     * accepts the credentials; rejects otherwise, with the rejection
+     * message naming the failing phase (connect, auth, or SMTP error).
+     */
+    test(payload: SmtpTestPayload): Promise<void>;
+    /**
+     * Connects and authenticates using a saved profile's stored
+     * credentials (the per-profile Test Connection in Settings).
+     */
+    testProfile(id: string): Promise<void>;
   };
 }

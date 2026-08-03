@@ -233,6 +233,27 @@ export interface SqliteRepoShape {
   ) => Effect.Effect<
     Option.Option<{ status: "pending" | "generated" | "failed"; outputPath: string | null }>
   >;
+  /**
+   * Every stored SMTP profile, newest first, with the password included -
+   * the smtp service is the only consumer and strips it before anything
+   * crosses the IPC bridge.
+   */
+  readonly listSmtpProfiles: () => Effect.Effect<SmtpStoredProfile[]>;
+  /** A single stored profile by id, password included, or none. */
+  readonly getSmtpProfile: (id: string) => Effect.Effect<Option.Option<SmtpStoredProfile>>;
+  /** Inserts a profile; the id is assigned here. */
+  readonly insertSmtpProfile: (draft: SmtpProfileDraft) => Effect.Effect<SmtpStoredProfile>;
+  /**
+   * Updates the mutable profile fields (name, host, port, username, and
+   * password when given). Returns the updated row, or none when no such
+   * id exists.
+   */
+  readonly updateSmtpProfile: (
+    id: string,
+    patch: SmtpProfilePatch,
+  ) => Effect.Effect<Option.Option<SmtpStoredProfile>>;
+  /** Deletes a profile and returns how many rows were removed. */
+  readonly deleteSmtpProfile: (id: string) => Effect.Effect<number>;
 }
 
 /**
@@ -276,6 +297,42 @@ export interface GenerateJobRecipientRow {
   readonly errorMessage: string | null;
 }
 
+/**
+ * An SMTP profile row as stored, password included. The smtp service maps
+ * this to the shared `SmtpProfile` shape (password dropped, `hasPassword`
+ * set) at its boundary, so the credential never leaves the main process.
+ */
+export interface SmtpStoredProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly host: string;
+  readonly port: number;
+  readonly username: string;
+  readonly password: string;
+  readonly createdAt: string;
+}
+
+/** A profile ready to be persisted: the form fields, without the id or stamp. */
+export interface SmtpProfileDraft {
+  readonly name: string;
+  readonly host: string;
+  readonly port: number;
+  readonly username: string;
+  readonly password: string;
+}
+
+/**
+ * The mutable profile fields. `password` null keeps the stored one - the
+ * edit dialog cannot see the stored value, so omitting it must not clear it.
+ */
+export interface SmtpProfilePatch {
+  readonly name: string;
+  readonly host: string;
+  readonly port: number;
+  readonly username: string;
+  readonly password: string | null;
+}
+
 function normalizeEmail(email: string | null): string | null {
   if (email === null) return null;
   const trimmed = email.trim();
@@ -310,6 +367,29 @@ interface TemplateRow {
   slots: string;
   output_pattern: string;
   created_at: string;
+}
+
+/** An smtp_profiles row as stored. */
+interface SmtpProfileRow {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  created_at: string;
+}
+
+function toSmtpStoredProfile(row: SmtpProfileRow): SmtpStoredProfile {
+  return {
+    id: row.id,
+    name: row.name,
+    host: row.host,
+    port: row.port,
+    username: row.username,
+    password: row.password,
+    createdAt: row.created_at,
+  };
 }
 
 function toTemplate(row: TemplateRow): Template {
@@ -623,6 +703,61 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
         return row === undefined
           ? Option.none()
           : Option.some({ status: row.status, outputPath: row.output_path });
+      }),
+    listSmtpProfiles: () =>
+      Effect.sync(() => {
+        const rows = db
+          .prepare(
+            // rowid DESC breaks ties within the same creation second: the
+            // most recently added profile comes first.
+            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles ORDER BY created_at DESC, rowid DESC",
+          )
+          .all() as unknown as SmtpProfileRow[];
+        return rows.map(toSmtpStoredProfile);
+      }),
+    getSmtpProfile: (id) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles WHERE id = ?",
+          )
+          .get(id) as SmtpProfileRow | undefined;
+        return row === undefined ? Option.none() : Option.some(toSmtpStoredProfile(row));
+      }),
+    insertSmtpProfile: (draft) =>
+      Effect.sync(() => {
+        const id = crypto.randomUUID();
+        db.prepare(
+          "INSERT INTO smtp_profiles (id, name, host, port, username, password) VALUES (?, ?, ?, ?, ?, ?)",
+        ).run(id, draft.name, draft.host, draft.port, draft.username, draft.password);
+        const row = db
+          .prepare(
+            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles WHERE id = ?",
+          )
+          .get(id) as SmtpProfileRow | undefined;
+        // The insert above just landed, so the row must exist.
+        return toSmtpStoredProfile(row as SmtpProfileRow);
+      }),
+    updateSmtpProfile: (id, patch) =>
+      Effect.sync(() => {
+        // null password keeps the stored one; the SQL COALESCE never sees the
+        // empty string because the service rejects "" before persisting.
+        const result = db
+          .prepare(
+            "UPDATE smtp_profiles SET name = ?, host = ?, port = ?, username = ?, password = COALESCE(?, password) WHERE id = ?",
+          )
+          .run(patch.name, patch.host, patch.port, patch.username, patch.password, id);
+        if (Number(result.changes) === 0) return Option.none();
+        const row = db
+          .prepare(
+            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles WHERE id = ?",
+          )
+          .get(id) as SmtpProfileRow | undefined;
+        return row === undefined ? Option.none() : Option.some(toSmtpStoredProfile(row));
+      }),
+    deleteSmtpProfile: (id) =>
+      Effect.sync(() => {
+        return Number(db.prepare("DELETE FROM smtp_profiles WHERE id = ?").run(id).changes);
       }),
   };
 }
