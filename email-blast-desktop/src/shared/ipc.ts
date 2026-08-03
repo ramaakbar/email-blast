@@ -295,8 +295,10 @@ export type GenerateStartPayload = Schema.Schema.Type<typeof GenerateStartPayloa
 /**
  * `generate-progress` event: one per recipient outcome, a delta the
  * renderer applies to its running state (SQLite stays the source of truth).
+ * `kind` discriminates the hub event union the main process forwards.
  */
 export const GenerateProgressEvent = Schema.Struct({
+  kind: Schema.Literal("generate-progress"),
   jobId: Schema.String,
   current: Schema.Number,
   total: Schema.Number,
@@ -389,6 +391,143 @@ export const RecipientListAllPayload = Schema.Struct({
   importBatch: Schema.Union([Schema.Null, Schema.String]),
 });
 export type RecipientListAllPayload = Schema.Schema.Type<typeof RecipientListAllPayload>;
+
+// ---- Send domain (ticket 15) ----
+
+/** The lifecycle of a send job (mirrors the send_jobs table CHECK). */
+export const SendJobStatus = Schema.Literals([
+  "pending",
+  "sending",
+  "paused",
+  "completed",
+  "cancelled",
+]);
+export type SendJobStatus = Schema.Schema.Type<typeof SendJobStatus>;
+
+/** The per-recipient outcome of a send job (mirrors the join table CHECK). */
+export const SendRecipientStatus = Schema.Literals(["pending", "sent", "failed", "skipped"]);
+export type SendRecipientStatus = Schema.Schema.Type<typeof SendRecipientStatus>;
+
+/**
+ * `send.start` payload: the generate job whose confirmed attachments this
+ * send delivers, the recipients (the generated-only handoff from step 5),
+ * the SMTP identity (a saved profile id OR an inline override, never
+ * both), the message, and the per-job rate limit - the value the
+ * wizard's slider set, recorded on the job for history (the gate itself
+ * reads the live setting every iteration, so a later change applies to
+ * a running job without restart). The inline password crosses the
+ * bridge exactly once, at start - afterwards it lives only in the
+ * send_jobs row (plaintext at rest, the ticket-14 posture) and never
+ * in any response.
+ */
+export const SendStartPayload = Schema.Struct({
+  generateJobId: Schema.String,
+  recipientIds: Schema.Array(Schema.String),
+  smtpProfileId: Schema.Union([Schema.Null, Schema.String]),
+  smtpOverride: Schema.Union([
+    Schema.Null,
+    Schema.Struct({
+      host: Schema.String,
+      port: Schema.Number,
+      username: Schema.String,
+      password: Schema.String,
+    }),
+  ]),
+  subject: Schema.String,
+  bodyHtml: Schema.String,
+  senderName: Schema.String,
+  senderAddress: Schema.String,
+  delayMs: Schema.Number,
+});
+export type SendStartPayload = Schema.Schema.Type<typeof SendStartPayload>;
+
+/**
+ * The inline SMTP identity as the renderer may ever see it again - the
+ * password stays in the main process, so `send.get-status` never echoes
+ * a credential back over the bridge.
+ */
+export const SendSmtpOverrideInfo = Schema.Struct({
+  host: Schema.String,
+  port: Schema.Number,
+  username: Schema.String,
+});
+export type SendSmtpOverrideInfo = Schema.Schema.Type<typeof SendSmtpOverrideInfo>;
+
+/**
+ * One recipient's outcome inside a send job, joined with the name the job
+ * started with. `sent` carries the server message id, `failed` the error.
+ */
+export const SendJobRecipient = Schema.Struct({
+  recipientId: Schema.String,
+  recipientName: Schema.String,
+  status: SendRecipientStatus,
+  messageId: Schema.Union([Schema.Null, Schema.String]),
+  errorMessage: Schema.Union([Schema.Null, Schema.String]),
+  sentAt: Schema.Union([Schema.Null, Schema.String]),
+});
+export type SendJobRecipient = Schema.Schema.Type<typeof SendJobRecipient>;
+
+/**
+ * A send job as returned to the renderer: the job row (SMTP identity
+ * without any credential, cursor, counts) plus every per-recipient
+ * outcome, so one snapshot renders the whole send screen.
+ */
+export const SendJob = Schema.Struct({
+  id: Schema.String,
+  generateJobId: Schema.String,
+  status: SendJobStatus,
+  smtpProfileId: Schema.Union([Schema.Null, Schema.String]),
+  /** The profile name at send time; "(deleted profile)" when it was removed. */
+  smtpProfileName: Schema.Union([Schema.Null, Schema.String]),
+  smtpOverride: Schema.Union([Schema.Null, SendSmtpOverrideInfo]),
+  subject: Schema.String,
+  bodyHtml: Schema.String,
+  senderName: Schema.String,
+  senderAddress: Schema.String,
+  /** The pacing delay in ms; the gate itself reads the live setting. */
+  delayMs: Schema.Number,
+  /** The index of the next recipient the loop will process. */
+  cursorIndex: Schema.Number,
+  total: Schema.Number,
+  createdAt: Schema.String,
+  completedAt: Schema.Union([Schema.Null, Schema.String]),
+  recipients: Schema.Array(SendJobRecipient),
+});
+export type SendJob = Schema.Schema.Type<typeof SendJob>;
+
+/**
+ * `send-progress` event: one per recipient outcome, a delta the renderer
+ * applies to its running state (SQLite stays the source of truth).
+ */
+export const SendProgressEvent = Schema.Struct({
+  kind: Schema.Literal("send-progress"),
+  jobId: Schema.String,
+  current: Schema.Number,
+  total: Schema.Number,
+  status: Schema.Literals(["sent", "failed"]),
+  recipientId: Schema.String,
+  messageId: Schema.Union([Schema.Null, Schema.String]),
+  error: Schema.Union([Schema.Null, Schema.String]),
+});
+export type SendProgressEvent = Schema.Schema.Type<typeof SendProgressEvent>;
+
+/**
+ * `job-paused` event: the job stopped and is persisted as `paused` -
+ * manually from the wizard, or automatically when a recipient exhausted
+ * its retries. `lastIndex` is the cursor, i.e. how many recipients have a
+ * persisted outcome.
+ */
+export const JobPausedEvent = Schema.Struct({
+  kind: Schema.Literal("job-paused"),
+  jobId: Schema.String,
+  reason: Schema.Literals(["user", "retry-exhausted"]),
+  lastIndex: Schema.Number,
+});
+export type JobPausedEvent = Schema.Schema.Type<typeof JobPausedEvent>;
+
+/** Every job event the hub carries; `kind` discriminates the union. */
+export const HubEvent = Schema.Union([GenerateProgressEvent, SendProgressEvent, JobPausedEvent]);
+export type HubEvent = Schema.Schema.Type<typeof HubEvent>;
 
 /**
  * The contextBridge-exposed API (`window.api`). Domains and methods are
@@ -507,5 +646,52 @@ export interface Api {
      * credentials (the per-profile Test Connection in Settings).
      */
     testProfile(id: string): Promise<void>;
+  };
+  send: {
+    /**
+     * Creates a pending send job: the message, the SMTP identity (profile
+     * or inline override), and the recipients to deliver to. Nothing is
+     * sent yet - `runSend` does the work, so a job can be created and
+     * inspected before any email leaves.
+     */
+    startSend(payload: SendStartPayload): Promise<SendJob>;
+    /**
+     * Runs the job: pre-flight (SMTP connect + auth, at least one
+     * confirmed generated attachment) fails fast, then one email per
+     * recipient at the live pacing rate with 3 retries (1s/2s/4s
+     * backoff) per recipient. Resolves with the finished job; a
+     * recipient that exhausts its retries pauses the job (persisted,
+     * plus a `job-paused` event). Re-running a finished job is a no-op.
+     */
+    runSend(jobId: string): Promise<SendJob>;
+    /** Pauses a sending job: persisted `paused`, the loop stops at the next checkpoint. */
+    pauseSend(jobId: string): Promise<SendJob>;
+    /** Marks a paused job `pending` so `runSend` can continue it from the cursor. */
+    resumeSend(jobId: string): Promise<SendJob>;
+    /**
+     * Cancels a job (terminal): the remaining `pending` recipients become
+     * `skipped` and the job `cancelled` in one transaction. The in-flight
+     * recipient's send completes and its outcome persists.
+     */
+    cancelSend(jobId: string): Promise<SendJob>;
+    /** The full job snapshot: status plus every per-recipient outcome. */
+    getSendStatus(jobId: string): Promise<SendJob | null>;
+    /**
+     * Resets the `failed` recipients of a finished job to `pending` and
+     * returns it to `pending`, so `runSend` retries exactly those - the
+     * completion summary's Retry Failures action.
+     */
+    retryFailedSend(jobId: string): Promise<SendJob>;
+    /**
+     * Subscribes to per-recipient send progress. Returns an unsubscribe
+     * function; events are deltas, the snapshot from `getSendStatus`
+     * stays the source of truth.
+     */
+    onSendProgress(cb: (event: SendProgressEvent) => void): () => void;
+    /**
+     * Subscribes to job-paused events (manual pause or retry exhaustion).
+     * Returns an unsubscribe function.
+     */
+    onJobPaused(cb: (event: JobPausedEvent) => void): () => void;
   };
 }

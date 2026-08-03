@@ -17,7 +17,7 @@ import {
  * deletable, and a connection test that proves a profile works before a
  * campaign sends through it. The stored password never leaves the main
  * process - the public profile shape carries `hasPassword` instead, and
- * the send pipeline (future ticket) resolves the credential here.
+ * the send pipeline resolves the credential here through `getCredentials`.
  */
 
 // ---- Errors ----
@@ -45,12 +45,18 @@ export class SmtpSendFailed extends Data.TaggedError("SmtpSendFailed")<{
   readonly message: string;
 }> {}
 
+/** An attachment file referenced by a message is missing or unreadable. */
+export class AttachmentNotFound extends Data.TaggedError("AttachmentNotFound")<{
+  readonly message: string;
+}> {}
+
 /**
- * The typed send-domain error union (spec decision 9). The send pipeline
- * extends it with AttachmentNotFound; the connection test produces the
- * connect/auth/send buckets.
+ * The typed send-domain error union (spec decision 9). The connection
+ * test produces the connect/auth/send buckets; the send pipeline's
+ * per-recipient send adds AttachmentNotFound - a file confirmed at
+ * generate time may be gone by send time.
  */
-export type SendError = SmtpConnectFailed | SmtpAuthFailed | SmtpSendFailed;
+export type SendError = SmtpConnectFailed | SmtpAuthFailed | SmtpSendFailed | AttachmentNotFound;
 
 // ---- Environment ----
 
@@ -60,6 +66,16 @@ export interface SmtpCredentials {
   readonly port: number;
   readonly username: string;
   readonly password: string;
+}
+
+/** One email the send pipeline delivers through the given credentials. */
+export interface SmtpMailMessage {
+  readonly to: string;
+  readonly subject: string;
+  readonly html: string;
+  readonly fromName: string;
+  readonly fromAddress: string;
+  readonly attachments: readonly { filename: string; path: string }[];
 }
 
 export interface SmtpServiceShape {
@@ -80,6 +96,22 @@ export interface SmtpServiceShape {
   readonly test: (credentials: SmtpCredentials) => Effect.Effect<void, SendError>;
   /** Connects and authenticates with a saved profile's stored credentials. */
   readonly testProfile: (id: string) => Effect.Effect<void, SmtpProfileNotFound | SendError>;
+  /**
+   * Delivers one message and resolves with the server's message id - the
+   * send pipeline's per-recipient delivery. One fresh connection per
+   * send (no pooling): the job runner owns pacing, so nodemailer's pool
+   * limiter stays off. A missing attachment file fails with
+   * AttachmentNotFound before anything is sent.
+   */
+  readonly send: (
+    credentials: SmtpCredentials,
+    message: SmtpMailMessage,
+  ) => Effect.Effect<string, SendError>;
+  /**
+   * The stored credentials of a saved profile - the send pipeline's
+   * only path to a credential, which never crosses the IPC bridge.
+   */
+  readonly getCredentials: (id: string) => Effect.Effect<SmtpCredentials, SmtpProfileNotFound>;
 }
 
 /**
@@ -109,22 +141,65 @@ export function verifySmtp(credentials: SmtpCredentials): Promise<void> {
 /**
  * Maps a nodemailer failure onto the typed SendError taxonomy. Nodemailer
  * tags its own failures with `code` (EAUTH for rejected credentials, the
- * Node net/tls codes for unreachable servers); everything else lands in
- * the generic bucket so no failure escapes untyped.
+ * Node net/tls codes for unreachable servers, ENOENT for a missing
+ * attachment file); everything else lands in the generic bucket so no
+ * failure escapes untyped.
  */
 export function classifySmtpError(error: unknown): SendError {
   const code =
     error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
   const message = error instanceof Error ? error.message : String(error);
   if (code === "EAUTH") return new SmtpAuthFailed({ message });
+  // nodemailer wraps a missing attachment file as ESTREAM, keeping the
+  // fs ENOENT wording inside the message - match on both.
+  if (code === "ENOENT" || message.includes("ENOENT")) return new AttachmentNotFound({ message });
   if (
-    ["ECONNECTION", "ETIMEDOUT", "ENOTFOUND", "EHOSTUNREACH", "ECONNREFUSED", "ECONNRESET", "ESOCKET", "ETLS"].includes(
-      code,
-    )
+    [
+      "ECONNECTION",
+      "ETIMEDOUT",
+      "ENOTFOUND",
+      "EHOSTUNREACH",
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "ESOCKET",
+      "ETLS",
+    ].includes(code)
   ) {
     return new SmtpConnectFailed({ message });
   }
   return new SmtpSendFailed({ message });
+}
+
+/**
+ * Delivers one message through a fresh transporter (the same
+ * connection settings as `verifySmtp`) and resolves with the server's
+ * message id. `transporter.close()` in `finally` releases the socket
+ * even when the send failed, so a per-recipient failure never leaks a
+ * connection.
+ */
+export function sendSmtp(credentials: SmtpCredentials, message: SmtpMailMessage): Promise<string> {
+  const transporter = nodemailer.createTransport({
+    host: credentials.host,
+    port: credentials.port,
+    secure: credentials.port === 465,
+    auth: { user: credentials.username, pass: credentials.password },
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
+  });
+  return transporter
+    .sendMail({
+      from: `"${message.fromName.replace(/["\\]/g, "")}" <${message.fromAddress}>`,
+      to: message.to,
+      subject: message.subject,
+      html: message.html,
+      attachments: message.attachments as {
+        filename: string;
+        path: string;
+      }[],
+    })
+    .then((info) => (info.messageId || info.response || "").toString())
+    .finally(() => transporter.close());
 }
 
 /** The public profile shape: the stored row minus the password, plus the mask flag. */
@@ -198,6 +273,18 @@ export function makeSmtpService(repo: SqliteRepoShape): SmtpServiceShape {
           try: () => verifySmtp({ host, port, username, password }),
           catch: (error) => classifySmtpError(error),
         });
+      }),
+    send: (credentials, message) =>
+      Effect.tryPromise({
+        try: () => sendSmtp(credentials, message),
+        catch: (error) => classifySmtpError(error),
+      }),
+    getCredentials: (id) =>
+      Effect.gen(function* () {
+        const stored = yield* repo.getSmtpProfile(id);
+        if (Option.isNone(stored)) return yield* Effect.fail(new SmtpProfileNotFound());
+        const { host, port, username, password } = stored.value;
+        return { host, port, username, password };
       }),
   };
 }

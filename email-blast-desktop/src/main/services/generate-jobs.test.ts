@@ -9,7 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { openDatabase, makeSqliteRepo } from "./sqlite-repo";
 import { LibreOfficeFailed, makeGenerateJobService, type GenerateEnv } from "./generate-jobs";
 import { makeProgressHub } from "./progress-hub";
-import type { GenerateProgressEvent } from "../../shared/ipc";
+import type { HubEvent } from "../../shared/ipc";
 import { tempDir, writeFixture } from "./test-helpers";
 
 /**
@@ -101,7 +101,7 @@ function makeSvc() {
   const hub = makeProgressHub();
   const stub = stubEnv();
   const service = makeGenerateJobService(repo, hub, stub.env);
-  const events: GenerateProgressEvent[] = [];
+  const events: HubEvent[] = [];
   hub.subscribe((event) => events.push(event));
   return { db, repo, hub, service, events, ...stub };
 }
@@ -276,9 +276,33 @@ describe("GenerateJobService run - docx (Seam A)", () => {
     await Effect.runPromise(service.run(job.id));
 
     expect(events).toEqual([
-      { jobId: job.id, current: 1, total: 3, status: "generated", recipientId: budi, error: null },
-      { jobId: job.id, current: 2, total: 3, status: "generated", recipientId: sari, error: null },
-      { jobId: job.id, current: 3, total: 3, status: "generated", recipientId: andi, error: null },
+      {
+        kind: "generate-progress",
+        jobId: job.id,
+        current: 1,
+        total: 3,
+        status: "generated",
+        recipientId: budi,
+        error: null,
+      },
+      {
+        kind: "generate-progress",
+        jobId: job.id,
+        current: 2,
+        total: 3,
+        status: "generated",
+        recipientId: sari,
+        error: null,
+      },
+      {
+        kind: "generate-progress",
+        jobId: job.id,
+        current: 3,
+        total: 3,
+        status: "generated",
+        recipientId: andi,
+        error: null,
+      },
     ]);
   });
 
@@ -315,7 +339,9 @@ describe("GenerateJobService run - docx (Seam A)", () => {
       ["generated", null],
       ["failed", 'Missing data for slot "no".'],
     ]);
-    expect(events.map((e) => [e.status, e.error])).toEqual([
+    expect(
+      events.filter((e) => e.kind === "generate-progress").map((e) => [e.status, e.error]),
+    ).toEqual([
       ["generated", null],
       ["generated", null],
       ["failed", 'Missing data for slot "no".'],

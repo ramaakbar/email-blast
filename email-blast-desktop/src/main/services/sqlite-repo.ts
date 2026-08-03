@@ -6,6 +6,8 @@ import type {
   ImportBatch,
   Recipient,
   RecipientListPayload,
+  SendJobStatus,
+  SendRecipientStatus,
   Template,
 } from "../../shared/ipc";
 
@@ -254,6 +256,61 @@ export interface SqliteRepoShape {
   ) => Effect.Effect<Option.Option<SmtpStoredProfile>>;
   /** Deletes a profile and returns how many rows were removed. */
   readonly deleteSmtpProfile: (id: string) => Effect.Effect<number>;
+  /** Inserts a send job row and returns its assigned id. */
+  readonly insertSendJob: (draft: SendJobDraft) => Effect.Effect<string>;
+  /** Inserts one pending recipient row per id, in the given order. */
+  readonly insertSendJobRecipients: (
+    jobId: string,
+    recipientIds: readonly string[],
+  ) => Effect.Effect<void>;
+  /** Moves a send job through its lifecycle; null completedAt clears it. */
+  readonly setSendJobStatus: (
+    jobId: string,
+    status: SendJobStatus,
+    completedAt?: string | null,
+  ) => Effect.Effect<void>;
+  /**
+   * The send pipeline's critical section: the per-recipient outcome and
+   * the job cursor in ONE transaction, so a crash between them can never
+   * leave a sent email un-advanced (double-send) or an advanced cursor
+   * behind an un-sent recipient (skip).
+   */
+  readonly persistSendOutcome: (
+    jobId: string,
+    recipientId: string,
+    result: {
+      status: Extract<SendRecipientStatus, "sent" | "failed" | "skipped">;
+      messageId: string | null;
+      errorMessage: string | null;
+      sentAt: string | null;
+    },
+    cursorIndex: number,
+  ) => Effect.Effect<void>;
+  /**
+   * The full send job: the job row (with the profile name) plus every
+   * recipient outcome joined with the recipient's name, in job order.
+   * None when the job id does not exist.
+   */
+  readonly getSendJob: (jobId: string) => Effect.Effect<Option.Option<SendJobWithRecipients>>;
+  /**
+   * Cancel, terminal: in ONE transaction the remaining `pending`
+   * recipients become `skipped` and the job `cancelled` (with
+   * completedAt). Sent/failed rows keep their outcomes.
+   */
+  readonly cancelSendJob: (jobId: string) => Effect.Effect<void>;
+  /**
+   * Retry failures: in ONE transaction the `failed` recipients return to
+   * `pending` (error cleared), the cursor rewinds to the first of them,
+   * and the job returns to `pending` so the pipeline re-runs exactly
+   * those. Returns how many recipients were reset.
+   */
+  readonly retryFailedSendJob: (jobId: string) => Effect.Effect<number>;
+  /**
+   * Whether ANY OTHER send job is active - `sending` or a paused-but-
+   * unresumed job - the one-active-job rule (spec section 5). The job
+   * itself is excluded so a paused job can always be resumed.
+   */
+  readonly anySendJobActiveExcept: (jobId: string) => Effect.Effect<boolean>;
 }
 
 /**
@@ -331,6 +388,56 @@ export interface SmtpProfilePatch {
   readonly port: number;
   readonly username: string;
   readonly password: string | null;
+}
+
+/**
+ * A send job ready to be persisted: the compose wizard's channel config
+ * plus the per-job pacing snapshot. `smtpOverride` is the serialized
+ * inline credential JSON (plaintext at rest, the ticket-14 posture);
+ * `cursorIndex` starts at 0 and `totalCount` is the recipient count.
+ */
+export interface SendJobDraft {
+  readonly generateJobId: string;
+  readonly smtpProfileId: string | null;
+  readonly smtpOverrideJson: string | null;
+  readonly subject: string;
+  readonly bodyHtml: string;
+  readonly senderName: string;
+  readonly senderAddress: string;
+  readonly delayMs: number;
+  readonly totalCount: number;
+}
+
+/** A send job row as stored, with the profile name for display. */
+export interface SendJobWithRecipients {
+  readonly job: {
+    readonly id: string;
+    readonly generateJobId: string;
+    readonly status: SendJobStatus;
+    readonly smtpProfileId: string | null;
+    readonly smtpProfileName: string | null;
+    readonly smtpOverrideJson: string | null;
+    readonly subject: string;
+    readonly bodyHtml: string;
+    readonly senderName: string;
+    readonly senderAddress: string;
+    readonly delayMs: number;
+    readonly cursorIndex: number;
+    readonly totalCount: number;
+    readonly createdAt: string;
+    readonly completedAt: string | null;
+  };
+  readonly recipients: readonly SendJobRecipientRow[];
+}
+
+/** One send-job recipient row as stored, name joined for display. */
+export interface SendJobRecipientRow {
+  readonly recipientId: string;
+  readonly recipientName: string | null;
+  readonly status: SendRecipientStatus;
+  readonly messageId: string | null;
+  readonly errorMessage: string | null;
+  readonly sentAt: string | null;
 }
 
 function normalizeEmail(email: string | null): string | null {
@@ -758,6 +865,190 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
     deleteSmtpProfile: (id) =>
       Effect.sync(() => {
         return Number(db.prepare("DELETE FROM smtp_profiles WHERE id = ?").run(id).changes);
+      }),
+    insertSendJob: (draft) =>
+      Effect.sync(() => {
+        const id = crypto.randomUUID();
+        db.prepare(
+          `INSERT INTO send_jobs (id, generate_job_id, smtp_profile_id, smtp_override, subject, body_html, sender_name, sender_address, delay_ms, total_count)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          id,
+          draft.generateJobId,
+          draft.smtpProfileId,
+          draft.smtpOverrideJson,
+          draft.subject,
+          draft.bodyHtml,
+          draft.senderName,
+          draft.senderAddress,
+          draft.delayMs,
+          draft.totalCount,
+        );
+        return id;
+      }),
+    insertSendJobRecipients: (jobId, recipientIds) =>
+      Effect.sync(() => {
+        if (recipientIds.length === 0) return;
+        const insert = db.prepare(
+          "INSERT INTO send_job_recipients (job_id, recipient_id) VALUES (?, ?)",
+        );
+        db.exec("BEGIN");
+        try {
+          for (const recipientId of recipientIds) insert.run(jobId, recipientId);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }),
+    setSendJobStatus: (jobId, status, completedAt = null) =>
+      Effect.sync(() => {
+        db.prepare("UPDATE send_jobs SET status = ?, completed_at = ? WHERE id = ?").run(
+          status,
+          completedAt,
+          jobId,
+        );
+      }),
+    persistSendOutcome: (jobId, recipientId, result, cursorIndex) =>
+      Effect.sync(() => {
+        db.exec("BEGIN");
+        try {
+          db.prepare(
+            `UPDATE send_job_recipients SET status = ?, message_id = ?, error_message = ?, sent_at = ?
+             WHERE job_id = ? AND recipient_id = ?`,
+          ).run(
+            result.status,
+            result.messageId,
+            result.errorMessage,
+            result.sentAt,
+            jobId,
+            recipientId,
+          );
+          db.prepare("UPDATE send_jobs SET cursor_index = ? WHERE id = ?").run(cursorIndex, jobId);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }),
+    getSendJob: (jobId) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            `SELECT sj.id, sj.generate_job_id AS generateJobId, sj.status,
+                    sj.smtp_profile_id AS smtpProfileId, sp.name AS smtpProfileName,
+                    sj.smtp_override AS smtpOverrideJson, sj.subject, sj.body_html AS bodyHtml,
+                    sj.sender_name AS senderName, sj.sender_address AS senderAddress,
+                    sj.delay_ms AS delayMs, sj.cursor_index AS cursorIndex,
+                    sj.total_count AS totalCount, sj.created_at AS createdAt, sj.completed_at AS completedAt
+             FROM send_jobs sj
+             LEFT JOIN smtp_profiles sp ON sp.id = sj.smtp_profile_id
+             WHERE sj.id = ?`,
+          )
+          .get(jobId) as
+          | {
+              id: string;
+              generateJobId: string;
+              status: SendJobStatus;
+              smtpProfileId: string | null;
+              smtpProfileName: string | null;
+              smtpOverrideJson: string | null;
+              subject: string;
+              bodyHtml: string;
+              senderName: string;
+              senderAddress: string;
+              delayMs: number;
+              cursorIndex: number;
+              totalCount: number;
+              createdAt: string;
+              completedAt: string | null;
+            }
+          | undefined;
+        if (row === undefined) return Option.none();
+        // LEFT JOIN so a recipient deleted after the job started still shows
+        // its row (name falls back to "(deleted recipient)" in the service).
+        const recipients = db
+          .prepare(
+            `SELECT sjr.recipient_id AS recipientId, r.name AS recipientName, sjr.status,
+                    sjr.message_id AS messageId, sjr.error_message AS errorMessage, sjr.sent_at AS sentAt
+             FROM send_job_recipients sjr
+             LEFT JOIN recipients r ON r.id = sjr.recipient_id
+             WHERE sjr.job_id = ? ORDER BY sjr.rowid`,
+          )
+          .all(jobId) as unknown as SendJobRecipientRow[];
+        return Option.some({
+          job: {
+            id: row.id,
+            generateJobId: row.generateJobId,
+            status: row.status,
+            smtpProfileId: row.smtpProfileId,
+            smtpProfileName: row.smtpProfileName,
+            smtpOverrideJson: row.smtpOverrideJson,
+            subject: row.subject,
+            bodyHtml: row.bodyHtml,
+            senderName: row.senderName,
+            senderAddress: row.senderAddress,
+            delayMs: row.delayMs,
+            cursorIndex: row.cursorIndex,
+            totalCount: row.totalCount,
+            createdAt: row.createdAt,
+            completedAt: row.completedAt,
+          },
+          recipients,
+        });
+      }),
+    cancelSendJob: (jobId) =>
+      Effect.sync(() => {
+        db.exec("BEGIN");
+        try {
+          db.prepare(
+            "UPDATE send_job_recipients SET status = 'skipped' WHERE job_id = ? AND status = 'pending'",
+          ).run(jobId);
+          db.prepare(
+            "UPDATE send_jobs SET status = 'cancelled', completed_at = datetime('now') WHERE id = ?",
+          ).run(jobId);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }),
+    retryFailedSendJob: (jobId) =>
+      Effect.sync(() => {
+        db.exec("BEGIN");
+        try {
+          const reset = db
+            .prepare(
+              `UPDATE send_job_recipients SET status = 'pending', message_id = NULL, error_message = NULL, sent_at = NULL
+             WHERE job_id = ? AND status = 'failed'`,
+            )
+            .run(jobId);
+          // Rewind the cursor to the first retried recipient - its index
+          // (how many rows precede it); the pipeline re-processes from
+          // there, skipping rows already sent/skipped.
+          db.prepare(
+            `UPDATE send_jobs SET cursor_index = (
+               SELECT COUNT(*) FROM send_job_recipients
+               WHERE job_id = ? AND rowid < (
+                 SELECT MIN(rowid) FROM send_job_recipients WHERE job_id = ? AND status = 'pending'
+               )
+             ), status = 'pending', completed_at = NULL WHERE id = ?`,
+          ).run(jobId, jobId, jobId);
+          db.exec("COMMIT");
+          return Number(reset.changes);
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }),
+    anySendJobActiveExcept: (jobId) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM send_jobs WHERE id != ? AND status IN ('sending', 'paused')",
+          )
+          .get(jobId) as { n: number };
+        return row.n > 0;
       }),
   };
 }

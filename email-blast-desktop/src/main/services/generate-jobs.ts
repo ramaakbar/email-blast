@@ -295,6 +295,7 @@ export function makeGenerateJobService(
       });
       state.current += 1;
       hub.emit({
+        kind: "generate-progress",
         jobId,
         current: state.current,
         total: state.total,

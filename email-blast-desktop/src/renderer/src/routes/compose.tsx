@@ -6,9 +6,13 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  CircleStop,
   FileText,
   Loader2,
-  Lock,
+  Pause,
+  Play,
+  Plug,
+  RotateCcw,
   Send,
   Users,
   X,
@@ -20,20 +24,40 @@ import { TemplateBadge } from "@/components/template-badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { slotCoverage } from "../../../shared/generate";
-import type { GenerateJob, Recipient, Template } from "../../../shared/ipc";
-import { SETTING_KEYS } from "../../../shared/settings";
+import {
+  availableSlots,
+  interpolateMessageHtml,
+  interpolateMessagePlain,
+  messageCoverage,
+  messageValues,
+} from "../../../shared/send";
+import {
+  DEFAULT_RATE_LIMIT_DELAY_MS,
+  parseRateLimitMs,
+  RATE_LIMIT_MAX_MS,
+  RATE_LIMIT_MIN_MS,
+  RATE_LIMIT_STEP_MS,
+  SETTING_KEYS,
+} from "../../../shared/settings";
+import type {
+  GenerateJob,
+  Recipient,
+  SendJob,
+  SendStartPayload,
+  Template,
+} from "../../../shared/ipc";
 
 export const Route = createFileRoute("/compose")({
   component: ComposePage,
 });
 
 /**
- * The 6-step compose wizard (spec decision 8). Ticket 13 builds steps
- * 1 (recipients), 2 (template), and 5 (generate & review) end to end;
- * steps 3 (message) and 4 (SMTP) arrive with the send pipeline (ticket
- * 15), so they are locked placeholders here. Wizard state lives in React
- * and is handed forward step by step; step 5 records the generated-only
- * recipient list for the send step, excluding failures automatically.
+ * The 6-step compose wizard (spec decision 8). Ticket 13 built steps
+ * 1 (recipients), 2 (template), and 5 (generate & review); ticket 15
+ * completes steps 3 (message), 4 (SMTP), and 6 (send) end to end.
+ * Wizard state lives in React and is handed forward step by step; step 5
+ * records the generated-only recipient list for the send step, excluding
+ * failures automatically.
  */
 
 const WIZARD_STEPS = [
@@ -44,9 +68,6 @@ const WIZARD_STEPS = [
   { n: 5, label: "Generate & Review" },
   { n: 6, label: "Send" },
 ] as const;
-
-/** Steps 3, 4, and 6 belong to tickets 14/15; they render as locked here. */
-const LOCKED_STEPS = new Set([3, 4, 6]);
 
 const PAGE_SIZE = 25;
 
@@ -70,13 +91,83 @@ type GenerateState =
     }
   | { kind: "error"; message: string };
 
+/** The SMTP identity + sender fields the wizard carries from step 4. */
+interface SmtpFormState {
+  mode: "profile" | "inline";
+  profileId: string | null;
+  host: string;
+  port: string;
+  username: string;
+  password: string;
+  saveAsProfile: boolean;
+  profileName: string;
+  senderName: string;
+  senderAddress: string;
+  delayMs: number;
+}
+
+const INITIAL_SMTP: SmtpFormState = {
+  mode: "profile",
+  profileId: null,
+  host: "",
+  port: "587",
+  username: "",
+  password: "",
+  saveAsProfile: false,
+  profileName: "",
+  senderName: "",
+  senderAddress: "",
+  delayMs: DEFAULT_RATE_LIMIT_DELAY_MS,
+};
+
+/** One per-recipient log row (names seeded from the job; `skipped` appears on cancel). */
+interface SendLogRow {
+  status: "sent" | "failed" | "skipped" | null;
+  messageId: string | null;
+  error: string | null;
+  name: string;
+}
+
+/**
+ * The running log's initial rows: every recipient with its name, so the
+ * per-recipient list reads correctly before the first event lands.
+ */
+function seedResults(job: SendJob): Record<string, SendLogRow> {
+  return Object.fromEntries(
+    job.recipients.map((r) => [
+      r.recipientId,
+      { status: null, messageId: null, error: null, name: r.recipientName },
+    ]),
+  );
+}
+
+/** The live state of a send job in the wizard. */
+type SendState =
+  | { kind: "idle" }
+  | { kind: "starting" }
+  | {
+      kind: "running";
+      jobId: string;
+      total: number;
+      current: number;
+      paused: boolean;
+      results: Record<string, SendLogRow>;
+    }
+  | { kind: "paused"; jobId: string; job: SendJob; windingDown: boolean }
+  | { kind: "done"; jobId: string; job: SendJob }
+  | { kind: "cancelled"; jobId: string; job: SendJob }
+  | { kind: "error"; message: string; jobId: string | null };
+
 function ComposePage() {
   const [step, setStep] = useState<number>(1);
   const [selection, setSelection] = useState<Map<string, Recipient>>(new Map());
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [generate, setGenerate] = useState<GenerateState>({ kind: "idle" });
-  // The send handoff: only recipients with confirmed output (ticket 15).
+  // The send handoff: only recipients with confirmed output (ticket 13).
   const [sendRecipientIds, setSendRecipientIds] = useState<string[]>([]);
+  const [message, setMessage] = useState({ subject: "", bodyHtml: "" });
+  const [smtp, setSmtp] = useState<SmtpFormState>(INITIAL_SMTP);
+  const [send, setSend] = useState<SendState>({ kind: "idle" });
 
   const templatesQuery = useQuery({
     queryKey: ["templates", "list"],
@@ -92,24 +183,42 @@ function ComposePage() {
     [selectedRecipients, template],
   );
 
+  const messageReport = useMemo(
+    () => messageCoverage(selectedRecipients, `${message.subject} ${message.bodyHtml}`),
+    [selectedRecipients, message],
+  );
+
+  /** The step-4 validity the wizard gates on (sender + one SMTP identity). */
+  const smtpValid =
+    smtp.senderName.trim() !== "" &&
+    smtp.senderAddress.trim() !== "" &&
+    (smtp.mode === "profile"
+      ? smtp.profileId !== null
+      : smtp.host.trim() !== "" &&
+        Number.isInteger(Number(smtp.port)) &&
+        Number(smtp.port) > 0 &&
+        Number(smtp.port) < 65536 &&
+        smtp.username.trim() !== "" &&
+        smtp.password !== "");
+
+  const messageValid =
+    message.subject.trim() !== "" &&
+    message.bodyHtml.trim() !== "" &&
+    messageReport.unknownSlots.length === 0;
+
   const canNext =
     step === 1
       ? selection.size > 0
       : step === 2
         ? template !== null && coverage.ok
-        : generate.kind === "done";
+        : step === 3
+          ? messageValid
+          : step === 4
+            ? smtpValid
+            : generate.kind === "done";
 
-  const nextStep = (): void => {
-    if (step === 1) setStep(2);
-    else if (step === 2) setStep(5);
-    else if (step === 5) setStep(6);
-  };
-
-  const backStep = (): void => {
-    if (step === 2) setStep(1);
-    else if (step === 5) setStep(2);
-    else setStep(5);
-  };
+  const nextStep = (): void => setStep((s) => Math.min(6, s + 1));
+  const backStep = (): void => setStep((s) => Math.max(1, s - 1));
 
   const failedCount =
     generate.kind === "done"
@@ -118,30 +227,43 @@ function ComposePage() {
 
   // A finished generate is bound to the selection and template it was
   // started from; changing either invalidates the done state and the send
-  // handoff, so the wizard can never hand a stale job forward. Toggling a
-  // recipient on and off back to the same set keeps the job valid.
+  // handoff, so the wizard can never hand a stale job forward. The send
+  // state is bound to the same handoff - a stale job snapshot would leave
+  // step 6 showing an old completion summary with no way to send the new
+  // selection, so it resets with the handoff. Toggling a recipient on and
+  // off back to the same set keeps the job valid.
   useEffect(() => {
     if (generate.kind !== "done") return;
     const nowBound = [...selection.keys()].toSorted().join(",");
     if (generate.bound.recipientIds !== nowBound || generate.bound.templateId !== templateId) {
       setGenerate({ kind: "idle" });
       setSendRecipientIds([]);
+      setSend({ kind: "idle" });
     }
   }, [selection, templateId, generate]);
+
+  // Load the stored rate limit once; the step-4 slider writes it back
+  // live, so the gate and every slider agree.
+  useEffect(() => {
+    window.api.settings
+      .get(SETTING_KEYS.rateLimitDelayMs)
+      .then((raw) => setSmtp((prev) => ({ ...prev, delayMs: parseRateLimitMs(raw) })))
+      .catch(() => undefined);
+  }, []);
 
   return (
     <div className="flex h-full flex-col">
       <header className="px-6 pb-4 pt-6">
         <h1 className="text-2xl font-semibold">Compose</h1>
         <p className="text-sm text-muted-foreground">
-          Pick who receives the documents, choose a template, and generate the PDFs.
+          Pick who receives the documents, write the message, and send the emails.
         </p>
       </header>
 
       <WizardStepper
         current={step}
-        onGoTo={(n) => setStep(n)}
-        reachable5={selection.size > 0 && template !== null && coverage.ok}
+        onGoTo={setStep}
+        done={stepDone({ selection, template, coverage, messageValid, smtpValid, generate })}
       />
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-4">
@@ -155,6 +277,15 @@ function ComposePage() {
             coverage={coverage}
           />
         )}
+        {step === 3 && (
+          <MessageStep
+            recipients={selectedRecipients}
+            message={message}
+            onChange={setMessage}
+            report={messageReport}
+          />
+        )}
+        {step === 4 && <SmtpStep config={smtp} onChange={setSmtp} />}
         {step === 5 && (
           <GenerateStep
             recipients={selectedRecipients}
@@ -165,7 +296,14 @@ function ComposePage() {
           />
         )}
         {step === 6 && (
-          <SendPlaceholder sendCount={sendRecipientIds.length} failedCount={failedCount} />
+          <SendStep
+            recipientIds={sendRecipientIds}
+            generateJobId={generate.kind === "done" ? generate.jobId : null}
+            message={message}
+            smtp={smtp}
+            state={send}
+            onStateChange={setSend}
+          />
         )}
       </div>
 
@@ -178,10 +316,20 @@ function ComposePage() {
           {step === 2 &&
             coverage.ok &&
             `${selectedRecipients.length} recipients, data covers all slots`}
+          {step === 3 &&
+            (messageReport.unknownSlots.length > 0
+              ? `Unknown slot: {${messageReport.unknownSlots[0]}}`
+              : message.subject.trim() === ""
+                ? "Write a subject to continue"
+                : message.bodyHtml.trim() === ""
+                  ? "Write an email body to continue"
+                  : "Message looks good")}
+          {step === 4 &&
+            (smtpValid ? "Connection details ready" : "Complete the SMTP and sender details")}
           {step === 5 && generate.kind === "done" && (
             <>
               {generate.job.recipients.filter((r) => r.status === "generated").length} generated,{" "}
-              {generate.job.recipients.filter((r) => r.status === "failed").length} failed
+              {failedCount} failed
             </>
           )}
         </span>
@@ -196,22 +344,40 @@ function ComposePage() {
   );
 }
 
+/** Whether each wizard step's prerequisites are satisfied (for the stepper). */
+function stepDone(state: {
+  selection: Map<string, Recipient>;
+  template: Template | null;
+  coverage: ReturnType<typeof slotCoverage>;
+  messageValid: boolean;
+  smtpValid: boolean;
+  generate: GenerateState;
+}): Record<number, boolean> {
+  return {
+    1: state.selection.size > 0,
+    2: state.template !== null && state.coverage.ok,
+    3: state.messageValid,
+    4: state.smtpValid,
+    5: state.generate.kind === "done",
+  };
+}
+
 function WizardStepper({
   current,
   onGoTo,
-  reachable5,
+  done,
 }: {
   current: number;
   onGoTo: (n: number) => void;
-  reachable5: boolean;
+  done: Record<number, boolean>;
 }) {
   return (
     <ol className="flex items-center gap-1 px-6 pb-2 text-sm">
       {WIZARD_STEPS.map((s, index) => {
-        const locked = LOCKED_STEPS.has(s.n);
-        const done = current > s.n && !locked;
+        const complete = done[s.n];
         const active = current === s.n;
-        const clickable = !locked && (s.n <= 2 || (s.n === 5 && reachable5));
+        // A step is reachable when every earlier step is complete.
+        const clickable = WIZARD_STEPS.slice(0, s.n - 1).every((prev) => done[prev.n]);
         return (
           <li key={s.n} className="flex min-w-0 items-center gap-1">
             {index > 0 && <span className="mx-1 h-px w-4 shrink-0 bg-border" />}
@@ -219,14 +385,11 @@ function WizardStepper({
               type="button"
               onClick={() => clickable && onGoTo(s.n)}
               disabled={!clickable}
-              title={locked ? "Arrives with the send pipeline (next update)" : undefined}
               className={`flex min-w-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
                 active ? "bg-primary text-primary-foreground" : clickable ? "hover:bg-muted" : ""
-              } ${locked ? "text-muted-foreground/60" : "text-foreground"}`}
+              } ${clickable ? "text-foreground" : "text-muted-foreground/60"}`}
             >
-              {locked ? (
-                <Lock className="size-3 shrink-0" />
-              ) : done ? (
+              {complete && !active ? (
                 <Check className="size-3 shrink-0" />
               ) : (
                 <span className="shrink-0">{s.n}</span>
@@ -593,6 +756,568 @@ function TemplateStep({
   );
 }
 
+// ---- Step 3: message ----
+
+function MessageStep({
+  recipients,
+  message,
+  onChange,
+  report,
+}: {
+  recipients: Recipient[];
+  message: { subject: string; bodyHtml: string };
+  onChange: (next: { subject: string; bodyHtml: string }) => void;
+  report: ReturnType<typeof messageCoverage>;
+}) {
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [completion, setCompletion] = useState<{
+    start: number;
+    query: string;
+    index: number;
+  } | null>(null);
+  const suggestions = useMemo(() => {
+    if (completion === null) return [];
+    return availableSlots(recipients).filter((slot) => slot.startsWith(completion.query));
+  }, [completion, recipients]);
+
+  // Recompute the {slot} completion state from the textarea's cursor:
+  // open when the last "{" is after the last "}" before the cursor.
+  const updateCompletion = (textarea: HTMLTextAreaElement): void => {
+    const before = textarea.value.slice(0, textarea.selectionStart);
+    const brace = before.lastIndexOf("{");
+    const close = before.lastIndexOf("}");
+    if (brace !== -1 && brace > close) {
+      setCompletion((prev) => ({
+        start: brace,
+        query: before.slice(brace + 1),
+        index: Math.min(prev?.index ?? 0, Math.max(0, availableSlots(recipients).length - 1)),
+      }));
+    } else {
+      setCompletion(null);
+    }
+  };
+
+  const insertSlot = (slot: string): void => {
+    const textarea = bodyRef.current;
+    if (textarea === null || completion === null) return;
+    const cursor = textarea.selectionStart;
+    const next =
+      message.bodyHtml.slice(0, completion.start) + `{${slot}}` + message.bodyHtml.slice(cursor);
+    onChange({ ...message, bodyHtml: next });
+    setCompletion(null);
+    // Restore focus and place the cursor after the inserted placeholder.
+    requestAnimationFrame(() => {
+      textarea.focus();
+      const pos = completion.start + slot.length + 2;
+      textarea.setSelectionRange(pos, pos);
+    });
+  };
+
+  const onBodyKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (completion === null || suggestions.length === 0) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setCompletion({ ...completion, index: (completion.index + 1) % suggestions.length });
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setCompletion({
+        ...completion,
+        index: (completion.index - 1 + suggestions.length) % suggestions.length,
+      });
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      insertSlot(suggestions[Math.min(completion.index, suggestions.length - 1)]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setCompletion(null);
+    }
+  };
+
+  // The live preview: the first 2-3 selected recipients render the
+  // interpolated subject and body; a missing or unknown slot shows a
+  // descriptive error instead of a silent literal placeholder.
+  const samples = recipients.slice(0, 3);
+  const previews = samples.map((recipient) => {
+    const values = messageValues(recipient);
+    try {
+      return {
+        recipient,
+        subject: interpolateMessagePlain(message.subject, values),
+        body: interpolateMessageHtml(message.bodyHtml, values),
+        error: null as string | null,
+      };
+    } catch (error) {
+      return {
+        recipient,
+        subject: "",
+        body: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  return (
+    <div className="flex max-w-3xl flex-col gap-4">
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-muted-foreground">Subject</span>
+        <input
+          type="text"
+          value={message.subject}
+          onChange={(event) => onChange({ ...message, subject: event.target.value })}
+          placeholder="LOA for {name} - {instansi}"
+          className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+        />
+      </label>
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-muted-foreground">
+          HTML body - type {"{"} to insert a recipient field
+        </span>
+        <div className="relative">
+          <textarea
+            ref={bodyRef}
+            value={message.bodyHtml}
+            rows={9}
+            onChange={(event) => {
+              onChange({ ...message, bodyHtml: event.target.value });
+              updateCompletion(event.target);
+            }}
+            onKeyDown={onBodyKeyDown}
+            onSelect={(event) => updateCompletion(event.currentTarget)}
+            onClick={(event) => updateCompletion(event.currentTarget)}
+            placeholder={"<p>Dear {name},</p>\n<p>Congratulations on your scholarship.</p>"}
+            className="w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+          />
+          {completion !== null && suggestions.length > 0 && (
+            <ul className="absolute left-2 top-2 z-10 max-h-48 w-64 overflow-y-auto rounded-md border bg-popover py-1 shadow-lg">
+              {suggestions.map((slot, i) => (
+                <li key={slot}>
+                  <button
+                    type="button"
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      insertSlot(slot);
+                    }}
+                    className={`flex w-full items-center justify-between px-3 py-1 text-left font-mono text-xs ${
+                      i === completion.index ? "bg-accent" : ""
+                    }`}
+                  >
+                    {"{"}
+                    {slot}
+                    {"}"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </label>
+
+      {report.unknownSlots.length > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-700">
+          <X className="mt-0.5 size-3.5 shrink-0" />
+          <div>
+            <p className="font-medium">
+              Unknown slot{report.unknownSlots.length === 1 ? "" : "s"}:{" "}
+              {report.unknownSlots.map((s) => `{${s}}`).join(", ")}
+            </p>
+            <p className="mt-1">
+              No selected recipient has this field. Fix the placeholder or the recipients' data -
+              sending would fail for everyone.
+            </p>
+          </div>
+        </div>
+      )}
+      {report.unknownSlots.length === 0 && report.missing.length > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+          <div>
+            <p className="font-medium">
+              Some recipients are missing data for:{" "}
+              {report.missing.map((m) => `{${m.slot}} (${m.missingCount})`).join(", ")}
+            </p>
+            <p className="mt-1">
+              Those recipients will fail at send time while the rest of the batch continues. Fix
+              their data to avoid failures.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {previews.length > 0 && (
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Live preview
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Rendered for the first {previews.length} selected recipient
+            {previews.length === 1 ? "" : "s"} - the message updates as you type.
+          </p>
+          <div className="mt-3 grid gap-3">
+            {previews.map((preview) => (
+              <div key={preview.recipient.id} className="rounded-md border bg-background p-3">
+                <p className="text-xs font-medium">
+                  {preview.recipient.name}
+                  {preview.recipient.email !== null && (
+                    <span className="text-muted-foreground"> ({preview.recipient.email})</span>
+                  )}
+                </p>
+                {preview.error !== null ? (
+                  <p className="mt-2 flex items-start gap-1.5 text-xs text-red-700">
+                    <X className="mt-0.5 size-3.5 shrink-0" />
+                    {preview.error}
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-2 text-sm font-medium">{preview.subject}</p>
+                    <iframe
+                      title={`Preview for ${preview.recipient.name}`}
+                      sandbox=""
+                      srcDoc={`<!doctype html><html><head><style>body{font-family:system-ui,sans-serif;font-size:13px;margin:0}</style></head><body>${preview.body}</body></html>`}
+                      className="mt-1 h-28 w-full rounded border bg-white"
+                    />
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Step 4: SMTP ----
+
+function SmtpStep({
+  config,
+  onChange,
+}: {
+  config: SmtpFormState;
+  onChange: (next: SmtpFormState) => void;
+}) {
+  const profilesQuery = useQuery({
+    queryKey: ["smtp", "list"],
+    queryFn: () => window.api.smtp.list(),
+  });
+  const profiles = profilesQuery.data ?? [];
+  const profile = profiles.find((p) => p.id === config.profileId) ?? null;
+
+  const [testState, setTestState] = useState<
+    { kind: "idle" } | { kind: "testing" } | { kind: "ok" } | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const rateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The stored rate limit is loaded once by the wizard (ComposePage); the
+  // slider writes it back live here.
+
+  // Changing the connection details invalidates a previous test result -
+  // "Connected" must never refer to credentials the form no longer holds.
+  const updateConnection = (patch: Partial<SmtpFormState>): void => {
+    setTestState({ kind: "idle" });
+    onChange({ ...config, ...patch });
+  };
+
+  useEffect(
+    () => () => {
+      if (rateTimer.current !== null) clearTimeout(rateTimer.current);
+    },
+    [],
+  );
+
+  const commitRate = (ms: number): void => {
+    if (rateTimer.current !== null) clearTimeout(rateTimer.current);
+    rateTimer.current = setTimeout(() => {
+      void window.api.settings.set(SETTING_KEYS.rateLimitDelayMs, String(ms));
+    }, 400);
+  };
+
+  const testConnection = async (): Promise<void> => {
+    setTestState({ kind: "testing" });
+    try {
+      if (config.mode === "profile" && config.profileId !== null) {
+        await window.api.smtp.testProfile(config.profileId);
+      } else {
+        await window.api.smtp.test({
+          host: config.host,
+          port: Number(config.port),
+          username: config.username,
+          password: config.password,
+        });
+      }
+      setTestState({ kind: "ok" });
+    } catch (error) {
+      setTestState({ kind: "error", message: errorMessage(error, "Connection failed.") });
+    }
+  };
+
+  const saveProfile = async (): Promise<void> => {
+    setSaveError(null);
+    try {
+      const created = await window.api.smtp.create({
+        name: config.profileName,
+        host: config.host,
+        port: Number(config.port),
+        username: config.username,
+        password: config.password,
+      });
+      onChange({
+        ...config,
+        mode: "profile",
+        profileId: created.id,
+        saveAsProfile: false,
+        profileName: "",
+      });
+    } catch (error) {
+      setSaveError(errorMessage(error, "Could not save the profile."));
+    }
+  };
+
+  const inputClass =
+    "h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+
+  return (
+    <div className="flex max-w-2xl flex-col gap-4">
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Email connection
+        </h3>
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            onClick={() => updateConnection({ mode: "profile" })}
+            className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium ${
+              config.mode === "profile" ? "border-primary bg-primary/5" : "hover:bg-muted"
+            }`}
+          >
+            Saved profile
+          </button>
+          <button
+            type="button"
+            onClick={() => updateConnection({ mode: "inline" })}
+            className={`flex-1 rounded-md border px-3 py-2 text-sm font-medium ${
+              config.mode === "inline" ? "border-primary bg-primary/5" : "hover:bg-muted"
+            }`}
+          >
+            Enter details (this job only)
+          </button>
+        </div>
+
+        {config.mode === "profile" ? (
+          <div className="mt-3 space-y-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                Saved profile
+              </span>
+              <select
+                value={config.profileId ?? ""}
+                onChange={(event) => {
+                  setTestState({ kind: "idle" });
+                  onChange({
+                    ...config,
+                    profileId: event.target.value === "" ? null : event.target.value,
+                  });
+                }}
+                className={inputClass}
+              >
+                <option value="">Choose a profile…</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} · {p.host}:{p.port}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {profiles.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No saved profiles yet - switch to "Enter details" and use "Save as profile", or add
+                one in{" "}
+                <Link to="/settings" className="text-primary underline underline-offset-2">
+                  Settings
+                </Link>
+                .
+              </p>
+            )}
+            {profile !== null && (
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Plug className="size-3.5" />
+                {profile.username} · {profile.host}:{profile.port}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">Host</span>
+              <input
+                type="text"
+                value={config.host}
+                onChange={(event) => onChange({ ...config, host: event.target.value })}
+                placeholder="smtp.gmail.com"
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                Port (465 = implicit TLS, else STARTTLS)
+              </span>
+              <input
+                type="number"
+                value={config.port}
+                onChange={(event) => onChange({ ...config, port: event.target.value })}
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                Username (email address)
+              </span>
+              <input
+                type="text"
+                value={config.username}
+                onChange={(event) => onChange({ ...config, username: event.target.value })}
+                placeholder="you@gmail.com"
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                App password
+              </span>
+              <input
+                type="password"
+                value={config.password}
+                onChange={(event) => onChange({ ...config, password: event.target.value })}
+                placeholder="16-character app password"
+                className={inputClass}
+              />
+            </label>
+            <div className="sm:col-span-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={config.saveAsProfile}
+                  onChange={(event) => onChange({ ...config, saveAsProfile: event.target.checked })}
+                  className="size-4 accent-primary"
+                />
+                Save as profile
+              </label>
+              {config.saveAsProfile && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={config.profileName}
+                    onChange={(event) => onChange({ ...config, profileName: event.target.value })}
+                    placeholder="Profile name, e.g. Gmail utama"
+                    className={inputClass}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={config.profileName.trim() === ""}
+                    onClick={() => void saveProfile()}
+                  >
+                    Save
+                  </Button>
+                </div>
+              )}
+              {saveError !== null && <p className="mt-2 text-xs text-red-700">{saveError}</p>}
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4 flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              testState.kind === "testing" ||
+              (config.mode === "profile"
+                ? config.profileId === null
+                : config.host.trim() === "" ||
+                  config.username.trim() === "" ||
+                  config.password === "")
+            }
+            onClick={() => void testConnection()}
+          >
+            {testState.kind === "testing" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Plug className="size-4" />
+            )}
+            Test Connection
+          </Button>
+          {testState.kind === "ok" && (
+            <p className="flex items-center gap-1.5 text-xs text-emerald-700">
+              <Check className="size-4" /> Connected - the server accepted these credentials.
+            </p>
+          )}
+          {testState.kind === "error" && (
+            <p className="flex items-center gap-1.5 text-xs text-red-700">{testState.message}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Sender identity
+        </h3>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              Sender name
+            </span>
+            <input
+              type="text"
+              value={config.senderName}
+              onChange={(event) => onChange({ ...config, senderName: event.target.value })}
+              placeholder="Yayasan X"
+              className={inputClass}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              Sender address
+            </span>
+            <input
+              type="email"
+              value={config.senderAddress}
+              onChange={(event) => onChange({ ...config, senderAddress: event.target.value })}
+              placeholder="iym@example.org"
+              className={inputClass}
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="rounded-lg border bg-card p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Sending rate
+          </h3>
+          <span className="font-mono text-sm">{config.delayMs} ms / email</span>
+        </div>
+        <input
+          type="range"
+          min={RATE_LIMIT_MIN_MS}
+          max={RATE_LIMIT_MAX_MS}
+          step={RATE_LIMIT_STEP_MS}
+          value={config.delayMs}
+          onChange={(event) => {
+            const ms = Number(event.target.value);
+            onChange({ ...config, delayMs: ms });
+            commitRate(ms);
+          }}
+          className="mt-3 w-full accent-primary"
+        />
+        <p className="mt-1 text-xs text-muted-foreground">
+          Applies live - a running job picks up changes without restarting.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ---- Step 5: generate & review ----
 
 function GenerateStep({
@@ -662,7 +1387,10 @@ function GenerateStep({
       // Snapshot what the job was started from, so a later selection or
       // template change can invalidate it (stale-state guard).
       const bound = {
-        recipientIds: recipients.map((r) => r.id).toSorted().join(","),
+        recipientIds: recipients
+          .map((r) => r.id)
+          .toSorted()
+          .join(","),
         templateId: template!.id,
       };
       const started = await window.api.generate.startGenerate({
@@ -908,21 +1636,518 @@ function GenerateStep({
   );
 }
 
-// ---- Step 6 placeholder (send pipeline, ticket 15) ----
+// ---- Step 6: send ----
 
-function SendPlaceholder({ sendCount, failedCount }: { sendCount: number; failedCount: number }) {
+function SendStep({
+  recipientIds,
+  generateJobId,
+  message,
+  smtp,
+  state,
+  onStateChange,
+}: {
+  recipientIds: string[];
+  generateJobId: string | null;
+  message: { subject: string; bodyHtml: string };
+  smtp: SmtpFormState;
+  state: SendState;
+  onStateChange: React.Dispatch<React.SetStateAction<SendState>>;
+}) {
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const pausedRef = useRef<(() => void) | null>(null);
+  const logRef = useRef<HTMLUListElement>(null);
+  const runRef = useRef<number>(0);
+
+  // Unmount (or leaving step 6 mid-run) unsubscribes the event listeners;
+  // a returning mount re-subscribes through the running state below.
+  useEffect(
+    () => () => {
+      unsubscribeRef.current?.();
+      pausedRef.current?.();
+      unsubscribeRef.current = null;
+      pausedRef.current = null;
+    },
+    [],
+  );
+
+  // The run flow: start a job and drive it to a terminal or paused state.
+  // The run promise is the primary completion signal; progress events and
+  // the job-paused event update the running state as it streams.
+  const runSendFlow = async (jobId: string, isResume: boolean): Promise<void> => {
+    const flow = ++runRef.current;
+    unsubscribeRef.current?.();
+    pausedRef.current?.();
+    unsubscribeRef.current = window.api.send.onSendProgress((event) => {
+      if (event.jobId !== jobId || flow !== runRef.current) return;
+      onStateChange((prev) => {
+        if (prev.kind !== "running" || prev.jobId !== jobId) return prev;
+        return {
+          ...prev,
+          current: event.current,
+          // The events carry the authoritative total - a resumed run
+          // starts with a placeholder 0 until the first event lands.
+          total: event.total,
+          results: {
+            ...prev.results,
+            [event.recipientId]: {
+              // Keep the seeded name; only the outcome fields change.
+              ...prev.results[event.recipientId],
+              status: event.status,
+              messageId: event.messageId,
+              error: event.error,
+            },
+          },
+        };
+      });
+    });
+    pausedRef.current = window.api.send.onJobPaused((event) => {
+      if (event.jobId !== jobId || flow !== runRef.current) return;
+      onStateChange((prev) => (prev.kind === "running" ? { ...prev, paused: true } : prev));
+    });
+    try {
+      if (isResume) await window.api.send.resumeSend(jobId);
+      const done = await window.api.send.runSend(jobId);
+      if (flow !== runRef.current) return;
+      unsubscribeRef.current?.();
+      pausedRef.current?.();
+      unsubscribeRef.current = null;
+      pausedRef.current = null;
+      onStateChange(
+        done.status === "paused"
+          ? // The loop has fully stopped now - resume is safe again.
+            { kind: "paused", jobId, job: done, windingDown: false }
+          : done.status === "cancelled"
+            ? { kind: "cancelled", jobId, job: done }
+            : { kind: "done", jobId, job: done },
+      );
+    } catch (error) {
+      if (flow !== runRef.current) return;
+      onStateChange({ kind: "error", message: errorMessage(error, "Sending failed."), jobId });
+    }
+  };
+
+  const startSending = async (): Promise<void> => {
+    if (generateJobId === null || recipientIds.length === 0) return;
+    try {
+      const payload: SendStartPayload = {
+        generateJobId,
+        recipientIds,
+        smtpProfileId: smtp.mode === "profile" ? smtp.profileId : null,
+        smtpOverride:
+          smtp.mode === "inline"
+            ? {
+                host: smtp.host,
+                port: Number(smtp.port),
+                username: smtp.username,
+                password: smtp.password,
+              }
+            : null,
+        subject: message.subject,
+        bodyHtml: message.bodyHtml,
+        senderName: smtp.senderName,
+        senderAddress: smtp.senderAddress,
+        delayMs: smtp.delayMs,
+      };
+      onStateChange({ kind: "starting" });
+      const job = await window.api.send.startSend(payload);
+      onStateChange({
+        kind: "running",
+        jobId: job.id,
+        total: job.total,
+        current: 0,
+        paused: false,
+        results: seedResults(job),
+      });
+      await runSendFlow(job.id, false);
+    } catch (error) {
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, "Could not start the send."),
+        jobId: null,
+      });
+    }
+  };
+
+  const pauseSend = async (jobId: string): Promise<void> => {
+    try {
+      const job = await window.api.send.pauseSend(jobId);
+      // The DB is paused, but the old loop may still be finishing an
+      // in-flight send - resume stays disabled until the run promise
+      // resolves (windingDown false), so a quick pause -> resume can
+      // never double-deliver the in-flight recipient.
+      onStateChange({ kind: "paused", jobId, job, windingDown: true });
+    } catch (error) {
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, "Could not pause the send."),
+        jobId,
+      });
+    }
+  };
+
+  const resumeSend = (job: SendJob): void => {
+    onStateChange({
+      kind: "running",
+      jobId: job.id,
+      total: job.total,
+      current: job.cursorIndex,
+      paused: false,
+      results: seedResults(job),
+    });
+    void runSendFlow(job.id, true);
+  };
+
+  const cancelSend = async (jobId: string, current: number, total: number): Promise<void> => {
+    if (!window.confirm(`${current} of ${total} sent - cancel anyway?`)) return;
+    try {
+      const job = await window.api.send.cancelSend(jobId);
+      onStateChange({ kind: "cancelled", jobId, job });
+    } catch (error) {
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, "Could not cancel the send."),
+        jobId,
+      });
+    }
+  };
+
+  const retryFailures = async (job: SendJob): Promise<void> => {
+    try {
+      await window.api.send.retryFailedSend(job.id);
+      onStateChange({
+        kind: "running",
+        jobId: job.id,
+        total: job.total,
+        current: job.cursorIndex,
+        paused: false,
+        results: seedResults(job),
+      });
+      await runSendFlow(job.id, false);
+    } catch (error) {
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, "Could not retry the failures."),
+        jobId: job.id,
+      });
+    }
+  };
+
+  /** Resume from an error state, where no job snapshot is held. */
+  const resumeFromError = async (jobId: string): Promise<void> => {
+    try {
+      const job = await window.api.send.getSendStatus(jobId);
+      if (job === null) {
+        onStateChange({
+          kind: "error",
+          message: "The send job no longer exists.",
+          jobId: null,
+        });
+        return;
+      }
+      resumeSend(job);
+    } catch (error) {
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, "Could not resume the send."),
+        jobId,
+      });
+    }
+  };
+
+  // Auto-scroll the per-recipient log as events arrive.
+  useEffect(() => {
+    const list = logRef.current;
+    if (list !== null) list.scrollTop = list.scrollHeight;
+  });
+
+  const smtpLabel =
+    smtp.mode === "profile" && smtp.profileId !== null
+      ? "Saved profile"
+      : `${smtp.host}:${smtp.port}`;
+
+  // The per-recipient log rows, one shape for every state: the live
+  // results map while running (names seeded up front), the job's
+  // authoritative rows once a snapshot exists (skipped included).
+  const snapshotRows =
+    state.kind === "paused" || state.kind === "done" || state.kind === "cancelled"
+      ? Object.fromEntries(
+          state.job.recipients.map((r) => [
+            r.recipientId,
+            {
+              status: r.status === "pending" ? null : r.status,
+              messageId: r.messageId,
+              error: r.errorMessage,
+              name: r.recipientName,
+            },
+          ]),
+        )
+      : {};
+  const rows = state.kind === "running" ? state.results : snapshotRows;
+  const rowList = Object.entries(rows);
+  const total =
+    state.kind === "running"
+      ? state.total
+      : state.kind === "paused" || state.kind === "done" || state.kind === "cancelled"
+        ? state.job.total
+        : 0;
+  const current =
+    state.kind === "running"
+      ? state.current
+      : state.kind === "paused" || state.kind === "done" || state.kind === "cancelled"
+        ? state.job.cursorIndex
+        : 0;
+  const rowStatuses = Object.values(rows).map((r) => r.status);
+  const sentCount = rowStatuses.filter((s) => s === "sent").length;
+  const failedCount = rowStatuses.filter((s) => s === "failed").length;
+
   return (
-    <div className="flex max-w-2xl flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
-      <Send className="size-10 text-muted-foreground" />
-      <p className="text-sm font-medium">Ready to send - the send step arrives next</p>
-      <p className="max-w-md text-xs text-muted-foreground">
-        {sendCount} recipient{sendCount === 1 ? "" : "s"} with generated attachments are queued here
-        {failedCount > 0
-          ? `; ${failedCount} failed recipient${failedCount === 1 ? "" : "s"} were excluded`
-          : ""}
-        . The SMTP and message steps (3 and 4) plus the send pipeline land in the next update.
-      </p>
+    <div className="flex max-w-3xl flex-col gap-4">
+      <div className="rounded-lg border bg-card p-4">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Send summary
+        </h3>
+        <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+          <div>
+            <dt className="text-muted-foreground">Recipients</dt>
+            <dd className="font-medium">{recipientIds.length}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Subject</dt>
+            <dd className="truncate font-medium" title={message.subject}>
+              {message.subject}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Sender</dt>
+            <dd
+              className="truncate font-medium"
+              title={`${smtp.senderName} <${smtp.senderAddress}>`}
+            >
+              {smtp.senderName} &lt;{smtp.senderAddress}&gt;
+            </dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Connection</dt>
+            <dd className="font-medium">{smtpLabel}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Pacing</dt>
+            <dd className="font-medium">{smtp.delayMs} ms / email</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Attachments</dt>
+            <dd className="font-medium">{recipientIds.length} generated PDFs</dd>
+          </div>
+        </dl>
+        <p className="mt-2 text-xs text-muted-foreground">
+          The pre-flight checks the SMTP connection and confirms the generated attachments before
+          the first email goes out.
+        </p>
+      </div>
+
+      {state.kind === "idle" && (
+        <div className="flex flex-col items-start gap-2">
+          <Button disabled={recipientIds.length === 0} onClick={() => void startSending()}>
+            <Send className="size-4" /> Send {recipientIds.length} email
+            {recipientIds.length === 1 ? "" : "s"}
+          </Button>
+          {recipientIds.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              No recipients have a generated attachment - go back and generate the PDFs first.
+            </p>
+          )}
+        </div>
+      )}
+
+      {state.kind === "starting" && (
+        <div className="flex items-center gap-2 rounded-lg border bg-card p-4 text-sm">
+          <Loader2 className="size-4 animate-spin" /> Preparing the send…
+        </div>
+      )}
+
+      {(state.kind === "running" || state.kind === "paused") && (
+        <div className="rounded-lg border bg-card p-4">
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2 font-medium">
+              {state.kind === "paused" || (state.kind === "running" && state.paused) ? (
+                <>
+                  <Pause className="size-4" /> Paused
+                </>
+              ) : (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Sending…
+                </>
+              )}
+            </span>
+            <span className="text-muted-foreground">
+              {sentCount} sent · {failedCount} failed · {Math.max(0, total - current)} pending
+            </span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${total === 0 ? 0 : (current / total) * 100}%` }}
+            />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {state.kind === "running" && !state.paused && (
+              <Button variant="outline" size="sm" onClick={() => void pauseSend(state.jobId)}>
+                <Pause className="size-4" /> Pause
+              </Button>
+            )}
+            {state.kind === "paused" && (
+              <Button
+                size="sm"
+                disabled={state.windingDown}
+                title={
+                  state.windingDown
+                    ? "The in-flight email is finishing - resume in a moment"
+                    : undefined
+                }
+                onClick={() => resumeSend(state.job)}
+              >
+                <Play className="size-4" /> Resume
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void cancelSend(state.jobId, current, total)}
+            >
+              <CircleStop className="size-4" /> Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {(state.kind === "running" || state.kind === "paused") && (
+        <div className="rounded-lg border bg-card p-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Per-recipient log
+          </h3>
+          <ul ref={logRef} className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+            {rowList.length === 0 && (
+              <li className="text-xs text-muted-foreground">Waiting for the first email…</li>
+            )}
+            {rowList.map(([recipientId, row]) => (
+              <SendLogRowView key={recipientId} row={row} />
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {state.kind === "done" && (
+        <>
+          <div
+            className={`flex items-center gap-2 rounded-md border p-3 text-sm ${
+              failedCount === 0
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700"
+                : "border-amber-500/40 bg-amber-500/10 text-amber-700"
+            }`}
+          >
+            {failedCount === 0 ? (
+              <>
+                <Check className="size-4 shrink-0" />
+                All {sentCount} emails sent.
+              </>
+            ) : (
+              <>
+                <AlertTriangle className="size-4 shrink-0" />
+                {sentCount} sent, {failedCount} failed. Retry the failures below.
+              </>
+            )}
+          </div>
+          {failedCount > 0 && (
+            <div>
+              <Button onClick={() => void retryFailures(state.job)}>
+                <RotateCcw className="size-4" /> Retry Failures
+              </Button>
+            </div>
+          )}
+          <div className="rounded-lg border bg-card p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Per-recipient log
+            </h3>
+            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+              {rowList.map(([recipientId, row]) => (
+                <SendLogRowView key={recipientId} row={row} />
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+
+      {state.kind === "cancelled" && (
+        <>
+          <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700">
+            <CircleStop className="mt-0.5 size-4 shrink-0" />
+            <div>
+              <p className="font-medium">Send cancelled.</p>
+              <p className="mt-1 text-xs">
+                {sentCount} sent, {Math.max(0, state.job.total - sentCount - failedCount)} skipped.
+                No one was double-sent. To send to the skipped recipients, go back and start a new
+                send from the same generated PDFs.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border bg-card p-4">
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Per-recipient log
+            </h3>
+            <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+              {rowList.map(([recipientId, row]) => (
+                <SendLogRowView key={recipientId} row={row} />
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+
+      {state.kind === "error" &&
+        (() => {
+          const jobId = state.jobId;
+          return (
+            <div className="flex flex-col gap-3">
+              <ErrorBanner message={state.message} />
+              <div className="flex gap-2">
+                {jobId !== null && (
+                  <Button onClick={() => void resumeFromError(jobId)}>
+                    <Play className="size-4" /> Resume
+                  </Button>
+                )}
+                <Button variant="outline" onClick={() => void startSending()}>
+                  Try again
+                </Button>
+              </div>
+            </div>
+          );
+        })()}
     </div>
+  );
+}
+
+/** One per-recipient log row, shared by the live and snapshot renderers. */
+function SendLogRowView({ row }: { row: SendLogRow }) {
+  return (
+    <li className="flex items-start gap-2">
+      {row.status === "sent" ? (
+        <Check className="mt-0.5 size-3.5 shrink-0 text-emerald-600" />
+      ) : row.status === "failed" ? (
+        <X className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+      ) : (
+        <span className="mt-0.5 size-3.5 shrink-0 text-muted-foreground">·</span>
+      )}
+      <span className="min-w-0">
+        <span className="font-medium">{row.name ?? "Recipient"}</span>
+        {row.status === "sent" && row.messageId !== null && (
+          <span className="text-muted-foreground"> - {row.messageId}</span>
+        )}
+        {row.status === "failed" && row.error !== null && (
+          <span className="text-destructive"> - {row.error}</span>
+        )}
+        {row.status === "skipped" && <span className="text-muted-foreground"> - skipped</span>}
+      </span>
+    </li>
   );
 }
 

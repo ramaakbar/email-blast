@@ -25,6 +25,8 @@ import {
   RecipientListAllPayload,
   RecipientListPayload,
   ScanSlotsResponse,
+  SendJob,
+  SendStartPayload,
   SettingsGetPayload,
   SettingsSetPayload,
   SmtpDeleteResponse,
@@ -47,6 +49,7 @@ import { ImportService } from "./services/import";
 import { findLibreOffice } from "./services/libreoffice";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
+import { SendJobService } from "./services/send-jobs";
 import { SmtpService } from "./services/smtp";
 import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
@@ -463,21 +466,102 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       }),
     );
   });
+
+  registerWindowHandler(IPC["send:start"], (payload) => {
+    const draft = decodePayload(SendStartPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(SendJob)(yield* service.start(draft));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["send:run"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(SendJob)(yield* service.run(jobId));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["send:pause"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(SendJob)(yield* service.pause(jobId));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["send:resume"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(SendJob)(yield* service.resume(jobId));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["send:cancel"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(SendJob)(yield* service.cancel(jobId));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["send:get-status"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Option.getOrNull(
+          yield* service
+            .getStatus(jobId)
+            .pipe(Effect.map(Option.map((job) => Schema.encodeSync(SendJob)(job)))),
+        );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["send:retry-failed"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(SendJob)(yield* service.retryFailed(jobId));
+      }),
+    );
+  });
 }
 
 /**
- * Forwards every job progress event to every open window. Subscribed once
- * at boot; the hub is the only source of job events and windows come and
- * go, so a fresh window picks up the stream from its next event onward
- * (events are deltas - the snapshot API stays the source of truth).
+ * Forwards every job event to every open window, routed to the channel
+ * its kind belongs to. Subscribed once at boot; the hub is the only
+ * source of job events and windows come and go, so a fresh window picks
+ * up the stream from its next event onward (events are deltas - the
+ * snapshot API stays the source of truth).
  */
 function forwardProgressToWindows(layer: Layer.Layer<AppServices>): void {
   void Effect.runPromise(
     Effect.gen(function* () {
       const hub = yield* ProgressHub;
       hub.subscribe((event) => {
+        const channel =
+          event.kind === "generate-progress"
+            ? IPC["generate-progress"]
+            : event.kind === "send-progress"
+              ? IPC["send-progress"]
+              : IPC["job-paused"];
         for (const win of BrowserWindow.getAllWindows()) {
-          win.webContents.send(IPC["generate-progress"], event);
+          win.webContents.send(channel, event);
         }
       });
     }).pipe(Effect.provide(layer)),

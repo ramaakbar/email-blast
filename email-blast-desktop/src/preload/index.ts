@@ -61,6 +61,29 @@ const api: Api = {
     test: (payload) => ipcRenderer.invoke(IPC["smtp:test"], payload),
     testProfile: (id) => ipcRenderer.invoke(IPC["smtp:test-profile"], id),
   },
+  send: {
+    startSend: (payload) => ipcRenderer.invoke(IPC["send:start"], payload),
+    runSend: (jobId) => ipcRenderer.invoke(IPC["send:run"], jobId),
+    pauseSend: (jobId) => ipcRenderer.invoke(IPC["send:pause"], jobId),
+    resumeSend: (jobId) => ipcRenderer.invoke(IPC["send:resume"], jobId),
+    cancelSend: (jobId) => ipcRenderer.invoke(IPC["send:cancel"], jobId),
+    getSendStatus: (jobId) => ipcRenderer.invoke(IPC["send:get-status"], jobId),
+    retryFailedSend: (jobId) => ipcRenderer.invoke(IPC["send:retry-failed"], jobId),
+    onSendProgress: (cb) => {
+      const listener = (_event: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload);
+      ipcRenderer.on(IPC["send-progress"], listener);
+      return () => {
+        ipcRenderer.removeListener(IPC["send-progress"], listener);
+      };
+    },
+    onJobPaused: (cb) => {
+      const listener = (_event: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload);
+      ipcRenderer.on(IPC["job-paused"], listener);
+      return () => {
+        ipcRenderer.removeListener(IPC["job-paused"], listener);
+      };
+    },
+  },
 };
 
 if (process.contextIsolated) {

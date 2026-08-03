@@ -6,6 +6,7 @@ import { GenerateJobService } from "./services/generate-jobs";
 import { ImportService } from "./services/import";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
+import { SendJobService } from "./services/send-jobs";
 import { Settings } from "./services/settings";
 import { SmtpService } from "./services/smtp";
 import type { SqliteRepo } from "./services/sqlite-repo";
@@ -18,14 +19,16 @@ export type AppServices =
   | RecipientsService
   | TemplatesService
   | GenerateJobService
+  | SendJobService
   | SmtpService
   | ProgressHub
   | AppInfo;
 
 /**
  * Root Layer of the main process - the composition root the Effect
- * runtime is built from. Later tickets attach their services here
- * (SmtpSender, JobRunner for send, ProgressHub for send events).
+ * runtime is built from. SendJobService brings the send pipeline
+ * (ticket 15); its Live layer provides GenerateJob, Smtp, ProgressHub,
+ * Settings, and SqliteRepo alongside, so the duplicates merge away.
  */
 export const rootLayer = (db: DatabaseSync, defaults: DefaultPaths): Layer.Layer<AppServices> =>
   Layer.mergeAll(
@@ -33,7 +36,6 @@ export const rootLayer = (db: DatabaseSync, defaults: DefaultPaths): Layer.Layer
     ImportService.Live(db),
     RecipientsService.Live(db),
     TemplatesService.Live(db),
-    GenerateJobService.Live(db, defaults),
-    SmtpService.Live(db),
+    SendJobService.Live(db, defaults),
     AppInfo.Live,
   );

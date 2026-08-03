@@ -20,6 +20,18 @@ export const RATE_LIMIT_MAX_MS = 5000;
 export const RATE_LIMIT_STEP_MS = 100;
 
 /**
+ * Parses the stored rate-limit setting into the delay the pacing gate
+ * uses, clamping to the slider bounds and falling back to the default
+ * when the row is absent or unparseable. Shared by the main-process gate
+ * and the renderer's sliders so the two can never disagree on a value.
+ */
+export function parseRateLimitMs(raw: string | null): number {
+  const parsed = raw === null ? NaN : Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_RATE_LIMIT_DELAY_MS;
+  return Math.min(RATE_LIMIT_MAX_MS, Math.max(RATE_LIMIT_MIN_MS, Math.round(parsed)));
+}
+
+/**
  * First-run defaults (spec decision 7). Shared so the main-process seed,
  * the read fallbacks, and the renderer's fallbacks cannot drift apart.
  */

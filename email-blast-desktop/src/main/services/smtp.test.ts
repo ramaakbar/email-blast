@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import { createServer } from "net";
 import { join } from "path";
+import { writeFileSync } from "fs";
 import { SMTPServer } from "smtp-server";
 import { openDatabase, SqliteRepo } from "./sqlite-repo";
 import { SmtpService, type SmtpServiceShape } from "./smtp";
@@ -35,9 +36,9 @@ afterEach(async () => {
   // smtp-server's close() returns nothing without a callback - the
   // callback form is the only way to wait for the shutdown.
   await Promise.all(
-    servers.splice(0).map(
-      (server) => new Promise<void>((resolve) => server.close(() => resolve())),
-    ),
+    servers
+      .splice(0)
+      .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
   );
 });
 
@@ -52,9 +53,10 @@ afterEach(async () => {
  * about connect + auth semantics, so the plaintext path keeps them real
  * without the expired-cert noise.
  */
-async function startServer(
-  credentials?: { user: string; pass: string },
-): Promise<{ port: number }> {
+async function startServer(credentials?: {
+  user: string;
+  pass: string;
+}): Promise<{ port: number }> {
   const server = new SMTPServer({
     hideSTARTTLS: true,
     allowInsecureAuth: true,
@@ -76,6 +78,58 @@ async function startServer(
   const address = server.server.address();
   if (address === null || typeof address === "string") throw new Error("No ephemeral port");
   return { port: address.port };
+}
+
+/** One delivered message, captured from the wire: envelope plus raw MIME. */
+interface CapturedMail {
+  readonly from: string;
+  readonly to: string;
+  readonly raw: string;
+}
+
+/**
+ * Starts a server that captures every accepted message (the send
+ * pipeline's seam: the tests assert against what actually went out).
+ * Recipients whose address contains "fail" are rejected at RCPT so a
+ * send can fail deterministically.
+ */
+async function startCapturingServer(): Promise<{ port: number; captured: CapturedMail[] }> {
+  const captured: CapturedMail[] = [];
+  const server = new SMTPServer({
+    hideSTARTTLS: true,
+    allowInsecureAuth: true,
+    onAuth(auth, _session, callback) {
+      callback(null, { user: auth.username });
+    },
+    onRcptTo(rcpt, _session, callback) {
+      if (rcpt.address.includes("fail")) {
+        callback(new Error("mailbox unavailable"));
+        return;
+      }
+      callback(null);
+    },
+    onData(stream, session, callback) {
+      const chunks: Buffer[] = [];
+      stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+      stream.on("end", () => {
+        captured.push({
+          from:
+            session.envelope.mailFrom === false ? "" : (session.envelope.mailFrom?.address ?? ""),
+          to: session.envelope.rcptTo[0]?.address ?? "",
+          raw: Buffer.concat(chunks).toString("utf8"),
+        });
+        callback(null);
+      });
+    },
+  });
+  servers.push(server);
+  await new Promise<void>((resolve, reject) => {
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.server.address();
+  if (address === null || typeof address === "string") throw new Error("No ephemeral port");
+  return { port: address.port, captured };
 }
 
 /** A local port that nothing listens on - connections are refused instantly. */
@@ -139,24 +193,30 @@ describe("SmtpService create (Seam A)", () => {
 
   it("rejects empty fields and invalid ports", async () => {
     const layer = smtpLayer();
-    await expect(
-      use(layer, (s) => s.create({ ...GMAIL, name: "  " })),
-    ).rejects.toMatchObject({ _tag: "InvalidSmtpProfile", message: expect.stringMatching(/name/) });
-    await expect(
-      use(layer, (s) => s.create({ ...GMAIL, host: "" })),
-    ).rejects.toMatchObject({ _tag: "InvalidSmtpProfile", message: expect.stringMatching(/host/i) });
-    await expect(
-      use(layer, (s) => s.create({ ...GMAIL, port: 0 })),
-    ).rejects.toMatchObject({ _tag: "InvalidSmtpProfile", message: expect.stringMatching(/port/i) });
-    await expect(
-      use(layer, (s) => s.create({ ...GMAIL, port: 70_000 })),
-    ).rejects.toMatchObject({ _tag: "InvalidSmtpProfile", message: expect.stringMatching(/port/i) });
-    await expect(
-      use(layer, (s) => s.create({ ...GMAIL, username: " " })),
-    ).rejects.toMatchObject({ _tag: "InvalidSmtpProfile", message: expect.stringMatching(/username/i) });
-    await expect(
-      use(layer, (s) => s.create({ ...GMAIL, password: "" })),
-    ).rejects.toMatchObject({ _tag: "InvalidSmtpProfile", message: expect.stringMatching(/password/i) });
+    await expect(use(layer, (s) => s.create({ ...GMAIL, name: "  " }))).rejects.toMatchObject({
+      _tag: "InvalidSmtpProfile",
+      message: expect.stringMatching(/name/),
+    });
+    await expect(use(layer, (s) => s.create({ ...GMAIL, host: "" }))).rejects.toMatchObject({
+      _tag: "InvalidSmtpProfile",
+      message: expect.stringMatching(/host/i),
+    });
+    await expect(use(layer, (s) => s.create({ ...GMAIL, port: 0 }))).rejects.toMatchObject({
+      _tag: "InvalidSmtpProfile",
+      message: expect.stringMatching(/port/i),
+    });
+    await expect(use(layer, (s) => s.create({ ...GMAIL, port: 70_000 }))).rejects.toMatchObject({
+      _tag: "InvalidSmtpProfile",
+      message: expect.stringMatching(/port/i),
+    });
+    await expect(use(layer, (s) => s.create({ ...GMAIL, username: " " }))).rejects.toMatchObject({
+      _tag: "InvalidSmtpProfile",
+      message: expect.stringMatching(/username/i),
+    });
+    await expect(use(layer, (s) => s.create({ ...GMAIL, password: "" }))).rejects.toMatchObject({
+      _tag: "InvalidSmtpProfile",
+      message: expect.stringMatching(/password/i),
+    });
   });
 });
 
@@ -279,6 +339,108 @@ describe("SmtpService test (Seam A)", () => {
   it("testProfile fails with SmtpProfileNotFound for an unknown id", async () => {
     const layer = smtpLayer();
     await expect(use(layer, (s) => s.testProfile("no-such-id"))).rejects.toMatchObject({
+      _tag: "SmtpProfileNotFound",
+    });
+  });
+});
+
+describe("SmtpService send (Seam A)", () => {
+  const MAIL = {
+    to: "budi@example.com",
+    subject: "Surat LOA untuk Budi",
+    html: "<p>Dear Budi</p>",
+    fromName: "Yayasan X",
+    fromAddress: "iym@example.org",
+    attachments: [] as readonly { filename: string; path: string }[],
+  };
+
+  it("delivers the message and returns the server message id", async () => {
+    const layer = smtpLayer();
+    const { port, captured } = await startCapturingServer();
+    const messageId = await use(layer, (s) =>
+      s.send({ host: "127.0.0.1", port, username: "me", password: "secret" }, MAIL),
+    );
+    expect(messageId).toMatch(/@/);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({
+      from: "iym@example.org",
+      to: "budi@example.com",
+    });
+    // The MIME payload carries the display name, subject, and html body.
+    expect(captured[0].raw).toContain("Yayasan X");
+    expect(captured[0].raw).toContain("Subject: Surat LOA untuk Budi");
+    expect(captured[0].raw).toContain("Dear Budi");
+  });
+
+  it("attaches the given files by path", async () => {
+    const layer = smtpLayer();
+    const { port, captured } = await startCapturingServer();
+    const attachmentPath = join(tempDir(), "LOA_budi.pdf");
+    writeFileSync(attachmentPath, "%PDF-1.4 fake");
+    await use(layer, (s) =>
+      s.send(
+        { host: "127.0.0.1", port, username: "me", password: "secret" },
+        { ...MAIL, attachments: [{ filename: "LOA_budi.pdf", path: attachmentPath }] },
+      ),
+    );
+    expect(captured[0].raw).toContain("name=LOA_budi.pdf");
+    // The attachment travels base64-encoded in the MIME body.
+    expect(captured[0].raw).toContain(Buffer.from("%PDF-1.4 fake").toString("base64"));
+  });
+
+  it("fails with SmtpAuthFailed when the server rejects the credentials", async () => {
+    const layer = smtpLayer();
+    const { port } = await startServer({ user: "me", pass: "right" });
+    await expect(
+      use(layer, (s) =>
+        s.send({ host: "127.0.0.1", port, username: "me", password: "wrong" }, MAIL),
+      ),
+    ).rejects.toMatchObject({ _tag: "SmtpAuthFailed" });
+  });
+
+  it("fails with SmtpConnectFailed against a bad host", async () => {
+    const layer = smtpLayer();
+    const port = await closedPort();
+    await expect(
+      use(layer, (s) =>
+        s.send({ host: "127.0.0.1", port, username: "me", password: "secret" }, MAIL),
+      ),
+    ).rejects.toMatchObject({ _tag: "SmtpConnectFailed" });
+  });
+
+  it("fails with AttachmentNotFound when an attachment file is missing", async () => {
+    const layer = smtpLayer();
+    const { port } = await startCapturingServer();
+    await expect(
+      use(layer, (s) =>
+        s.send(
+          { host: "127.0.0.1", port, username: "me", password: "secret" },
+          {
+            ...MAIL,
+            attachments: [{ filename: "ghost.pdf", path: join(tempDir(), "ghost.pdf") }],
+          },
+        ),
+      ),
+    ).rejects.toMatchObject({ _tag: "AttachmentNotFound" });
+  });
+});
+
+describe("SmtpService getCredentials (Seam A)", () => {
+  it("resolves the stored credential of a saved profile", async () => {
+    const layer = smtpLayer();
+    const created = await use(layer, (s) => s.create(GMAIL));
+    const credentials = await use(layer, (s) => s.getCredentials(created.id));
+    expect(credentials).toEqual({
+      host: GMAIL.host,
+      port: GMAIL.port,
+      username: GMAIL.username,
+      password: GMAIL.password,
+    });
+  });
+
+  it("fails with SmtpProfileNotFound for an unknown id", async () => {
+    const layer = smtpLayer();
+    await expect(use(layer, (s) => s.getCredentials("no-such-id"))).rejects.toMatchObject({
       _tag: "SmtpProfileNotFound",
     });
   });

@@ -272,9 +272,7 @@ type ProfileTestState =
   | { kind: "error"; profileId: string; message: string };
 
 /** The profile form, shared by the create and edit dialogs. */
-type ProfileFormState =
-  | { kind: "create" }
-  | { kind: "edit"; profile: SmtpProfile };
+type ProfileFormState = { kind: "create" } | { kind: "edit"; profile: SmtpProfile };
 
 function SmtpProfilesSection() {
   const queryClient = useQueryClient();
@@ -474,11 +472,7 @@ function SmtpProfilesSection() {
                     >
                       <Pencil className="size-4" /> Edit
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setConfirmProfile(profile)}
-                    >
+                    <Button size="sm" variant="outline" onClick={() => setConfirmProfile(profile)}>
                       <Trash2 className="size-4" /> Delete
                     </Button>
                   </div>
@@ -579,9 +573,7 @@ function ProfileFormDialog({
   const [name, setName] = useState(form.kind === "create" ? "" : form.profile.name);
   const [host, setHost] = useState(form.kind === "create" ? "" : form.profile.host);
   const [port, setPort] = useState(form.kind === "create" ? 587 : form.profile.port);
-  const [username, setUsername] = useState(
-    form.kind === "create" ? "" : form.profile.username,
-  );
+  const [username, setUsername] = useState(form.kind === "create" ? "" : form.profile.username);
   // The stored password never reaches the renderer: the edit dialog starts
   // blank and a blank field means "keep the stored password".
   const [passwordInput, setPasswordInput] = useState("");
@@ -635,9 +627,7 @@ function ProfileFormDialog({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              SMTP host
-            </span>
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">SMTP host</span>
             <input
               type="text"
               value={host}
