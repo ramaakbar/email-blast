@@ -45,6 +45,75 @@ export const SettingsGetPayload = Schema.String;
 export const SettingsSetPayload = Schema.Tuple([Schema.String, Schema.String]);
 export type SettingsSetPayload = Schema.Schema.Type<typeof SettingsSetPayload>;
 
+// ---- Import domain (ticket 10) ----
+
+/**
+ * The role a parsed Excel column plays for the imported recipient:
+ * the address fields, a pass-through metadata bag entry, or ignored.
+ */
+export const ColumnRole = Schema.Literals(["name", "email", "phone", "metadata", "skip"]);
+export type ColumnRole = Schema.Schema.Type<typeof ColumnRole>;
+
+/** One parsed Excel row: column header -> cell value, every value a string. */
+export const ExcelRow = Schema.Record(Schema.String, Schema.String);
+export type ExcelRow = Schema.Schema.Type<typeof ExcelRow>;
+
+/** Excel column header -> role. The user's mapping overrides the suggestion. */
+export const ColumnMapping = Schema.Record(Schema.String, ColumnRole);
+export type ColumnMapping = Schema.Schema.Type<typeof ColumnMapping>;
+
+/**
+ * A recipient as produced by the import pipeline. No id yet - ids and the
+ * import batch are assigned at commit, not at parse time.
+ */
+export const ImportRecipient = Schema.Struct({
+  name: Schema.String,
+  email: Schema.Union([Schema.Null, Schema.String]),
+  phone: Schema.Union([Schema.Null, Schema.String]),
+  metadata: Schema.Record(Schema.String, Schema.String),
+});
+export type ImportRecipient = Schema.Schema.Type<typeof ImportRecipient>;
+
+/**
+ * `import.read` response: the parsed sheet (headers + every row), the
+ * recipients the auto-suggestion maps, the suggestion itself (the UI shows
+ * it pre-selected and lets the user override), and the parse report.
+ */
+export const ImportPreview = Schema.Struct({
+  columns: Schema.Array(Schema.String),
+  rows: Schema.Array(ExcelRow),
+  recipients: Schema.Array(ImportRecipient),
+  suggestedMapping: ColumnMapping,
+  skippedDuplicates: Schema.Number,
+  warnings: Schema.Array(Schema.String),
+});
+export type ImportPreview = Schema.Schema.Type<typeof ImportPreview>;
+
+/** `import.read` payload: the absolute path of the `.xlsx`/`.xls` file. */
+export const ImportReadPayload = Schema.String;
+
+/**
+ * `import.commit` payload: the parsed rows from the preview plus the final
+ * column mapping. The main process re-applies the mapping, dedupes against
+ * existing recipients, and persists - the renderer never constructs
+ * recipients itself.
+ */
+export const ImportCommitPayload = Schema.Struct({
+  rows: Schema.Array(ExcelRow),
+  columnMapping: ColumnMapping,
+});
+export type ImportCommitPayload = Schema.Schema.Type<typeof ImportCommitPayload>;
+
+/** `import.commit` response: what actually landed, what was skipped, and the batch id. */
+export const ImportCommitResponse = Schema.Struct({
+  imported: Schema.Number,
+  duplicatesSkipped: Schema.Number,
+  /** Rows dropped because their name was empty under the final mapping. */
+  rowsSkippedNoName: Schema.Number,
+  batchId: Schema.String,
+});
+export type ImportCommitResponse = Schema.Schema.Type<typeof ImportCommitResponse>;
+
 /**
  * The contextBridge-exposed API (`window.api`). Domains and methods are
  * added additively as later tickets land.
@@ -56,11 +125,21 @@ export interface Api {
     checkLibreOffice(): Promise<string | null>;
     /** Opens a native folder picker; the chosen path, or null when cancelled. */
     pickFolder(): Promise<string | null>;
+    /** Opens a native `.xlsx`/`.xls` picker; the chosen path, or null when cancelled. */
+    pickExcelFile(): Promise<string | null>;
+    /** The absolute path of a dropped File (the deprecated `File.path` is not available with the sandbox on). */
+    getPathForFile(file: File): string;
     getAppInfo(): Promise<GetAppInfoResponse>;
   };
   settings: {
     /** Raw setting value by key (persisted in SQLite), or null when unset. */
     get(key: string): Promise<string | null>;
     set(key: string, value: string): Promise<void>;
+  };
+  import: {
+    /** Parses an Excel file and returns the import preview (rows, mapping suggestion, report). */
+    read(excelPath: string): Promise<ImportPreview>;
+    /** Applies the column mapping, dedupes against existing recipients, and persists the batch. */
+    commit(payload: ImportCommitPayload): Promise<ImportCommitResponse>;
   };
 }

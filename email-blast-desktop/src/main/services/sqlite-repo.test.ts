@@ -82,4 +82,83 @@ describe("SqliteRepo (Seam A)", () => {
     expect(row.value).toBe("5000");
     db2.close();
   });
+
+  it("inserts recipients with their metadata bag and import batch, and lists existing emails", async () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    const layer = SqliteRepo.Live(db);
+
+    await use(layer, (r) =>
+      r.insertRecipients([
+        {
+          name: "Alice",
+          email: "alice@example.com",
+          phone: "0812",
+          metadata: { instansi: "Kampus A", no: "1" },
+          importBatch: "batch-1",
+        },
+        {
+          name: "Bob",
+          email: null,
+          phone: null,
+          metadata: {},
+          importBatch: "batch-1",
+        },
+        {
+          name: "Carol",
+          email: "CAROL@example.com",
+          phone: null,
+          metadata: {},
+          importBatch: "batch-2",
+        },
+      ]),
+    );
+
+    // Emails are lowercased on the way in, so the dedupe key is stable.
+    await expect(use(layer, (r) => r.listRecipientEmails())).resolves.toEqual(
+      new Set(["alice@example.com", "carol@example.com"]),
+    );
+
+    const alice = db
+      .prepare(
+        "SELECT id, name, email, phone, metadata, import_batch FROM recipients WHERE name = ?",
+      )
+      .get("Alice") as {
+      id: string;
+      name: string;
+      email: string;
+      phone: string;
+      metadata: string;
+      import_batch: string;
+    };
+    expect(alice.id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(alice.email).toBe("alice@example.com");
+    expect(alice.phone).toBe("0812");
+    expect(alice.metadata).toBe('{"instansi":"Kampus A","no":"1"}');
+    expect(alice.import_batch).toBe("batch-1");
+    db.close();
+  });
+
+  it("inserts nothing when given an empty list, and survives a reopen", async () => {
+    const dbPath = join(tempDir(), "test.db");
+    const db1 = openDatabase(dbPath);
+    const layer1 = SqliteRepo.Live(db1);
+
+    await use(layer1, (r) => r.insertRecipients([]));
+    const count = db1.prepare("SELECT COUNT(*) AS n FROM recipients").get() as { n: number };
+    expect(count.n).toBe(0);
+
+    await use(layer1, (r) =>
+      r.insertRecipients([
+        { name: "Zoe", email: "zoe@example.com", phone: null, metadata: {}, importBatch: "b" },
+      ]),
+    );
+    db1.close();
+
+    const db2 = openDatabase(dbPath);
+    const row = db2.prepare("SELECT import_batch FROM recipients WHERE name = ?").get("Zoe") as {
+      import_batch: string;
+    };
+    expect(row.import_batch).toBe("b");
+    db2.close();
+  });
 });

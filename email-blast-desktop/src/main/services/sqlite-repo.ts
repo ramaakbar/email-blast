@@ -106,9 +106,38 @@ export function openDatabase(dbPath: string): DatabaseSync {
   return db;
 }
 
+/**
+ * A recipient ready to be persisted: the fields from the import pipeline,
+ * without the id (assigned here) or the row-level defaults.
+ */
+export interface RecipientDraft {
+  readonly name: string;
+  readonly email: string | null;
+  readonly phone: string | null;
+  readonly metadata: Record<string, string>;
+  readonly importBatch: string;
+}
+
 export interface SqliteRepoShape {
   readonly getSetting: (key: string) => Effect.Effect<Option.Option<string>>;
   readonly setSetting: (key: string, value: string) => Effect.Effect<void>;
+  /**
+   * Every email currently in the recipients table, trimmed and lowercased -
+   * the dedupe key the import commit checks against.
+   */
+  readonly listRecipientEmails: () => Effect.Effect<Set<string>>;
+  /**
+   * Inserts a whole import batch in one transaction. Ids are assigned here
+   * and emails are normalized (trim + lowercase) so the dedupe key and the
+   * stored value can never drift apart.
+   */
+  readonly insertRecipients: (recipients: RecipientDraft[]) => Effect.Effect<void>;
+}
+
+function normalizeEmail(email: string | null): string | null {
+  if (email === null) return null;
+  const trimmed = email.trim();
+  return trimmed === "" ? null : trimmed.toLowerCase();
 }
 
 export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
@@ -123,6 +152,37 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
     setSetting: (key, value) =>
       Effect.sync(() => {
         db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+      }),
+    listRecipientEmails: () =>
+      Effect.sync(() => {
+        const rows = db
+          .prepare("SELECT email FROM recipients WHERE email IS NOT NULL AND email != ''")
+          .all() as { email: string }[];
+        return new Set(rows.map((row) => row.email.trim().toLowerCase()));
+      }),
+    insertRecipients: (recipients) =>
+      Effect.sync(() => {
+        if (recipients.length === 0) return;
+        const insert = db.prepare(
+          "INSERT INTO recipients (id, name, email, phone, metadata, import_batch) VALUES (?, ?, ?, ?, ?, ?)",
+        );
+        db.exec("BEGIN");
+        try {
+          for (const recipient of recipients) {
+            insert.run(
+              crypto.randomUUID(),
+              recipient.name,
+              normalizeEmail(recipient.email),
+              recipient.phone?.trim() === "" ? null : (recipient.phone?.trim() ?? null),
+              JSON.stringify(recipient.metadata),
+              recipient.importBatch,
+            );
+          }
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
       }),
   };
 }

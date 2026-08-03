@@ -16,9 +16,12 @@ export const IPC = {
   "system:ping": "system:ping",
   "system:check-libreoffice": "system:check-libreoffice",
   "system:pick-folder": "system:pick-folder",
+  "system:pick-excel-file": "system:pick-excel-file",
   "system:get-app-info": "system:get-app-info",
   "settings:get": "settings:get",
   "settings:set": "settings:set",
+  "import:read": "import:read",
+  "import:commit": "import:commit",
   "dev:api-version-check": "dev:api-version-check",
   "dev:api-version-report": "dev:api-version-report",
 } as const;

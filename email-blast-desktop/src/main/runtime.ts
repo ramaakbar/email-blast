@@ -2,10 +2,11 @@ import { Layer } from "effect";
 import { DatabaseSync } from "node:sqlite";
 import { AppInfo } from "./services/app-info";
 import type { DefaultPaths } from "./services/default-paths";
+import { ImportService } from "./services/import";
 import { Settings } from "./services/settings";
 import type { SqliteRepo } from "./services/sqlite-repo";
 
-export type AppServices = Settings | SqliteRepo | AppInfo;
+export type AppServices = Settings | SqliteRepo | ImportService | AppInfo;
 
 /**
  * Root Layer of the main process - the composition root the Effect
@@ -13,4 +14,4 @@ export type AppServices = Settings | SqliteRepo | AppInfo;
  * (SmtpSender, TemplatePipeline, JobRunner, ProgressHub).
  */
 export const rootLayer = (db: DatabaseSync, defaults: DefaultPaths): Layer.Layer<AppServices> =>
-  Layer.mergeAll(Settings.Live(db, defaults), AppInfo.Live);
+  Layer.mergeAll(Settings.Live(db, defaults), ImportService.Live(db), AppInfo.Live);

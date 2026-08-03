@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet, createRootRoute } from "@tanstack/react-router";
 import { FileText, History, Send, Settings, Upload, Users } from "lucide-react";
+import { Toaster } from "sonner";
 import { Button } from "@/components/ui/button";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { SETTING_KEYS } from "../../../shared/settings";
@@ -98,6 +99,7 @@ function RootLayout() {
       <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
+      <Toaster position="bottom-right" richColors />
     </div>
   );
 }

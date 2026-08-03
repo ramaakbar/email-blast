@@ -7,6 +7,10 @@ import { Effect, Layer, Option, Schema } from "effect";
 import {
   API_VERSION,
   GetAppInfoResponse,
+  ImportCommitPayload,
+  ImportCommitResponse,
+  ImportPreview,
+  ImportReadPayload,
   IPC,
   PingResponse,
   SettingsGetPayload,
@@ -16,6 +20,7 @@ import { decodePayload, registerWindowHandler } from "./ipc";
 import { rootLayer, type AppServices } from "./runtime";
 import { AppInfo } from "./services/app-info";
 import { defaultPathsForHome } from "./services/default-paths";
+import { ImportService } from "./services/import";
 import { findLibreOffice } from "./services/libreoffice";
 import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
@@ -124,6 +129,15 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
   });
 
+  registerWindowHandler(IPC["system:pick-excel-file"], () => {
+    return dialog
+      .showOpenDialog({
+        properties: ["openFile"],
+        filters: [{ name: "Excel", extensions: ["xlsx", "xls"] }],
+      })
+      .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+  });
+
   registerWindowHandler(IPC["system:get-app-info"], () => {
     return run(
       Effect.gen(function* () {
@@ -149,6 +163,26 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       Effect.gen(function* () {
         const repo = yield* SqliteRepo;
         yield* repo.setSetting(key, value);
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["import:read"], (payload) => {
+    const excelPath = decodePayload(ImportReadPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* ImportService;
+        return Schema.encodeSync(ImportPreview)(yield* service.read(excelPath));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["import:commit"], (payload) => {
+    const { rows, columnMapping } = decodePayload(ImportCommitPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* ImportService;
+        return Schema.encodeSync(ImportCommitResponse)(yield* service.commit(rows, columnMapping));
       }),
     );
   });

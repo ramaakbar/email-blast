@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import { API_VERSION, IPC } from "../shared/ipc-channels";
 import type { Api } from "../shared/ipc";
 
@@ -11,11 +11,17 @@ const api: Api = {
     ping: () => ipcRenderer.invoke(IPC["system:ping"]),
     checkLibreOffice: () => ipcRenderer.invoke(IPC["system:check-libreoffice"]),
     pickFolder: () => ipcRenderer.invoke(IPC["system:pick-folder"]),
+    pickExcelFile: () => ipcRenderer.invoke(IPC["system:pick-excel-file"]),
+    getPathForFile: (file) => webUtils.getPathForFile(file),
     getAppInfo: () => ipcRenderer.invoke(IPC["system:get-app-info"]),
   },
   settings: {
     get: (key) => ipcRenderer.invoke(IPC["settings:get"], key),
     set: (key, value) => ipcRenderer.invoke(IPC["settings:set"], key, value),
+  },
+  import: {
+    read: (excelPath) => ipcRenderer.invoke(IPC["import:read"], excelPath),
+    commit: (payload) => ipcRenderer.invoke(IPC["import:commit"], payload),
   },
 };
 
