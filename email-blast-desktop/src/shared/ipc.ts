@@ -240,6 +240,93 @@ export const ScanSlotsResponse = Schema.Struct({
 });
 export type ScanSlotsResponse = Schema.Schema.Type<typeof ScanSlotsResponse>;
 
+// ---- Generate domain (ticket 13) ----
+
+/** The lifecycle of a generate job (mirrors the generate_jobs table CHECK). */
+export const GenerateJobStatus = Schema.Literals([
+  "pending",
+  "generating",
+  "generated",
+  "cancelled",
+]);
+export type GenerateJobStatus = Schema.Schema.Type<typeof GenerateJobStatus>;
+
+/** The per-recipient outcome of a generate job (mirrors the join table CHECK). */
+export const GenerateRecipientStatus = Schema.Literals(["pending", "generated", "failed"]);
+export type GenerateRecipientStatus = Schema.Schema.Type<typeof GenerateRecipientStatus>;
+
+/**
+ * One recipient's outcome inside a generate job, joined with the name the
+ * job started with (so a recipient deleted later still shows who the row
+ * belonged to).
+ */
+export const GenerateJobRecipient = Schema.Struct({
+  recipientId: Schema.String,
+  recipientName: Schema.String,
+  status: GenerateRecipientStatus,
+  outputPath: Schema.Union([Schema.Null, Schema.String]),
+  errorMessage: Schema.Union([Schema.Null, Schema.String]),
+});
+export type GenerateJobRecipient = Schema.Schema.Type<typeof GenerateJobRecipient>;
+
+/**
+ * A generate job as returned to the renderer: the job row plus every
+ * per-recipient outcome, so one snapshot renders the whole status screen.
+ */
+export const GenerateJob = Schema.Struct({
+  id: Schema.String,
+  templateId: Schema.String,
+  templateName: Schema.String,
+  status: GenerateJobStatus,
+  total: Schema.Number,
+  createdAt: Schema.String,
+  completedAt: Schema.Union([Schema.Null, Schema.String]),
+  recipients: Schema.Array(GenerateJobRecipient),
+});
+export type GenerateJob = Schema.Schema.Type<typeof GenerateJob>;
+
+/** `generate.start` payload: the template plus the recipient ids, in job order. */
+export const GenerateStartPayload = Schema.Struct({
+  templateId: Schema.String,
+  recipientIds: Schema.Array(Schema.String),
+});
+export type GenerateStartPayload = Schema.Schema.Type<typeof GenerateStartPayload>;
+
+/**
+ * `generate-progress` event: one per recipient outcome, a delta the
+ * renderer applies to its running state (SQLite stays the source of truth).
+ */
+export const GenerateProgressEvent = Schema.Struct({
+  jobId: Schema.String,
+  current: Schema.Number,
+  total: Schema.Number,
+  status: Schema.Literals(["generated", "failed"]),
+  recipientId: Schema.String,
+  error: Schema.Union([Schema.Null, Schema.String]),
+});
+export type GenerateProgressEvent = Schema.Schema.Type<typeof GenerateProgressEvent>;
+
+/** `generate.getRecipientPdf` payload: which job, which recipient. */
+export const GeneratePdfPayload = Schema.Struct({
+  jobId: Schema.String,
+  recipientId: Schema.String,
+});
+export type GeneratePdfPayload = Schema.Schema.Type<typeof GeneratePdfPayload>;
+
+/** `generate.getRecipientPdf` response: the PDF bytes for the spot-check preview. */
+export const GeneratePdfResponse = Schema.Struct({
+  fileName: Schema.String,
+  dataBase64: Schema.String,
+});
+export type GeneratePdfResponse = Schema.Schema.Type<typeof GeneratePdfResponse>;
+
+/** `recipients.listAll` payload: the same filters as `list`, without pagination. */
+export const RecipientListAllPayload = Schema.Struct({
+  search: Schema.Union([Schema.Null, Schema.String]),
+  importBatch: Schema.Union([Schema.Null, Schema.String]),
+});
+export type RecipientListAllPayload = Schema.Schema.Type<typeof RecipientListAllPayload>;
+
 /**
  * The contextBridge-exposed API (`window.api`). Domains and methods are
  * added additively as later tickets land.
@@ -282,6 +369,12 @@ export interface Api {
     delete(ids: string[]): Promise<RecipientDeleteResponse>;
     /** Every distinct import batch, newest first, with its size and stamp. */
     listBatches(): Promise<ImportBatch[]>;
+    /**
+     * Every recipient matching the search text and import-batch filter,
+     * unpaginated - the compose wizard's "select all matching" needs the
+     * full list so generation holds every selected row's metadata.
+     */
+    listAll(filter: RecipientListAllPayload): Promise<Recipient[]>;
   };
   templates: {
     /** Every registered template, newest first. */
@@ -299,5 +392,33 @@ export interface Api {
      * headers, and footers), in document order. Fails for non-DOCX files.
      */
     scanSlots(docxPath: string): Promise<ScanSlotsResponse>;
+  };
+  generate: {
+    /**
+     * Creates a pending generate job for the template and recipient ids.
+     * Nothing is produced yet - `runGenerate` does the work, so a job can
+     * be created and inspected before any file is touched.
+     */
+    startGenerate(payload: GenerateStartPayload): Promise<GenerateJob>;
+    /**
+     * Runs the job: fills and converts one PDF per recipient with live
+     * progress events. Resolves with the finished job; fails with a typed
+     * GenerateError for job-level failures (template missing, LibreOffice
+     * missing). Re-running a finished job is a no-op.
+     */
+    runGenerate(jobId: string): Promise<GenerateJob>;
+    /** The full job snapshot: status plus every per-recipient outcome. */
+    getGenerateStatus(jobId: string): Promise<GenerateJob | null>;
+    /**
+     * The generated PDF bytes of one recipient, for the spot-check
+     * preview; null when the recipient has no generated output.
+     */
+    getRecipientPdf(payload: GeneratePdfPayload): Promise<GeneratePdfResponse | null>;
+    /**
+     * Subscribes to per-recipient generate progress. Returns an
+     * unsubscribe function; events are deltas, the snapshot from
+     * `getGenerateStatus` stays the source of truth.
+     */
+    onGenerateProgress(cb: (event: GenerateProgressEvent) => void): () => void;
   };
 }

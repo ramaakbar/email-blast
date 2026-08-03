@@ -4,6 +4,7 @@ import type {
   ImportBatch,
   PaginatedRecipients,
   Recipient,
+  RecipientListAllPayload,
   RecipientListPayload,
 } from "../../shared/ipc";
 import { SqliteRepo, type SqliteRepoShape } from "./sqlite-repo";
@@ -23,6 +24,11 @@ export interface RecipientsServiceShape {
   readonly delete: (ids: readonly string[]) => Effect.Effect<number>;
   /** Every distinct import batch, newest first, with its stamp and size. */
   readonly listBatches: () => Effect.Effect<ImportBatch[]>;
+  /**
+   * Every recipient matching the search text and import-batch filter,
+   * unpaginated - the compose wizard's select-all (ticket 13).
+   */
+  readonly listAll: (filter: RecipientListAllPayload) => Effect.Effect<Recipient[]>;
 }
 
 export function makeRecipientsService(repo: SqliteRepoShape): RecipientsServiceShape {
@@ -35,6 +41,7 @@ export function makeRecipientsService(repo: SqliteRepoShape): RecipientsServiceS
     get: (id) => repo.getRecipient(id),
     delete: (ids) => repo.deleteRecipients(ids),
     listBatches: () => repo.listImportBatches(),
+    listAll: (filter) => repo.listAllRecipients(filter),
   };
 }
 

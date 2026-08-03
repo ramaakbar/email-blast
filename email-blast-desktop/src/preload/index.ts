@@ -29,6 +29,7 @@ const api: Api = {
     get: (id) => ipcRenderer.invoke(IPC["recipients:get"], id),
     delete: (ids) => ipcRenderer.invoke(IPC["recipients:delete"], ids),
     listBatches: () => ipcRenderer.invoke(IPC["recipients:list-batches"]),
+    listAll: (filter) => ipcRenderer.invoke(IPC["recipients:list-all"], filter),
   },
   templates: {
     list: () => ipcRenderer.invoke(IPC["templates:list"]),
@@ -37,6 +38,19 @@ const api: Api = {
     update: (payload) => ipcRenderer.invoke(IPC["templates:update"], payload),
     delete: (id) => ipcRenderer.invoke(IPC["templates:delete"], id),
     scanSlots: (docxPath) => ipcRenderer.invoke(IPC["templates:scan-slots"], docxPath),
+  },
+  generate: {
+    startGenerate: (payload) => ipcRenderer.invoke(IPC["generate:start"], payload),
+    runGenerate: (jobId) => ipcRenderer.invoke(IPC["generate:run"], jobId),
+    getGenerateStatus: (jobId) => ipcRenderer.invoke(IPC["generate:get-status"], jobId),
+    getRecipientPdf: (payload) => ipcRenderer.invoke(IPC["generate:get-recipient-pdf"], payload),
+    onGenerateProgress: (cb) => {
+      const listener = (_event: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload);
+      ipcRenderer.on(IPC["generate-progress"], listener);
+      return () => {
+        ipcRenderer.removeListener(IPC["generate-progress"], listener);
+      };
+    },
   },
 };
 

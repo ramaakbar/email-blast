@@ -1,6 +1,13 @@
 import { Context, Effect, Layer, Option } from "effect";
 import { DatabaseSync } from "node:sqlite";
-import type { ImportBatch, Recipient, RecipientListPayload, Template } from "../../shared/ipc";
+import type {
+  GenerateJobStatus,
+  GenerateRecipientStatus,
+  ImportBatch,
+  Recipient,
+  RecipientListPayload,
+  Template,
+} from "../../shared/ipc";
 
 /**
  * The SQLite database of the app. Owns the schema (spec decision 7, verbatim)
@@ -100,9 +107,15 @@ CREATE TABLE IF NOT EXISTS settings (
 /**
  * Opens (creating if absent) the database and applies the schema.
  * Idempotent - safe on every launch.
+ *
+ * Foreign keys are deliberately left unenforced: deleting a recipient or
+ * template keeps historical job rows referencing it, so past job outcomes
+ * survive (ticket 11 documented this against plain SQLite's default; the
+ * `node:sqlite` driver enforces FKs by default, so it is turned off here
+ * explicitly).
  */
 export function openDatabase(dbPath: string): DatabaseSync {
-  const db = new DatabaseSync(dbPath);
+  const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: false });
   db.exec(SCHEMA_SQL);
   return db;
 }
@@ -151,6 +164,15 @@ export interface SqliteRepoShape {
   readonly deleteRecipients: (ids: readonly string[]) => Effect.Effect<number>;
   /** Every distinct import batch, newest first, with its stamp and size. */
   readonly listImportBatches: () => Effect.Effect<ImportBatch[]>;
+  /**
+   * Every recipient matching the search text and import-batch filter,
+   * unpaginated - the compose wizard's select-all reads the full list so
+   * generation holds every selected row's metadata.
+   */
+  readonly listAllRecipients: (filter: {
+    readonly search: string | null;
+    readonly importBatch: string | null;
+  }) => Effect.Effect<Recipient[]>;
   /** Every registered template, newest first. Slots round-trip through JSON. */
   readonly listTemplates: () => Effect.Effect<Template[]>;
   /** A single template by id, or none when no such row exists. */
@@ -167,6 +189,50 @@ export interface SqliteRepoShape {
   ) => Effect.Effect<Option.Option<Template>>;
   /** Deletes a template and returns how many rows were removed. */
   readonly deleteTemplate: (id: string) => Effect.Effect<number>;
+  /** Inserts a generate job row and returns its assigned id. */
+  readonly insertGenerateJob: (templateId: string) => Effect.Effect<string>;
+  /** Inserts one pending recipient row per id, in the given order. */
+  readonly insertGenerateJobRecipients: (
+    jobId: string,
+    recipientIds: readonly string[],
+  ) => Effect.Effect<void>;
+  /**
+   * Moves a generate job through its lifecycle. `completedAt` is written
+   * when the job finishes; passing null clears it (e.g. back to pending
+   * after a job-level failure).
+   */
+  readonly setGenerateJobStatus: (
+    jobId: string,
+    status: GenerateJobStatus,
+    completedAt?: string | null,
+  ) => Effect.Effect<void>;
+  /**
+   * The full generate job: the job row plus every recipient outcome joined
+   * with the recipient's name (null after the recipient is deleted), in
+   * job order. None when the job id does not exist.
+   */
+  readonly getGenerateJob: (
+    jobId: string,
+  ) => Effect.Effect<Option.Option<GenerateJobWithRecipients>>;
+  /** Records one recipient's outcome inside a generate job. */
+  readonly setGenerateRecipientResult: (
+    jobId: string,
+    recipientId: string,
+    result: {
+      status: Extract<GenerateRecipientStatus, "generated" | "failed">;
+      outputPath: string | null;
+      errorMessage: string | null;
+    },
+  ) => Effect.Effect<void>;
+  /** The recipients with these ids, in the given order. */
+  readonly getRecipientsByIds: (ids: readonly string[]) => Effect.Effect<Recipient[]>;
+  /** One recipient row of a generate job, for the spot-check PDF read. */
+  readonly getGenerateRecipient: (
+    jobId: string,
+    recipientId: string,
+  ) => Effect.Effect<
+    Option.Option<{ status: "pending" | "generated" | "failed"; outputPath: string | null }>
+  >;
 }
 
 /**
@@ -186,6 +252,28 @@ export interface TemplatePatch {
   readonly name: string;
   readonly slots: readonly string[];
   readonly outputPattern: string;
+}
+
+/** A generate job row as stored, with the template name for display. */
+export interface GenerateJobWithRecipients {
+  readonly job: {
+    readonly id: string;
+    readonly templateId: string;
+    readonly templateName: string;
+    readonly status: GenerateJobStatus;
+    readonly createdAt: string;
+    readonly completedAt: string | null;
+  };
+  readonly recipients: readonly GenerateJobRecipientRow[];
+}
+
+/** One generate-job recipient row as stored, name joined for display. */
+export interface GenerateJobRecipientRow {
+  readonly recipientId: string;
+  readonly recipientName: string | null;
+  readonly status: GenerateRecipientStatus;
+  readonly outputPath: string | null;
+  readonly errorMessage: string | null;
 }
 
 function normalizeEmail(email: string | null): string | null {
@@ -353,6 +441,29 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
           )
           .all() as ImportBatch[];
       }),
+    listAllRecipients: ({ search, importBatch }) =>
+      Effect.sync(() => {
+        const clauses: string[] = [];
+        const params: string[] = [];
+        if (search !== null && search.trim() !== "") {
+          const pattern = `%${escapeLike(search.trim())}%`;
+          clauses.push(
+            "(name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\')",
+          );
+          params.push(pattern, pattern, pattern, pattern);
+        }
+        if (importBatch !== null) {
+          clauses.push("import_batch = ?");
+          params.push(importBatch);
+        }
+        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
+        const rows = db
+          .prepare(
+            `SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients${where} ORDER BY created_at DESC, name COLLATE NOCASE ASC, id ASC`,
+          )
+          .all(...params) as unknown as RecipientRow[];
+        return rows.map(toRecipient);
+      }),
     listTemplates: () =>
       Effect.sync(() => {
         const rows = db
@@ -408,6 +519,110 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
     deleteTemplate: (id) =>
       Effect.sync(() => {
         return Number(db.prepare("DELETE FROM templates WHERE id = ?").run(id).changes);
+      }),
+    insertGenerateJob: (templateId) =>
+      Effect.sync(() => {
+        const id = crypto.randomUUID();
+        db.prepare("INSERT INTO generate_jobs (id, template_id) VALUES (?, ?)").run(id, templateId);
+        return id;
+      }),
+    insertGenerateJobRecipients: (jobId, recipientIds) =>
+      Effect.sync(() => {
+        if (recipientIds.length === 0) return;
+        const insert = db.prepare(
+          "INSERT INTO generate_job_recipients (job_id, recipient_id) VALUES (?, ?)",
+        );
+        db.exec("BEGIN");
+        try {
+          for (const recipientId of recipientIds) insert.run(jobId, recipientId);
+          db.exec("COMMIT");
+        } catch (error) {
+          db.exec("ROLLBACK");
+          throw error;
+        }
+      }),
+    setGenerateJobStatus: (jobId, status, completedAt = null) =>
+      Effect.sync(() => {
+        db.prepare("UPDATE generate_jobs SET status = ?, completed_at = ? WHERE id = ?").run(
+          status,
+          completedAt,
+          jobId,
+        );
+      }),
+    getGenerateJob: (jobId) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            `SELECT gj.id, gj.template_id, COALESCE(t.name, '(deleted template)') AS template_name, gj.status, gj.created_at, gj.completed_at
+             FROM generate_jobs gj LEFT JOIN templates t ON t.id = gj.template_id WHERE gj.id = ?`,
+          )
+          .get(jobId) as
+          | {
+              id: string;
+              template_id: string;
+              template_name: string;
+              status: GenerateJobStatus;
+              created_at: string;
+              completed_at: string | null;
+            }
+          | undefined;
+        if (row === undefined) return Option.none();
+        // LEFT JOIN so a recipient deleted after the job started still shows
+        // its row (name falls back to "(deleted recipient)" in the service).
+        // Aliases are camelCase so the row keys match GenerateJobRecipientRow
+        // verbatim - a snake_case/camelCase mismatch here would silently
+        // null out every recipient name at runtime.
+        const recipients = db
+          .prepare(
+            `SELECT gjr.recipient_id AS recipientId, r.name AS recipientName, gjr.status, gjr.output_path AS outputPath, gjr.error_message AS errorMessage
+             FROM generate_job_recipients gjr
+             LEFT JOIN recipients r ON r.id = gjr.recipient_id
+             WHERE gjr.job_id = ? ORDER BY gjr.rowid`,
+          )
+          .all(jobId) as unknown as GenerateJobRecipientRow[];
+        return Option.some({
+          job: {
+            id: row.id,
+            templateId: row.template_id,
+            templateName: row.template_name,
+            status: row.status,
+            createdAt: row.created_at,
+            completedAt: row.completed_at,
+          },
+          recipients,
+        });
+      }),
+    setGenerateRecipientResult: (jobId, recipientId, result) =>
+      Effect.sync(() => {
+        db.prepare(
+          "UPDATE generate_job_recipients SET status = ?, output_path = ?, error_message = ? WHERE job_id = ? AND recipient_id = ?",
+        ).run(result.status, result.outputPath, result.errorMessage, jobId, recipientId);
+      }),
+    getRecipientsByIds: (ids) =>
+      Effect.sync(() => {
+        if (ids.length === 0) return [];
+        const placeholders = ids.map(() => "?").join(", ");
+        const rows = db
+          .prepare(
+            `SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients WHERE id IN (${placeholders})`,
+          )
+          .all(...ids) as unknown as RecipientRow[];
+        const byId = new Map(rows.map((row) => [row.id, toRecipient(row)]));
+        // Preserve the requested order - it is the job's processing order.
+        return ids.flatMap((id) => (byId.has(id) ? [byId.get(id) as Recipient] : []));
+      }),
+    getGenerateRecipient: (jobId, recipientId) =>
+      Effect.sync(() => {
+        const row = db
+          .prepare(
+            "SELECT status, output_path FROM generate_job_recipients WHERE job_id = ? AND recipient_id = ?",
+          )
+          .get(jobId, recipientId) as
+          | { status: "pending" | "generated" | "failed"; output_path: string | null }
+          | undefined;
+        return row === undefined
+          ? Option.none()
+          : Option.some({ status: row.status, outputPath: row.output_path });
       }),
   };
 }

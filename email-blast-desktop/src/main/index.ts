@@ -6,6 +6,10 @@ import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import { Effect, Layer, Option, Schema } from "effect";
 import {
   API_VERSION,
+  GenerateJob,
+  GeneratePdfPayload,
+  GeneratePdfResponse,
+  GenerateStartPayload,
   GetAppInfoResponse,
   ImportBatch,
   ImportCommitPayload,
@@ -15,8 +19,10 @@ import {
   IPC,
   PaginatedRecipients,
   PingResponse,
+  Recipient,
   RecipientDeletePayload,
   RecipientDeleteResponse,
+  RecipientListAllPayload,
   RecipientListPayload,
   ScanSlotsResponse,
   SettingsGetPayload,
@@ -31,8 +37,10 @@ import { decodePayload, registerWindowHandler } from "./ipc";
 import { rootLayer, type AppServices } from "./runtime";
 import { AppInfo } from "./services/app-info";
 import { defaultPathsForHome } from "./services/default-paths";
+import { GenerateJobService } from "./services/generate-jobs";
 import { ImportService } from "./services/import";
 import { findLibreOffice } from "./services/libreoffice";
+import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
 import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
@@ -253,6 +261,16 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
     );
   });
 
+  registerWindowHandler(IPC["recipients:list-all"], (payload) => {
+    const filter = decodePayload(RecipientListAllPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* RecipientsService;
+        return Schema.encodeSync(Schema.Array(Recipient))(yield* service.listAll(filter));
+      }),
+    );
+  });
+
   registerWindowHandler(IPC["templates:list"], () => {
     return run(
       Effect.gen(function* () {
@@ -313,6 +331,73 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       }),
     );
   });
+
+  registerWindowHandler(IPC["generate:start"], (payload) => {
+    const { templateId, recipientIds } = decodePayload(GenerateStartPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        return Schema.encodeSync(GenerateJob)(yield* service.start(templateId, recipientIds));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["generate:run"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        return Schema.encodeSync(GenerateJob)(yield* service.run(jobId));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["generate:get-status"], (payload) => {
+    const jobId = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        return Option.getOrNull(
+          yield* service
+            .getStatus(jobId)
+            .pipe(Effect.map(Option.map((job) => Schema.encodeSync(GenerateJob)(job)))),
+        );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["generate:get-recipient-pdf"], (payload) => {
+    const { jobId, recipientId } = decodePayload(GeneratePdfPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        return Option.getOrNull(
+          yield* service
+            .getRecipientPdf(jobId, recipientId)
+            .pipe(Effect.map(Option.map((pdf) => Schema.encodeSync(GeneratePdfResponse)(pdf)))),
+        );
+      }),
+    );
+  });
+}
+
+/**
+ * Forwards every job progress event to every open window. Subscribed once
+ * at boot; the hub is the only source of job events and windows come and
+ * go, so a fresh window picks up the stream from its next event onward
+ * (events are deltas - the snapshot API stays the source of truth).
+ */
+function forwardProgressToWindows(layer: Layer.Layer<AppServices>): void {
+  void Effect.runPromise(
+    Effect.gen(function* () {
+      const hub = yield* ProgressHub;
+      hub.subscribe((event) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send(IPC["generate-progress"], event);
+        }
+      });
+    }).pipe(Effect.provide(layer)),
+  );
 }
 
 // This method will be called when Electron has finished
@@ -347,6 +432,9 @@ app.whenReady().then(async () => {
   );
 
   registerIpcHandlers(layer);
+  // Job progress events flow hub -> every window; subscribed before the
+  // first window exists so no event is ever missed after windows appear.
+  forwardProgressToWindows(layer);
   // Dev-only: assert the preload's API_VERSION matches ours (stale-bundle guard).
   // Registered before window creation so it catches the first webContents too.
   if (is.dev) registerApiVersionAssertion();

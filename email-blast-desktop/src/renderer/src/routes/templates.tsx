@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FileText, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { ErrorBanner } from "@/components/error-banner";
+import { PatternPreview } from "@/components/pattern-preview";
+import { TemplateBadge } from "@/components/template-badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import type { Template, TemplateType } from "../../../shared/ipc";
@@ -30,48 +32,6 @@ function formatTimestamp(sqliteUtc: string): string {
 /** The base file name without its extension, e.g. "LOA_2026.docx" -> "LOA_2026". */
 function baseName(fileName: string): string {
   return fileName.replace(/\.[^.]+$/, "");
-}
-
-function TypeBadge({ type }: { type: TemplateType }) {
-  return type === "docx" ? (
-    <span className="rounded-full border border-sky-600/40 bg-sky-600/10 px-2 py-0.5 text-xs font-medium text-sky-700">
-      DOCX
-    </span>
-  ) : (
-    <span className="rounded-full border border-amber-600/40 bg-amber-600/10 px-2 py-0.5 text-xs font-medium text-amber-700">
-      Image
-    </span>
-  );
-}
-
-/**
- * The output pattern with every `{slot}` highlighted, so the user sees
- * exactly which slot fills which position. References to slots the
- * template does not declare render red.
- */
-function PatternPreview({ pattern, slots }: { pattern: string; slots: readonly string[] }) {
-  const parts: React.ReactNode[] = [];
-  let key = 0;
-  let last = 0;
-  for (const match of pattern.matchAll(/\{([^{}]+)\}/g)) {
-    const ref = match[1];
-    const start = match.index ?? 0;
-    if (start > last) parts.push(<span key={key++}>{pattern.slice(last, start)}</span>);
-    const known = slots.some((slot) => slot.trim() === ref);
-    parts.push(
-      <code
-        key={key++}
-        className={`rounded bg-muted px-1 font-mono text-xs ${known ? "text-primary" : "text-destructive"}`}
-      >
-        {"{"}
-        {ref}
-        {"}"}
-      </code>,
-    );
-    last = start + match[0].length;
-  }
-  if (last < pattern.length) parts.push(<span key={key++}>{pattern.slice(last)}</span>);
-  return <span className="font-mono text-sm">{parts}</span>;
 }
 
 /** The template form, shared by the create and edit dialogs. */
@@ -250,7 +210,7 @@ function TemplatesPage() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="truncate font-medium">{template.name}</h3>
-                    <TypeBadge type={template.type} />
+                    <TemplateBadge type={template.type} />
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {template.slots.length} slot{template.slots.length === 1 ? "" : "s"} ·{" "}
@@ -319,7 +279,7 @@ function DetailPanel({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="truncate text-lg font-semibold">{template.name}</h2>
-            <TypeBadge type={template.type} />
+            <TemplateBadge type={template.type} />
           </div>
           <p className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
             {template.filePath}
@@ -491,7 +451,7 @@ function TemplateFormDialog({
             </h2>
             <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="max-w-64 truncate font-mono">{fileLabel}</span>
-              <TypeBadge type={form.kind === "create" ? form.type : form.template.type} />
+              <TemplateBadge type={form.kind === "create" ? form.type : form.template.type} />
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onCancel} aria-label="Cancel">
