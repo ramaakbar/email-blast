@@ -5,13 +5,14 @@ import { mkdir } from "node:fs/promises";
 import fontkit from "@pdf-lib/fontkit";
 
 // ========= CONFIG =========
-const DEFAULT_TEMPLATE = process.env.CERT_TEMPLATE || "./templates/sertifikat2.png";
+const DEFAULT_TEMPLATE = process.env.CERT_TEMPLATE || "./templates/SERTIFIKAT_1.png";
 const DEFAULT_EXCEL = process.env.CERT_EXCEL || "names.xlsx";
 const OUTPUT_DIR = process.env.CERT_OUTPUT_DIR || "certificates";
 
 const NAME_Y = process.env.CERT_NAME_Y ? Number(process.env.CERT_NAME_Y) : 1200;
 const NAME_COLOR = rgb(0.15294118, 0.0627451, 0.04313725);
-const NAME_GREENCOLOR = rgb(0.643, 0, 0);
+const NAME_GREENCOLOR = rgb(0.09, 0.267, 0.224);
+
 const NAME_COLUMN = (process.env.CERT_NAME_COLUMN || "name").toLowerCase();
 // ==== UTILS ====
 type Recipient = { no: string; name: string };
@@ -94,20 +95,20 @@ async function generateCertificateFor(rec: Recipient, assets: Assets): Promise<U
   page.drawImage(bg, { x: 0, y: 0, width: w, height: h });
 
   // nomor
-  const nomorText = `${rec.no}/07/PST/WBI-IYM/VII/2026`;
-  page.drawText(nomorText, {
-    x: (w - poppinsFont.widthOfTextAtSize(nomorText, 120)) / 2,
-    y: 2850,
-    size: 120,
-    font: poppinsFont,
-    color: NAME_COLOR,
-  });
+  // const nomorText = `${rec.no}/12/BKS-IYM/VII/2026`;
+  // page.drawText(nomorText, {
+  //   x: (w - poppinsFont.widthOfTextAtSize(nomorText, 58)) / 2,
+  //   y: 880,
+  //   size: 65,
+  //   font: poppinsFont,
+  //   color: NAME_GREENCOLOR,
+  // });
 
   // nama
-  const nameSize = 350;
+  const nameSize = 140;
   page.drawText(rec.name, {
     x: (w - customFont.widthOfTextAtSize(rec.name, nameSize)) / 2,
-    y: 2200, // atau NAME_Y jika mau konfig
+    y: 715, // atau NAME_Y jika mau konfig
     size: nameSize,
     font: customFont,
     color: NAME_GREENCOLOR,
@@ -157,10 +158,10 @@ async function main() {
   const templateKind: "png" | "jpg" = ext === ".png" ? "png" : "jpg";
 
   const fontCustomBytes = await Bun.file(
-    resolvePath("./fonts/Montserrat/static/Montserrat-Bold.ttf"),
+    resolvePath("./fonts/TheSeasons/The Seasons.ttf"),
   ).arrayBuffer();
   const fontPoppinsBytes = await Bun.file(
-    resolvePath("./fonts/Poppins/Poppins-Bold.ttf"),
+    resolvePath("./fonts/Poppins/Poppins-Regular.ttf"),
   ).arrayBuffer();
 
   const assets: Assets = {
