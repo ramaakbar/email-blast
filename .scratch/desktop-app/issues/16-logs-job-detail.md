@@ -2,12 +2,54 @@
 
 **What to build:** The Logs screen end to end: a history of all send jobs (most recent first) with status badge, subject, template, sent/failed/skipped counts, timestamps, and duration, filterable by status and date range. Clicking a job opens `/logs/$jobId` with a summary header and a per-recipient table showing status, error messages, and timestamps. Failed recipients can be retried individually or all at once, opening the compose wizard pre-filled with the same recipients, template, message, and SMTP config. Paused jobs show "Paused - N of M sent" with a Resume button.
 
-**Blocked by:** 15 — Send pipeline, 22 - Drizzle migration, 23 - TanStack Table v9, 24 - Paraglide + Bahasa Indonesia
+**Blocked by:** 15 — Send pipeline, 22 - Drizzle migration, 23 - TanStack Table v9, 24 - Paraglide + Bahasa Indonesia (user decision 2026-08-04: build 16 on the current stack - raw sqlite-repo, TanStack Table v8, English strings; 22/23/24 port it later)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Logs table: most recent first; filters for status and date range work
-- [ ] Paused jobs show "Paused - N of M sent" with a prominent Resume button that resumes the send
-- [ ] Job detail (`/logs/$jobId`): summary header (subject, template, SMTP, timestamps) + per-recipient table with error messages; search/filter within the list
-- [ ] Retry per failed recipient and Retry All Failures → compose wizard pre-filled (failed recipients, same template, same message, same SMTP)
-- [ ] Seam A: `retryFailed` creates a new send job scoped to the failed recipients; logs list/detail filtering round-trip against a temp database
+- [x] Logs table: most recent first; filters for status and date range work
+- [x] Paused jobs show "Paused - N of M sent" with a prominent Resume button that resumes the send
+- [x] Job detail (`/logs/$jobId`): summary header (subject, template, SMTP, timestamps) + per-recipient table with error messages; search/filter within the list
+- [x] Retry per failed recipient and Retry All Failures → compose wizard pre-filled (failed recipients, same template, same message, same SMTP)
+- [x] Seam A: `retryFailed` creates a new send job scoped to the failed recipients; logs list/detail filtering round-trip against a temp database
+
+## Answer
+
+Implemented in `email-blast-desktop/`:
+
+- `src/shared/ipc.ts` - NEW `SendJobSummary` (the Logs-table row: status, subject, template id/name, sent/failed/skipped counts, total, cursor, timestamps) and `LogsListPayload` (optional status filter + inclusive UTC date bounds; the renderer converts the user's local calendar days). `SendJob` gained `templateId`/`templateName` and `SendJobRecipient` gained `recipientEmail` (both joined through the generate job / recipients tables at read time) - additive, no existing field changed. `Api.logs.list` is the only new method: the job detail reuses the existing `send.get-status` (additive contract - no new channel when the existing surface does the job), and there is no `logs.retryFailed` (see deviations)
+- `src/main/services/sqlite-repo.ts` - `listSendJobs`: every send job most recent first (`created_at DESC, rowid DESC` tiebreak) with per-recipient outcome counts and the template joined through the generate job, narrowed by status and date; the date bounds are compared against the full UTC creation stamp. `getSendJob` now joins the template name and the recipient email too
+- `src/main/services/send-jobs.ts` - `SendJobServiceShape.list(filters)` mapping the repo rows to summaries; `run` now reverts a just-resumed job (pending with a persisted cursor) to `paused` when the wind-down or one-active rejection hits it, so the Logs Resume (resume + run as two calls) can never orphan a job as `pending` with no way to run it again (a fresh wizard job stays pending for its "Try again")
+- `src/main/index.ts` + `src/preload/index.ts` - the `logs:list` handler decodes at the boundary and Schema-encodes the array; preload exposes `window.api.logs.list`
+- `src/renderer/src/routes/logs.tsx` - the Logs table (TanStack Table v8, same pattern as recipients): status badge, subject, template, sent/failed/skipped counts, started stamp, duration; status select + From/To date inputs (local calendar days, converted to UTC bounds via `localDayToUtcRange` so a job created just after local midnight is never silently dropped); paused rows show "Paused - N of M sent" (N = the delivered count) with a Resume button; row click navigates to `/logs/$jobId`; the send-progress and job-paused events invalidate the table live; empty states for "no jobs yet" and "no match"
+- `src/renderer/src/routes/logs.$jobId.tsx` - the job detail: back link, subject, status badge, counts, "Paused - N of M sent" + Resume for paused jobs, and a summary grid (template, SMTP identity incl. the inline `username@host:port` label, sender, started + duration); the per-recipient table (name, email, status badge, error message, sent-at, message id) with client-side search (name/email) and a status filter; failed rows get a per-row Retry button and the header a Retry All Failures (N) button
+- `src/renderer/src/lib/compose-prefill.ts` - the pre-fill built from the job detail: the failed recipients, the same template, message, sender, delay, and SMTP identity (profile id, or inline host/port/username - the password is deliberately absent, see deviations); `history-state.d.ts` types the router state (the router-documented module augmentation)
+- `src/renderer/src/routes/compose.tsx` - applies the pre-fill once on mount (recipients fetched by id, template, message, SMTP, delayMs - the settings-load skips when a pre-fill carries the job's pacing) and shows an info banner: "Retry pre-filled from Logs: N failed recipients, the same template, message, and SMTP" plus a re-enter-the-app-password hint for inline jobs. The wizard then runs its normal flow (regenerate at step 5, send at step 6), so the re-send creates a NEW job scoped to exactly those recipients and the original job's history stays untouched
+- `src/renderer/src/components/send-status-badge.tsx` + `src/renderer/src/lib/format.ts` + `src/renderer/src/lib/use-resume-send.ts` - shared status badge, timestamp/duration/date-bound helpers (recipients and templates now import `formatTimestamp` from here - the third copy was the consolidation point), and the resume+run pair with its failure handling, shared by the list and the detail screens
+- `scripts/logs-e2e.mjs` - the committed Seam B script (see verification)
+
+Verified end to end on 2026-08-04:
+
+- Seam A: 6 new vitest tests green (167 total). Repo: the list returns most recent first with counts, template join, and the profile-name-free summary shape; the filters narrow by status, by UTC date bounds (inclusive over the full stamp, including a bound inside a job's creation day), and combined; `getSendJob` joins the template and the recipient email and survives the recipient's deletion. Service: the retry round trip - a completed job with one failed recipient, then a re-send scoped to exactly that recipient with the same message and SMTP identity creates a NEW job (different id, one recipient, same subject/body/sender/override), runs to completion against the capture server, and the original job is untouched (still completed, the failure intact); the service list returns summaries with filters; the resume race - pause mid-run, resume, run rejected while the old loop winds down, the job reverts to `paused` (never orphaned as `pending`), and the same resume pair succeeds once the loop exits
+- Seam B (`scripts/logs-e2e.mjs`, packaged app, temp userData, real SMTP capture server): a first launch creates the schema (no DDL copy in the script), the seed inserts the two jobs, then the live UI is driven - the list shows both jobs with "Paused - 2 of 3 sent" + Resume; the status filter narrows to one row each; the date-range filter excludes the older job and shows the empty state; the job detail shows the summary header (subject, template LOA, `me@127.0.0.1:port (inline)` SMTP, duration) and the failed recipient's error; the per-row Retry opens the wizard pre-filled (notice banner, "1 recipient selected", the same subject, the inline host/username pre-filled with the password empty); Resume of the paused job delivers its pending recipient to the capture server and the detail completes to "3 sent · 0 failed · 0 skipped" with every row Sent. Zero renderer console errors
+- typecheck (node + web), oxlint, oxfmt, the full vitest suite, and `pnpm build` (electron-forge package) all green
+
+Code review (five-axis, parallel agents over the working-tree diff - CLAUDE.md compliance, bug scan, spec/history, prior-ticket patterns, code-comment contracts) found 10 real issues; all fixed and re-verified:
+
+- The Resume pair (resume + run as two IPC calls) could leave a job orphaned as `pending` when `runSend` hit the wind-down or one-active rejection - the service now reverts a just-resumed job to `paused` (new Seam A test; the wizard was already safe through its winding-down guard, Logs could not see it)
+- The date filter compared the UTC day of the creation stamp against the user's local calendar day - off-by-one for non-UTC users; the renderer now converts local days to UTC bounds and the query compares full stamps (repo test updated)
+- Em-dash "—" placeholder glyphs in 10 spots of the new screens violated the no-em-dash rule (the same regression ticket 11's review had fixed) - plain "-" now
+- `SendJobSummary.smtpProfileName` was dead weight with an unfulfillable "(deleted profile)" contract - removed from the schema and the query
+- `logs.detail` was a byte-for-byte duplicate of `send.get-status` - dropped, the detail screen reuses the existing channel
+- `formatTimestamp` was a third copy instead of the shared module - recipients and templates now import it
+- The resume+run pair was copy-pasted across the two new screens - extracted into `useResumeSend`
+- The E2E copied the schema DDL (silent-drift hazard) and its Retry click silently hit the header button - the schema now comes from a real first launch and the per-row button is clicked explicitly
+- Comment contracts corrected: the credential claims (the bridge never ECHOES a stored credential; it does carry the inline password at `startSend`), the "empty payload lists everything" claim (all three keys are required), the "email the job started with" claim (the join is at read time), and a false stability claim about the retry callback
+
+Deviations from the spec, all deliberate:
+
+- There is no `logs.retryFailed(jobId, recipientIds)` IPC method (decision-04 table): the ticket's own text specifies the retry opens the compose wizard pre-filled, so the flow is pre-fill + the wizard's normal `startSend` - which creates the new job scoped to the failed recipients (Seam A proves the property through that path, original job untouched). The completion-summary Retry Failures keeps ticket 15's same-job rewind; the two affordances deliberately differ. Ticket 15's "extend the call additively" expectation is superseded by this design
+- The spec's Logs screen text lists a template filter, but the ticket checklist and the IPC table only require status and date range - implemented per the ticket
+- The paused "N of M sent" uses the delivered count (sentCount), not the cursor: a paused job whose last attempts failed should not claim them as sent
+- The inline override's password is never pre-filled: the bridge never echoes a stored credential (ticket 15), so a retried inline job re-enters the app password at step 4 (the notice says so)
+- A job left `sending` by the quit latch shows no Resume affordance until ticket 17's boot converts it to paused - documented ticket-17 scope
+- UI strings are English; ticket 24 moves them into the Paraglide catalog
