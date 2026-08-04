@@ -2,7 +2,7 @@
 
 **What to build:** The app survives being closed mid-send. Window close or app quit during a running or paused job shows a uniform dialog on both platforms ("Send in progress - N of M sent. The job will pause and you can resume it later from Logs.") with [Quit & Pause] / [Keep Sending]; quitting pauses, never cancels. On launch, any job stuck in `running` (hard crash, power loss) is treated as `paused` - the persisted cursor is authoritative. Exactly one paused job produces a one-time launch banner; resume re-runs the SMTP pre-flight. Starting a new send while one is active is blocked with a message.
 
-**Blocked by:** 16 — Logs & job detail
+**Blocked by:** 16 — Logs & job detail, 25 - Effect codebase refactor
 
 **Status:** ready-for-agent
 
