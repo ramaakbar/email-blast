@@ -55,12 +55,18 @@ import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
 import { Settings } from "./services/settings";
 import { TemplatesService } from "./services/templates";
 
+// Forge's Vite plugin defines these at build time (bare identifiers, from
+// its getBuildDefine): the dev-server URL in `electron-forge start`,
+// `undefined` in packaged builds, plus the renderer's output name.
+declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
+declare const MAIN_WINDOW_VITE_NAME: string;
+
 // The only origins the app may ever display: the Vite dev server in dev,
 // the local packaged file in production. Everything else is a navigation
 // away from the app and gets blocked.
 const expectedOrigin =
-  is.dev && process.env["ELECTRON_RENDERER_URL"]
-    ? new URL(process.env["ELECTRON_RENDERER_URL"]).origin
+  is.dev && MAIN_WINDOW_VITE_DEV_SERVER_URL
+    ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin
     : "file://";
 
 function createWindow(): BrowserWindow {
@@ -73,7 +79,7 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(__dirname, "preload.js"),
       // Security baseline: sandbox on, contextIsolation on, nodeIntegration off,
       // preload as the only bridge, no remote content ever loaded.
       sandbox: true,
@@ -103,10 +109,10 @@ function createWindow(): BrowserWindow {
   });
 
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    void mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+  if (is.dev && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   } else {
-    void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    void mainWindow.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
   }
 
   return mainWindow;

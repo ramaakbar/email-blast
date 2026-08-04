@@ -1,10 +1,6 @@
 # email-blast-desktop
 
-An Electron application with React and TypeScript
-
-## Recommended IDE Setup
-
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
+An Electron application with React and TypeScript, built with [Electron Forge](https://www.electronforge.io/) (Vite plugin) and Vite 8.
 
 ## Project Setup
 
@@ -14,21 +10,30 @@ An Electron application with React and TypeScript
 $ pnpm install
 ```
 
-### Development
+### Development (dev loop)
 
 ```bash
 $ pnpm dev
 ```
 
-### Build
+### Build & package
 
 ```bash
-# For windows
-$ pnpm build:win
+$ pnpm package    # typecheck + unpacked app in out/
+$ pnpm make       # distributables (dmg + zip on macOS, per forge.config)
+```
 
-# For macOS
-$ pnpm build:mac
+### Test / lint
 
-# For Linux
-$ pnpm build:linux
+```bash
+$ pnpm test       # vitest (main + shared unit tests)
+$ pnpm typecheck  # tsc for node + web
+$ pnpm lint       # oxlint
+$ pnpm fmt        # oxfmt
+```
+
+### Packaged smoke E2E
+
+```bash
+$ pnpm package && node scripts/smoke-packaged.mjs
 ```
