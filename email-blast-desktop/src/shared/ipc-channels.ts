@@ -55,6 +55,7 @@ export const IPC = {
   "send:retry-failed": "send:retry-failed",
   "send-progress": "send-progress",
   "job-paused": "job-paused",
+  "logs:list": "logs:list",
   "dev:api-version-check": "dev:api-version-check",
   "dev:api-version-report": "dev:api-version-report",
 } as const;

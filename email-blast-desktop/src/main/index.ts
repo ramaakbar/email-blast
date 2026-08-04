@@ -17,6 +17,7 @@ import {
   ImportPreview,
   ImportReadPayload,
   IPC,
+  LogsListPayload,
   PaginatedRecipients,
   PingResponse,
   Recipient,
@@ -26,6 +27,7 @@ import {
   RecipientListPayload,
   ScanSlotsResponse,
   SendJob,
+  SendJobSummary,
   SendStartPayload,
   SettingsGetPayload,
   SettingsSetPayload,
@@ -543,6 +545,18 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       Effect.gen(function* () {
         const service = yield* SendJobService;
         return Schema.encodeSync(SendJob)(yield* service.retryFailed(jobId));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["logs:list"], (payload) => {
+    const { statusFilter, dateFrom, dateTo } = decodePayload(LogsListPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Schema.encodeSync(Schema.Array(SendJobSummary))(
+          yield* service.list({ statusFilter, dateFrom, dateTo }),
+        );
       }),
     );
   });

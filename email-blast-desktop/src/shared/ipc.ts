@@ -454,12 +454,15 @@ export const SendSmtpOverrideInfo = Schema.Struct({
 export type SendSmtpOverrideInfo = Schema.Schema.Type<typeof SendSmtpOverrideInfo>;
 
 /**
- * One recipient's outcome inside a send job, joined with the name the job
- * started with. `sent` carries the server message id, `failed` the error.
+ * One recipient's outcome inside a send job, joined with the name and
+ * email at read time (a recipient deleted after the job keeps its row,
+ * with the joined values null). `sent` carries the server message id,
+ * `failed` the error.
  */
 export const SendJobRecipient = Schema.Struct({
   recipientId: Schema.String,
   recipientName: Schema.String,
+  recipientEmail: Schema.Union([Schema.Null, Schema.String]),
   status: SendRecipientStatus,
   messageId: Schema.Union([Schema.Null, Schema.String]),
   errorMessage: Schema.Union([Schema.Null, Schema.String]),
@@ -480,6 +483,9 @@ export const SendJob = Schema.Struct({
   /** The profile name at send time; "(deleted profile)" when it was removed. */
   smtpProfileName: Schema.Union([Schema.Null, Schema.String]),
   smtpOverride: Schema.Union([Schema.Null, SendSmtpOverrideInfo]),
+  /** The template the job generated from (via its generate job), or null when that history is gone. */
+  templateId: Schema.Union([Schema.Null, Schema.String]),
+  templateName: Schema.Union([Schema.Null, Schema.String]),
   subject: Schema.String,
   bodyHtml: Schema.String,
   senderName: Schema.String,
@@ -494,6 +500,43 @@ export const SendJob = Schema.Struct({
   recipients: Schema.Array(SendJobRecipient),
 });
 export type SendJob = Schema.Schema.Type<typeof SendJob>;
+
+/**
+ * One row of the Logs table: the job header plus the per-recipient counts
+ * the list renders (sent/failed/skipped) and the template it generated
+ * from, joined through the generate job. `sentCount` + `total` give the
+ * "N of M sent" line for paused jobs.
+ */
+export const SendJobSummary = Schema.Struct({
+  id: Schema.String,
+  status: SendJobStatus,
+  subject: Schema.String,
+  templateId: Schema.Union([Schema.Null, Schema.String]),
+  templateName: Schema.Union([Schema.Null, Schema.String]),
+  sentCount: Schema.Number,
+  failedCount: Schema.Number,
+  skippedCount: Schema.Number,
+  total: Schema.Number,
+  cursorIndex: Schema.Number,
+  createdAt: Schema.String,
+  completedAt: Schema.Union([Schema.Null, Schema.String]),
+});
+export type SendJobSummary = Schema.Schema.Type<typeof SendJobSummary>;
+
+/**
+ * `logs.list` payload: an optional status filter and an inclusive date
+ * range over the job's creation stamp. The date bounds are UTC
+ * "YYYY-MM-DD HH:MM:SS" stamps - the renderer converts the user's local
+ * calendar days before calling, so "from 2026-08-04" means the local day,
+ * wherever the machine is. Pass null for any filter that should not
+ * narrow the list.
+ */
+export const LogsListPayload = Schema.Struct({
+  statusFilter: Schema.Union([Schema.Null, SendJobStatus]),
+  dateFrom: Schema.Union([Schema.Null, Schema.String]),
+  dateTo: Schema.Union([Schema.Null, Schema.String]),
+});
+export type LogsListPayload = Schema.Schema.Type<typeof LogsListPayload>;
 
 /**
  * `send-progress` event: one per recipient outcome, a delta the renderer
@@ -646,6 +689,13 @@ export interface Api {
      * credentials (the per-profile Test Connection in Settings).
      */
     testProfile(id: string): Promise<void>;
+  };
+  logs: {
+    /**
+     * Every send job, most recent first, with per-recipient counts -
+     * optionally narrowed by status and creation date. The Logs table.
+     */
+    list(payload: LogsListPayload): Promise<SendJobSummary[]>;
   };
   send: {
     /**

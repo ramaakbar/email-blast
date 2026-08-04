@@ -2,7 +2,14 @@ import { Context, Data, Effect, Latch, Layer, Option, Result } from "effect";
 import { existsSync } from "fs";
 import { basename } from "path";
 import type { DatabaseSync } from "node:sqlite";
-import type { Recipient, SendJob, SendJobRecipient, SendStartPayload } from "../../shared/ipc";
+import type {
+  Recipient,
+  SendJob,
+  SendJobRecipient,
+  SendJobStatus,
+  SendJobSummary,
+  SendStartPayload,
+} from "../../shared/ipc";
 import {
   parseRateLimitMs,
   RATE_LIMIT_MAX_MS,
@@ -22,7 +29,12 @@ import {
   type SmtpCredentials,
   type SmtpServiceShape,
 } from "./smtp";
-import { SqliteRepo, type SendJobWithRecipients, type SqliteRepoShape } from "./sqlite-repo";
+import {
+  SqliteRepo,
+  type SendJobSummaryRow,
+  type SendJobWithRecipients,
+  type SqliteRepoShape,
+} from "./sqlite-repo";
 import { Settings } from "./settings";
 
 /**
@@ -139,6 +151,16 @@ export interface SendJobServiceShape {
   readonly retryFailed: (
     jobId: string,
   ) => Effect.Effect<SendJob, SendJobNotFound | InvalidSendRequest>;
+  /**
+   * The Logs table: every send job, most recent first, with the
+   * per-recipient outcome counts - optionally narrowed by status and
+   * creation date.
+   */
+  readonly list: (filter: {
+    readonly statusFilter: SendJobStatus | null;
+    readonly dateFrom: string | null;
+    readonly dateTo: string | null;
+  }) => Effect.Effect<readonly SendJobSummary[]>;
 }
 
 /** The SQLite UTC stamp format, matching `datetime('now')`. */
@@ -175,6 +197,8 @@ export function toSendJob(loaded: SendJobWithRecipients): SendJob {
     smtpProfileName:
       job.smtpProfileId === null ? null : (job.smtpProfileName ?? "(deleted profile)"),
     smtpOverride,
+    templateId: job.templateId,
+    templateName: job.templateName,
     subject: job.subject,
     bodyHtml: job.bodyHtml,
     senderName: job.senderName,
@@ -188,6 +212,7 @@ export function toSendJob(loaded: SendJobWithRecipients): SendJob {
       (row): SendJobRecipient => ({
         recipientId: row.recipientId,
         recipientName: row.recipientName ?? "(deleted recipient)",
+        recipientEmail: row.recipientEmail,
         status: row.status,
         messageId: row.messageId,
         errorMessage: row.errorMessage,
@@ -195,6 +220,43 @@ export function toSendJob(loaded: SendJobWithRecipients): SendJob {
       }),
     ),
   };
+}
+
+/** The shared Logs-table row shape of a stored summary row. */
+export function toSendJobSummary(row: SendJobSummaryRow): SendJobSummary {
+  return {
+    id: row.id,
+    status: row.status,
+    subject: row.subject,
+    templateId: row.templateId,
+    templateName: row.templateName,
+    sentCount: row.sentCount,
+    failedCount: row.failedCount,
+    skippedCount: row.skippedCount,
+    total: row.totalCount,
+    cursorIndex: row.cursorIndex,
+    createdAt: row.createdAt,
+    completedAt: row.completedAt,
+  };
+}
+
+/**
+ * Reverts a job that was just resumed (status `pending` with a persisted
+ * cursor) back to `paused` when its run is rejected before it starts -
+ * the wind-down or one-active checks. Without the revert, the Logs
+ * Resume button (resume + run as two calls) could leave such a job
+ * `pending` with no path to ever run it again; a fresh job (cursor 0,
+ * created by the wizard's send) legitimately stays pending for its
+ * "Try again".
+ */
+function revertResumedJob(
+  repo: SqliteRepoShape,
+  loaded: SendJobWithRecipients,
+): Effect.Effect<void, never, never> {
+  if (loaded.job.status !== "pending" || loaded.job.cursorIndex <= 0) {
+    return Effect.void;
+  }
+  return repo.setSendJobStatus(loaded.job.id, "paused", null);
 }
 
 export function makeSendJobService(
@@ -545,6 +607,11 @@ export function makeSendJobService(
         // excluded so it can always be resumed.
         const anyActive = yield* repo.anySendJobActiveExcept(jobId);
         if (anyActive) {
+          // A just-resumed job falls back to paused instead of being
+          // orphaned as pending (the Logs Resume button has no other way
+          // to re-trigger it); a fresh wizard job stays pending for its
+          // "Try again".
+          yield* revertResumedJob(repo, loaded);
           return yield* Effect.fail(
             new InvalidSendRequest({
               message: "Another send is in progress or paused. Pause or finish it first.",
@@ -557,6 +624,7 @@ export function makeSendJobService(
         // seconds). Running again now would deliver the same cursor row
         // twice, so the in-memory control is the guard.
         if (active !== null) {
+          yield* revertResumedJob(repo, loaded);
           return yield* Effect.fail(
             new InvalidSendRequest({
               message: "This job is still pausing - try again in a moment.",
@@ -665,6 +733,9 @@ export function makeSendJobService(
         yield* repo.retryFailedSendJob(jobId);
         return yield* reloadJob(jobId);
       }),
+
+    list: (filter) =>
+      repo.listSendJobs(filter).pipe(Effect.map((rows) => rows.map(toSendJobSummary))),
   };
 }
 

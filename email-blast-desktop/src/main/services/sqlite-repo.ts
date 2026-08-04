@@ -293,6 +293,18 @@ export interface SqliteRepoShape {
    */
   readonly getSendJob: (jobId: string) => Effect.Effect<Option.Option<SendJobWithRecipients>>;
   /**
+   * The Logs table: every send job, most recent first, with the
+   * per-recipient counts and the template it generated from - narrowed by
+   * status and creation date (both optional). The date bounds are
+   * inclusive UTC stamps compared against the job's creation stamp; the
+   * renderer converts the user's local calendar days before calling.
+   */
+  readonly listSendJobs: (filter: {
+    readonly statusFilter: SendJobStatus | null;
+    readonly dateFrom: string | null;
+    readonly dateTo: string | null;
+  }) => Effect.Effect<SendJobSummaryRow[]>;
+  /**
    * Cancel, terminal: in ONE transaction the remaining `pending`
    * recipients become `skipped` and the job `cancelled` (with
    * completedAt). Sent/failed rows keep their outcomes.
@@ -408,7 +420,7 @@ export interface SendJobDraft {
   readonly totalCount: number;
 }
 
-/** A send job row as stored, with the profile name for display. */
+/** A send job row as stored, with the profile name and template joined for display. */
 export interface SendJobWithRecipients {
   readonly job: {
     readonly id: string;
@@ -417,6 +429,8 @@ export interface SendJobWithRecipients {
     readonly smtpProfileId: string | null;
     readonly smtpProfileName: string | null;
     readonly smtpOverrideJson: string | null;
+    readonly templateId: string | null;
+    readonly templateName: string | null;
     readonly subject: string;
     readonly bodyHtml: string;
     readonly senderName: string;
@@ -430,14 +444,31 @@ export interface SendJobWithRecipients {
   readonly recipients: readonly SendJobRecipientRow[];
 }
 
-/** One send-job recipient row as stored, name joined for display. */
+/** One send-job recipient row as stored, name and email joined for display. */
 export interface SendJobRecipientRow {
   readonly recipientId: string;
   readonly recipientName: string | null;
+  readonly recipientEmail: string | null;
   readonly status: SendRecipientStatus;
   readonly messageId: string | null;
   readonly errorMessage: string | null;
   readonly sentAt: string | null;
+}
+
+/** One Logs-table row: the job header plus the per-recipient outcome counts. */
+export interface SendJobSummaryRow {
+  readonly id: string;
+  readonly status: SendJobStatus;
+  readonly subject: string;
+  readonly templateId: string | null;
+  readonly templateName: string | null;
+  readonly sentCount: number;
+  readonly failedCount: number;
+  readonly skippedCount: number;
+  readonly totalCount: number;
+  readonly cursorIndex: number;
+  readonly createdAt: string;
+  readonly completedAt: string | null;
 }
 
 function normalizeEmail(email: string | null): string | null {
@@ -937,12 +968,16 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
           .prepare(
             `SELECT sj.id, sj.generate_job_id AS generateJobId, sj.status,
                     sj.smtp_profile_id AS smtpProfileId, sp.name AS smtpProfileName,
-                    sj.smtp_override AS smtpOverrideJson, sj.subject, sj.body_html AS bodyHtml,
+                    sj.smtp_override AS smtpOverrideJson,
+                    g.template_id AS templateId, t.name AS templateName,
+                    sj.subject, sj.body_html AS bodyHtml,
                     sj.sender_name AS senderName, sj.sender_address AS senderAddress,
                     sj.delay_ms AS delayMs, sj.cursor_index AS cursorIndex,
                     sj.total_count AS totalCount, sj.created_at AS createdAt, sj.completed_at AS completedAt
              FROM send_jobs sj
              LEFT JOIN smtp_profiles sp ON sp.id = sj.smtp_profile_id
+             LEFT JOIN generate_jobs g ON g.id = sj.generate_job_id
+             LEFT JOIN templates t ON t.id = g.template_id
              WHERE sj.id = ?`,
           )
           .get(jobId) as
@@ -953,6 +988,8 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
               smtpProfileId: string | null;
               smtpProfileName: string | null;
               smtpOverrideJson: string | null;
+              templateId: string | null;
+              templateName: string | null;
               subject: string;
               bodyHtml: string;
               senderName: string;
@@ -969,8 +1006,9 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
         // its row (name falls back to "(deleted recipient)" in the service).
         const recipients = db
           .prepare(
-            `SELECT sjr.recipient_id AS recipientId, r.name AS recipientName, sjr.status,
-                    sjr.message_id AS messageId, sjr.error_message AS errorMessage, sjr.sent_at AS sentAt
+            `SELECT sjr.recipient_id AS recipientId, r.name AS recipientName, r.email AS recipientEmail,
+                    sjr.status, sjr.message_id AS messageId, sjr.error_message AS errorMessage,
+                    sjr.sent_at AS sentAt
              FROM send_job_recipients sjr
              LEFT JOIN recipients r ON r.id = sjr.recipient_id
              WHERE sjr.job_id = ? ORDER BY sjr.rowid`,
@@ -984,6 +1022,8 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
             smtpProfileId: row.smtpProfileId,
             smtpProfileName: row.smtpProfileName,
             smtpOverrideJson: row.smtpOverrideJson,
+            templateId: row.templateId,
+            templateName: row.templateName,
             subject: row.subject,
             bodyHtml: row.bodyHtml,
             senderName: row.senderName,
@@ -996,6 +1036,41 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
           },
           recipients,
         });
+      }),
+    listSendJobs: (filter) =>
+      Effect.sync(() => {
+        // The date bounds are full UTC stamps bounding the user's local
+        // calendar days (the renderer converts); string comparison works
+        // because every stamp is the fixed-width "YYYY-MM-DD HH:MM:SS".
+        const rows = db
+          .prepare(
+            `SELECT sj.id, sj.status, sj.subject,
+                    g.template_id AS templateId, t.name AS templateName,
+                    (SELECT COUNT(*) FROM send_job_recipients sjr
+                     WHERE sjr.job_id = sj.id AND sjr.status = 'sent') AS sentCount,
+                    (SELECT COUNT(*) FROM send_job_recipients sjr
+                     WHERE sjr.job_id = sj.id AND sjr.status = 'failed') AS failedCount,
+                    (SELECT COUNT(*) FROM send_job_recipients sjr
+                     WHERE sjr.job_id = sj.id AND sjr.status = 'skipped') AS skippedCount,
+                    sj.total_count AS totalCount, sj.cursor_index AS cursorIndex,
+                    sj.created_at AS createdAt, sj.completed_at AS completedAt
+             FROM send_jobs sj
+             LEFT JOIN generate_jobs g ON g.id = sj.generate_job_id
+             LEFT JOIN templates t ON t.id = g.template_id
+             WHERE (? IS NULL OR sj.status = ?)
+               AND (? IS NULL OR sj.created_at >= ?)
+               AND (? IS NULL OR sj.created_at <= ?)
+             ORDER BY sj.created_at DESC, sj.rowid DESC`,
+          )
+          .all(
+            filter.statusFilter,
+            filter.statusFilter,
+            filter.dateFrom,
+            filter.dateFrom,
+            filter.dateTo,
+            filter.dateTo,
+          ) as unknown as SendJobSummaryRow[];
+        return rows;
       }),
     cancelSendJob: (jobId) =>
       Effect.sync(() => {

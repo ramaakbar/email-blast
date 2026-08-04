@@ -553,6 +553,38 @@ describe("SendJobService run (Seam A)", () => {
     );
   });
 
+  it("reverts a just-resumed job to paused when its run hits the wind-down, so the Logs Resume is never orphaned", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 1);
+        yield* svc.service.pause(job.id);
+        // The Logs Resume pair: resume flips paused -> pending, then the
+        // run is rejected because the old loop is still winding down.
+        yield* svc.service.resume(job.id);
+        const outcome = yield* svc.service.run(job.id).pipe(Effect.result);
+        expect(Result.isFailure(outcome)).toBe(true);
+        if (Result.isFailure(outcome)) {
+          expect(outcome.failure.message).toMatch(/still pausing/i);
+        }
+        // The revert: the job is paused again (Resume still available),
+        // never left pending with no way to run it.
+        const after = yield* svc.service.getStatus(job.id);
+        expect(after.pipe(Option.map((j) => j.status))).toEqual(Option.some("paused"));
+        yield* pumpUntilExit(fiber);
+        // Once the old loop has exited, the same resume pair works and
+        // the job completes from the cursor.
+        yield* svc.service.resume(job.id);
+        const rerun = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 3);
+        const done = yield* pumpUntilExit(rerun);
+        expect(done.status).toBe("completed");
+      }),
+    );
+  });
+
   it("fails fast on the SMTP pre-flight and leaves the job pending", async () => {
     const svc = await makeSvc();
     const port = await closedPort();
@@ -1134,5 +1166,135 @@ describe("SendJobService start validation (Seam A)", () => {
     }
     const missing = await Effect.runPromise(svc.service.getStatus("nope"));
     expect(Option.isNone(missing)).toBe(true);
+  });
+});
+
+describe("SendJobService logs (ticket 16)", () => {
+  it("retries failures by creating a NEW job scoped to the failed recipients, leaving the original untouched", async () => {
+    const svc = await makeSvc();
+    const andi = svc.recipientIds[2];
+    // Andi has no confirmed attachment: the send fails her immediately
+    // (deterministic, no retries) and the batch completes with 1 failed.
+    svc.db
+      .prepare("DELETE FROM generate_job_recipients WHERE job_id = ? AND recipient_id = ?")
+      .run(svc.generateJobId, andi);
+    const job = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    const done = await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 2);
+        return yield* pumpUntilExit(fiber);
+      }),
+    );
+    expect(done.status).toBe("completed");
+    const failed = done.recipients.filter((r) => r.status === "failed");
+    expect(failed.map((r) => r.recipientId)).toEqual([andi]);
+    expect(failed[0].errorMessage).toContain("No confirmed generated attachment");
+
+    // The Logs retry re-sends the failures through the wizard pre-fill:
+    // the failed recipients, the same message, the same SMTP identity,
+    // and a fresh generate for the retried set (step 5 regenerates).
+    // The send then creates a NEW job scoped to exactly those recipients
+    // - the original job keeps its history untouched.
+    const { templateId } = svc.db
+      .prepare("SELECT template_id AS templateId FROM generate_jobs WHERE id = ?")
+      .get(svc.generateJobId) as { templateId: string };
+    const retryGenerateJobId = Effect.runSync(svc.repo.insertGenerateJob(templateId));
+    Effect.runSync(svc.repo.insertGenerateJobRecipients(retryGenerateJobId, [andi]));
+    const retryAttachment = join(tempDir(), "retry-attach.pdf");
+    writeFileSync(retryAttachment, "%PDF-1.4 fake");
+    Effect.runSync(
+      svc.repo.setGenerateRecipientResult(retryGenerateJobId, andi, {
+        status: "generated",
+        outputPath: retryAttachment,
+        errorMessage: null,
+      }),
+    );
+    const retry = await Effect.runPromise(
+      svc.service.start({
+        generateJobId: retryGenerateJobId,
+        recipientIds: [andi],
+        smtpProfileId: null,
+        smtpOverride: { host: "127.0.0.1", port: svc.port, username: "me", password: "secret" },
+        subject: done.subject,
+        bodyHtml: done.bodyHtml,
+        senderName: done.senderName,
+        senderAddress: done.senderAddress,
+        delayMs: done.delayMs,
+      }),
+    );
+    expect(retry.id).not.toBe(job.id);
+    expect(retry).toMatchObject({
+      status: "pending",
+      total: 1,
+      subject: done.subject,
+      bodyHtml: done.bodyHtml,
+      senderName: done.senderName,
+      senderAddress: done.senderAddress,
+      smtpProfileId: null,
+      templateId,
+    });
+    expect(retry.recipients.map((r) => r.recipientId)).toEqual([andi]);
+
+    // The original job is untouched: still completed, Andi still failed.
+    const original = await jobStatus(svc, job.id);
+    expect(original.status).toBe("completed");
+    expect(original.recipients.find((r) => r.recipientId === andi)?.status).toBe("failed");
+    expect(original.recipients.filter((r) => r.status === "failed")).toHaveLength(1);
+
+    // The retry job runs to completion - exactly the failed recipient.
+    const retryDone = await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(retry.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 3);
+        return yield* pumpUntilExit(fiber);
+      }),
+    );
+    expect(retryDone.status).toBe("completed");
+    expect(retryDone.recipients.map((r) => r.status)).toEqual(["sent"]);
+    expect(svc.captured[2]).toContain("Subject: LOA for Andi Wijaya");
+  });
+
+  it("lists send jobs through the service, most recent first, with counts and filters", async () => {
+    const svc = await makeSvc();
+    const first = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    const second = await Effect.runPromise(
+      svc.service.start(startPayload(svc, { subject: "Second campaign" })),
+    );
+    // Run the second job to completion: 3 sent, so its counts are real.
+    await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(second.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 3);
+        return yield* pumpUntilExit(fiber);
+      }),
+    );
+
+    const rows = await Effect.runPromise(
+      svc.service.list({ statusFilter: null, dateFrom: null, dateTo: null }),
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      id: second.id,
+      status: "completed",
+      subject: "Second campaign",
+      sentCount: 3,
+      failedCount: 0,
+      skippedCount: 0,
+      total: 3,
+      templateName: "LOA",
+      completedAt: expect.any(String),
+    });
+    expect(rows[1]).toMatchObject({ id: first.id, status: "pending", total: 3 });
+
+    const completedOnly = await Effect.runPromise(
+      svc.service.list({ statusFilter: "completed", dateFrom: null, dateTo: null }),
+    );
+    expect(completedOnly.map((row) => row.id)).toEqual([second.id]);
+
+    const nothing = await Effect.runPromise(
+      svc.service.list({ statusFilter: "cancelled", dateFrom: null, dateTo: null }),
+    );
+    expect(nothing).toEqual([]);
   });
 });

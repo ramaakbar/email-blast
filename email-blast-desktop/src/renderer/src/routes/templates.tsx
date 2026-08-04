@@ -8,26 +8,13 @@ import { PatternPreview } from "@/components/pattern-preview";
 import { TemplateBadge } from "@/components/template-badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
+import { formatTimestamp } from "@/lib/format";
 import type { Template, TemplateType } from "../../../shared/ipc";
 import { templateTypeForFile, validateTemplate } from "../../../shared/template-validation";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
 });
-
-/**
- * SQLite stores `datetime('now')` as UTC "YYYY-MM-DD HH:MM:SS". JS parses
- * space-separated stamps as local time, so normalize to an ISO UTC string
- * first and let Intl render it in the user's timezone.
- */
-function formatTimestamp(sqliteUtc: string): string {
-  const date = new Date(`${sqliteUtc.replace(" ", "T")}Z`);
-  if (Number.isNaN(date.getTime())) return sqliteUtc;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
 
 /** The base file name without its extension, e.g. "LOA_2026.docx" -> "LOA_2026". */
 function baseName(fileName: string): string {

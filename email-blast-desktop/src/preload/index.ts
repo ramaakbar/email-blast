@@ -84,6 +84,9 @@ const api: Api = {
       };
     },
   },
+  logs: {
+    list: (payload) => ipcRenderer.invoke(IPC["logs:list"], payload),
+  },
 };
 
 if (process.contextIsolated) {

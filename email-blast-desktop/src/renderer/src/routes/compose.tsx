@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -8,6 +8,7 @@ import {
   ChevronRight,
   CircleStop,
   FileText,
+  Info,
   Loader2,
   Pause,
   Play,
@@ -169,6 +170,12 @@ function ComposePage() {
   const [smtp, setSmtp] = useState<SmtpFormState>(INITIAL_SMTP);
   const [send, setSend] = useState<SendState>({ kind: "idle" });
 
+  // The Logs retry pre-fill arrives through the router's location state
+  // (the job detail navigates here with it); a plain sidebar visit has
+  // none and the wizard starts empty.
+  const routerState = useRouterState({ select: (state) => state.location.state });
+  const prefill = routerState.composePrefill ?? null;
+
   const templatesQuery = useQuery({
     queryKey: ["templates", "list"],
     queryFn: () => window.api.templates.list(),
@@ -243,13 +250,60 @@ function ComposePage() {
   }, [selection, templateId, generate]);
 
   // Load the stored rate limit once; the step-4 slider writes it back
-  // live, so the gate and every slider agree.
+  // live, so the gate and every slider agree. A Logs retry pre-fill
+  // carries the original job's pacing instead.
   useEffect(() => {
+    if (prefill !== null) return;
     window.api.settings
       .get(SETTING_KEYS.rateLimitDelayMs)
       .then((raw) => setSmtp((prev) => ({ ...prev, delayMs: parseRateLimitMs(raw) })))
       .catch(() => undefined);
-  }, []);
+  }, [prefill]);
+
+  // The Logs retry pre-fill (ticket 16): the failed recipients, template,
+  // message, and SMTP identity of a finished job, applied once on mount.
+  // The wizard then runs its normal flow, and step 6's send creates a NEW
+  // job scoped to those recipients. The inline password is never carried
+  // (the bridge never echoes a stored credential), so the user re-enters
+  // it at step 4 - the notice below says so.
+  const prefillAppliedRef = useRef(false);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (prefill === null || prefillAppliedRef.current) return;
+    prefillAppliedRef.current = true;
+    const apply = async (): Promise<void> => {
+      const recipients = (
+        await Promise.all(prefill.recipientIds.map((id) => window.api.recipients.get(id)))
+      ).filter((recipient): recipient is Recipient => recipient !== null);
+      if (recipients.length > 0) {
+        setSelection(new Map(recipients.map((recipient) => [recipient.id, recipient])));
+      }
+      if (prefill.templateId !== null) setTemplateId(prefill.templateId);
+      setMessage(prefill.message);
+      setSmtp({
+        ...INITIAL_SMTP,
+        ...prefill.smtp,
+        password: "",
+        delayMs: prefill.delayMs,
+      });
+      const missing = prefill.recipientIds.length - recipients.length;
+      const parts = [
+        `Retry pre-filled from Logs: ${recipients.length} failed recipient${
+          recipients.length === 1 ? "" : "s"
+        }, the same template, message, and SMTP.`,
+      ];
+      if (prefill.smtp.mode === "inline") {
+        parts.push("Re-enter the app password to send again - passwords never leave this app.");
+      }
+      if (missing > 0) {
+        parts.push(
+          `${missing} previously failed recipient${missing === 1 ? " was" : "s were"} deleted.`,
+        );
+      }
+      setPrefillNotice(parts.join(" "));
+    };
+    void apply();
+  }, [prefill]);
 
   return (
     <div className="flex h-full flex-col">
@@ -265,6 +319,13 @@ function ComposePage() {
         onGoTo={setStep}
         done={stepDone({ selection, template, coverage, messageValid, smtpValid, generate })}
       />
+
+      {prefillNotice !== null && (
+        <div className="mx-6 mt-4 flex items-start gap-2 rounded-lg border border-sky-600/40 bg-sky-600/10 px-4 py-2.5 text-sm text-sky-900">
+          <Info className="mt-0.5 size-4 shrink-0" />
+          <span>{prefillNotice}</span>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 pb-4">
         {step === 1 && <RecipientsStep selection={selection} onSelectionChange={setSelection} />}
