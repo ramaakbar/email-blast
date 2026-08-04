@@ -88,7 +88,7 @@ A channel seam keeps WhatsApp sending reachable for v2.
 
 ### 1. Stack and scaffold (ticket 01)
 
-- Electron 43 (template pins EOL 39; bump at scaffold), electron-vite 5.0.0 (plain Vite, not the Vite+ toolchain - it has no Electron story), electron-builder 26.15.3 for packaging.
+- Electron 43 (template pins EOL 39; bump at scaffold). Build toolchain (superseded by tickets 19/20): Electron Forge with its Vite plugin + Vite 8 - electron-vite and electron-builder are gone. `electron-forge start` is the dev loop; makers produce dmg/zip (macOS), Squirrel (Windows), deb/rpm (Linux).
 - React + TypeScript, TanStack Router / Query / Table, Tailwind CSS v4, shadcn/ui, pnpm.
 - oxlint + oxfmt as standalone packages; vitest for tests.
 - Security baseline: `sandbox: true` (remove the template's `sandbox: false`), contextIsolation on, nodeIntegration off, preload as the only bridge, no remote content.
@@ -359,7 +359,7 @@ This proves the IPC surface, the preload bridge, and the wizard wiring that Seam
 - Watch item: re-test `officecli view <file> pdf` only if an official PDF exporter plugin ships with a working `plugins install` (registry was down at research time).
 - Spot-check the `pf-*` / `sf-*` templates visually when wired into the app - same engine, but each template's table/header layout deserves one pass (verified template: `templates/ff.docx`).
 - Licensing: `@e965/xlsx` Apache-2.0, PizZip dual-licensed (MIT option used), LibreOffice MPL-2.0 (external binary), everything else MIT-family; no GPL dependencies.
-- Packaging gotchas recorded in ticket 01: `pnpm approve-builds` for the electron binary, Electron 39 → 43 bump, `sandbox: true`, ad-hoc identity for unsigned local macOS builds, `node:sqlite` must be externalized by electron-vite (default for `node:` builtins).
+- Packaging gotchas recorded in ticket 01: `pnpm approve-builds` for the electron binary, Electron 39 → 43 bump, `sandbox: true`, ad-hoc identity for unsigned local macOS builds. Forge-specific gotchas recorded in tickets 19/20: pnpm `nodeLinker: hoisted`, `blockExoticSubdeps: false` (@electron/rebuild pulls `@electron/node-gyp` from git), and build-script approval for the macOS packaging deps.
 - Gmail sends use App Passwords (regular account passwords are rejected by Gmail SMTP).
 - Generation performance (~0.22s/recipient) is not a bottleneck: the send rate gate (min 500ms) is 2x slower than the fastest generate throughput even before LibreOffice batch overhead.
 - The old Tauri-era spec at `archive/tauri-era/spec.md` remains the history record; this spec supersedes it.
