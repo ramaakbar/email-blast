@@ -1,7 +1,7 @@
 import { Context, Data, Effect, Latch, Layer, Option, Result } from "effect";
 import { existsSync } from "fs";
 import { basename } from "path";
-import type { DatabaseSync } from "node:sqlite";
+import type Database from "better-sqlite3";
 import type {
   Recipient,
   SendJob,
@@ -34,7 +34,7 @@ import {
   type SendJobSummaryRow,
   type SendJobWithRecipients,
   type SqliteRepoShape,
-} from "./sqlite-repo";
+} from "../db/repository";
 import { Settings } from "./settings";
 
 /**
@@ -748,7 +748,7 @@ export class SendJobService extends Context.Service<SendJobService, SendJobServi
   "SendJobService",
 ) {
   static readonly Live = (
-    db: DatabaseSync,
+    db: Database.Database,
     defaults: DefaultPaths,
   ): Layer.Layer<
     SendJobService | GenerateJobService | SmtpService | ProgressHub | Settings | SqliteRepo

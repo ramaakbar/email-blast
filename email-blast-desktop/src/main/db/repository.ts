@@ -1,5 +1,11 @@
 import { Context, Effect, Layer, Option } from "effect";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, lte, ne, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { existsSync } from "fs";
+import { join } from "path";
 import type {
   GenerateJobStatus,
   GenerateRecipientStatus,
@@ -10,115 +16,45 @@ import type {
   SendRecipientStatus,
   Template,
 } from "../../shared/ipc";
+import {
+  generateJobRecipients as gjr,
+  generateJobs as gj,
+  recipients as r,
+  sendJobRecipients as sjr,
+  sendJobs as sj,
+  settings as s,
+  smtpProfiles as sp,
+  templates as t,
+} from "./schema";
 
 /**
- * The SQLite database of the app. Owns the schema (spec decision 7, verbatim)
- * and the raw settings key/value store. The full schema is created idempotently
- * on every open; settings rows are seeded once (INSERT OR IGNORE), so user
- * values survive every later launch.
+ * The migrations folder applied on open (drizzle/): packaged builds get it
+ * via forge's extraResource (resources/drizzle), dev and tests run from the
+ * package root where it lives next to package.json.
  */
-const SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS recipients (
-    id          TEXT PRIMARY KEY,
-    name        TEXT NOT NULL,
-    email       TEXT,
-    phone       TEXT,
-    metadata    TEXT NOT NULL DEFAULT '{}',
-    import_batch TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_recipients_email ON recipients(email);
-CREATE INDEX IF NOT EXISTS idx_recipients_import_batch ON recipients(import_batch);
-
-CREATE TABLE IF NOT EXISTS templates (
-    id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    file_path       TEXT NOT NULL,
-    type            TEXT NOT NULL CHECK(type IN ('docx', 'image')),
-    slots           TEXT NOT NULL DEFAULT '[]',
-    output_pattern  TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS generate_jobs (
-    id              TEXT PRIMARY KEY,
-    template_id     TEXT NOT NULL REFERENCES templates(id),
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK(status IN ('pending','generating','generated','cancelled')),
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    completed_at    TEXT
-);
-
-CREATE TABLE IF NOT EXISTS generate_job_recipients (
-    job_id          TEXT NOT NULL REFERENCES generate_jobs(id),
-    recipient_id    TEXT NOT NULL REFERENCES recipients(id),
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK(status IN ('pending','generated','failed')),
-    output_path     TEXT,
-    error_message   TEXT,
-    PRIMARY KEY (job_id, recipient_id)
-);
-
-CREATE TABLE IF NOT EXISTS send_jobs (
-    id              TEXT PRIMARY KEY,
-    generate_job_id TEXT REFERENCES generate_jobs(id),
-    channel         TEXT NOT NULL DEFAULT 'email'
-                    CHECK(channel IN ('email', 'whatsapp')),
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK(status IN ('pending','sending','paused','completed','cancelled')),
-    smtp_profile_id TEXT REFERENCES smtp_profiles(id),
-    smtp_override   TEXT,
-    subject         TEXT NOT NULL,
-    body_html       TEXT NOT NULL,
-    sender_name     TEXT NOT NULL,
-    sender_address  TEXT NOT NULL,
-    delay_ms        INTEGER NOT NULL DEFAULT 1000,
-    cursor_index    INTEGER NOT NULL DEFAULT 0,
-    total_count     INTEGER NOT NULL DEFAULT 0,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
-    completed_at    TEXT
-);
-
-CREATE TABLE IF NOT EXISTS send_job_recipients (
-    job_id          TEXT NOT NULL REFERENCES send_jobs(id),
-    recipient_id    TEXT NOT NULL REFERENCES recipients(id),
-    status          TEXT NOT NULL DEFAULT 'pending'
-                    CHECK(status IN ('pending','sent','failed','skipped')),
-    message_id      TEXT,
-    error_message   TEXT,
-    sent_at         TEXT,
-    PRIMARY KEY (job_id, recipient_id)
-);
-
-CREATE TABLE IF NOT EXISTS smtp_profiles (
-    id              TEXT PRIMARY KEY,
-    name            TEXT NOT NULL,
-    host            TEXT NOT NULL,
-    port            INTEGER NOT NULL DEFAULT 587,
-    username        TEXT NOT NULL,
-    password        TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS settings (
-    key             TEXT PRIMARY KEY,
-    value           TEXT NOT NULL
-);
-`;
+function resolveMigrationsFolder(): string {
+  const packagedPath =
+    process.resourcesPath !== undefined ? join(process.resourcesPath, "drizzle") : null;
+  if (packagedPath !== null && existsSync(packagedPath)) return packagedPath;
+  return join(process.cwd(), "drizzle");
+}
 
 /**
- * Opens (creating if absent) the database and applies the schema.
- * Idempotent - safe on every launch.
+ * Opens (creating if absent) the database and applies pending migrations.
+ * The bootstrap migration is idempotent, so an existing database opens
+ * unmodified - tables, data, and format survive (ADR-0002, ticket 22).
  *
  * Foreign keys are deliberately left unenforced: deleting a recipient or
  * template keeps historical job rows referencing it, so past job outcomes
- * survive (ticket 11 documented this against plain SQLite's default; the
- * `node:sqlite` driver enforces FKs by default, so it is turned off here
- * explicitly).
+ * survive (ticket 11 documented this against plain SQLite's default).
+ * better-sqlite3 v13 turns FK enforcement ON by default (the inverse of
+ * raw SQLite and of the `node:sqlite` driver the old layer guarded
+ * against), so it is turned off explicitly here.
  */
-export function openDatabase(dbPath: string): DatabaseSync {
-  const db = new DatabaseSync(dbPath, { enableForeignKeyConstraints: false });
-  db.exec(SCHEMA_SQL);
+export function openDatabase(dbPath: string): Database.Database {
+  const db = new Database(dbPath);
+  db.exec("PRAGMA foreign_keys = OFF");
+  migrate(drizzle(db), { migrationsFolder: resolveMigrationsFolder() });
   return db;
 }
 
@@ -477,12 +413,29 @@ function normalizeEmail(email: string | null): string | null {
   return trimmed === "" ? null : trimmed.toLowerCase();
 }
 
+function normalizePhone(phone: string | null | undefined): string | null {
+  return phone?.trim() === "" ? null : (phone?.trim() ?? null);
+}
+
 /**
  * Escapes LIKE wildcards so user search text matches literally - a search
  * for "100%" finds only recipients whose field contains a literal "%".
  */
 function escapeLike(term: string): string {
   return term.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * The LIKE search over the recipient columns, case-insensitively over the
+ * serialized metadata bag too (custom field values and field names match).
+ * The ESCAPE clause keeps user search text literal; JSON punctuation can
+ * match too - a degenerate query like "," - the accepted tradeoff for
+ * keeping the search index-free.
+ */
+function recipientSearchClause(pattern: string): SQL {
+  // The double backslash survives the template literal as one backslash:
+  // ESCAPE '\' - a single `\'` here would collapse to an empty string.
+  return sql`(name LIKE ${pattern} ESCAPE '\\' OR email LIKE ${pattern} ESCAPE '\\' OR phone LIKE ${pattern} ESCAPE '\\' OR metadata LIKE ${pattern} ESCAPE '\\')`;
 }
 
 /** A recipients row as stored: the metadata bag still serialized. */
@@ -554,470 +507,478 @@ function toRecipient(row: RecipientRow): Recipient {
   };
 }
 
-export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
+/**
+ * The recipient row columns, shared by every recipients query. Aliased to
+ * the snake_case storage names so the result keys match RecipientRow
+ * verbatim - a camelCase key here would silently null out every
+ * import_batch and created_at at runtime.
+ */
+const recipientColumns = {
+  id: r.id,
+  name: r.name,
+  email: r.email,
+  phone: r.phone,
+  metadata: r.metadata,
+  import_batch: r.importBatch,
+  created_at: r.createdAt,
+} as const;
+
+/** The template row columns, shared by every templates query (same alias rule). */
+const templateColumns = {
+  id: t.id,
+  name: t.name,
+  file_path: t.filePath,
+  type: t.type,
+  slots: t.slots,
+  output_pattern: t.outputPattern,
+  created_at: t.createdAt,
+} as const;
+
+/** The smtp_profiles row columns, shared by every smtp-profiles query (same alias rule). */
+const smtpProfileColumns = {
+  id: sp.id,
+  name: sp.name,
+  host: sp.host,
+  port: sp.port,
+  username: sp.username,
+  password: sp.password,
+  created_at: sp.createdAt,
+} as const;
+
+export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
+  const dbx = drizzle(db);
   return {
     getSetting: (key) =>
       Effect.sync(() => {
-        const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-          | { value: string }
-          | undefined;
+        const row = dbx.select({ value: s.value }).from(s).where(eq(s.key, key)).get();
         return row === undefined ? Option.none() : Option.some(row.value);
       }),
     setSetting: (key, value) =>
       Effect.sync(() => {
-        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(key, value);
+        dbx
+          .insert(s)
+          .values({ key, value })
+          .onConflictDoUpdate({ target: s.key, set: { value } })
+          .run();
       }),
     listRecipientEmails: () =>
       Effect.sync(() => {
-        const rows = db
-          .prepare("SELECT email FROM recipients WHERE email IS NOT NULL AND email != ''")
-          .all() as { email: string }[];
-        return new Set(rows.map((row) => row.email.trim().toLowerCase()));
+        const rows = dbx
+          .select({ email: r.email })
+          .from(r)
+          .where(and(isNotNull(r.email), ne(r.email, "")))
+          .all();
+        return new Set(rows.map((row) => (row.email as string).trim().toLowerCase()));
       }),
     insertRecipients: (recipients) =>
       Effect.sync(() => {
         if (recipients.length === 0) return;
-        const insert = db.prepare(
-          "INSERT INTO recipients (id, name, email, phone, metadata, import_batch) VALUES (?, ?, ?, ?, ?, ?)",
-        );
-        db.exec("BEGIN");
-        try {
+        dbx.transaction((tx) => {
           for (const recipient of recipients) {
-            insert.run(
-              crypto.randomUUID(),
-              recipient.name,
-              normalizeEmail(recipient.email),
-              recipient.phone?.trim() === "" ? null : (recipient.phone?.trim() ?? null),
-              JSON.stringify(recipient.metadata),
-              recipient.importBatch,
-            );
+            tx.insert(r)
+              .values({
+                id: crypto.randomUUID(),
+                name: recipient.name,
+                email: normalizeEmail(recipient.email),
+                phone: normalizePhone(recipient.phone),
+                metadata: JSON.stringify(recipient.metadata),
+                importBatch: recipient.importBatch,
+              })
+              .run();
           }
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
+        });
       }),
     listRecipients: ({ search, importBatch, page, pageSize }) =>
       Effect.sync(() => {
-        const clauses: string[] = [];
-        const params: string[] = [];
+        const conditions: SQL[] = [];
         if (search !== null && search.trim() !== "") {
-          const pattern = `%${escapeLike(search.trim())}%`;
-          // The metadata bag is searched as its serialized JSON text: values
-          // match literally, and so do field names (searching "instansi"
-          // finds every row that has the field). JSON punctuation can match
-          // too - a degenerate query like "," - which is the accepted
-          // tradeoff for keeping the search index-free.
-          clauses.push(
-            "(name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\')",
-          );
-          params.push(pattern, pattern, pattern, pattern);
+          conditions.push(recipientSearchClause(`%${escapeLike(search.trim())}%`));
         }
         if (importBatch !== null) {
-          clauses.push("import_batch = ?");
-          params.push(importBatch);
+          conditions.push(eq(r.importBatch, importBatch));
         }
-        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
-
-        const total = (
-          db.prepare(`SELECT COUNT(*) AS n FROM recipients${where}`).get(...params) as {
-            n: number;
-          }
-        ).n;
+        const where = conditions.length === 0 ? undefined : and(...conditions);
+        const total = dbx.select({ n: count() }).from(r).where(where).get()?.n ?? 0;
         // Newest imports first; same-second rows tiebreak by name, then id.
-        const rows = db
-          .prepare(
-            `SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients${where} ORDER BY created_at DESC, name COLLATE NOCASE ASC, id ASC LIMIT ? OFFSET ?`,
-          )
-          .all(...params, pageSize, (page - 1) * pageSize) as unknown as RecipientRow[];
+        const rows = dbx
+          .select(recipientColumns)
+          .from(r)
+          .where(where)
+          .orderBy(desc(r.createdAt), sql`name COLLATE NOCASE ASC`, asc(r.id))
+          .limit(pageSize)
+          .offset((page - 1) * pageSize)
+          .all() as unknown as RecipientRow[];
         return { items: rows.map(toRecipient), total };
       }),
     getRecipient: (id) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            "SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients WHERE id = ?",
-          )
-          .get(id) as RecipientRow | undefined;
+        const row = dbx.select(recipientColumns).from(r).where(eq(r.id, id)).get() as
+          | RecipientRow
+          | undefined;
         return row === undefined ? Option.none() : Option.some(toRecipient(row));
       }),
     deleteRecipients: (ids) =>
       Effect.sync(() => {
         if (ids.length === 0) return 0;
-        const placeholders = ids.map(() => "?").join(", ");
-        const result = db
-          .prepare(`DELETE FROM recipients WHERE id IN (${placeholders})`)
-          .run(...ids);
-        return Number(result.changes);
+        return dbx
+          .delete(r)
+          .where(inArray(r.id, ids as string[]))
+          .run().changes;
       }),
     listImportBatches: () =>
       Effect.sync(() => {
-        return db
-          .prepare(
-            "SELECT import_batch AS id, MIN(created_at) AS createdAt, COUNT(*) AS count FROM recipients GROUP BY import_batch ORDER BY createdAt DESC, id",
-          )
-          .all() as ImportBatch[];
+        return dbx
+          .select({
+            id: r.importBatch,
+            createdAt: sql<string>`MIN(${r.createdAt})`,
+            count: count(),
+          })
+          .from(r)
+          .groupBy(r.importBatch)
+          .orderBy(desc(sql`MIN(${r.createdAt})`), asc(r.importBatch))
+          .all();
       }),
     listAllRecipients: ({ search, importBatch }) =>
       Effect.sync(() => {
-        const clauses: string[] = [];
-        const params: string[] = [];
+        const conditions: SQL[] = [];
         if (search !== null && search.trim() !== "") {
-          const pattern = `%${escapeLike(search.trim())}%`;
-          clauses.push(
-            "(name LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\' OR phone LIKE ? ESCAPE '\\' OR metadata LIKE ? ESCAPE '\\')",
-          );
-          params.push(pattern, pattern, pattern, pattern);
+          conditions.push(recipientSearchClause(`%${escapeLike(search.trim())}%`));
         }
         if (importBatch !== null) {
-          clauses.push("import_batch = ?");
-          params.push(importBatch);
+          conditions.push(eq(r.importBatch, importBatch));
         }
-        const where = clauses.length === 0 ? "" : ` WHERE ${clauses.join(" AND ")}`;
-        const rows = db
-          .prepare(
-            `SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients${where} ORDER BY created_at DESC, name COLLATE NOCASE ASC, id ASC`,
-          )
-          .all(...params) as unknown as RecipientRow[];
+        const where = conditions.length === 0 ? undefined : and(...conditions);
+        const rows = dbx
+          .select(recipientColumns)
+          .from(r)
+          .where(where)
+          .orderBy(desc(r.createdAt), sql`name COLLATE NOCASE ASC`, asc(r.id))
+          .all() as unknown as RecipientRow[];
         return rows.map(toRecipient);
       }),
     listTemplates: () =>
       Effect.sync(() => {
-        const rows = db
-          .prepare(
-            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates ORDER BY created_at DESC, name COLLATE NOCASE ASC, id ASC",
-          )
+        const rows = dbx
+          .select(templateColumns)
+          .from(t)
+          .orderBy(desc(t.createdAt), sql`name COLLATE NOCASE ASC`, asc(t.id))
           .all() as unknown as TemplateRow[];
         return rows.map(toTemplate);
       }),
     getTemplate: (id) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates WHERE id = ?",
-          )
-          .get(id) as TemplateRow | undefined;
+        const row = dbx.select(templateColumns).from(t).where(eq(t.id, id)).get() as
+          | TemplateRow
+          | undefined;
         return row === undefined ? Option.none() : Option.some(toTemplate(row));
       }),
     insertTemplate: (draft) =>
       Effect.sync(() => {
         const id = crypto.randomUUID();
-        db.prepare(
-          "INSERT INTO templates (id, name, file_path, type, slots, output_pattern) VALUES (?, ?, ?, ?, ?, ?)",
-        ).run(
-          id,
-          draft.name,
-          draft.filePath,
-          draft.type,
-          JSON.stringify(draft.slots),
-          draft.outputPattern,
-        );
-        const row = db
-          .prepare(
-            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates WHERE id = ?",
-          )
-          .get(id) as TemplateRow | undefined;
+        dbx
+          .insert(t)
+          .values({
+            id,
+            name: draft.name,
+            filePath: draft.filePath,
+            type: draft.type,
+            slots: JSON.stringify(draft.slots),
+            outputPattern: draft.outputPattern,
+          })
+          .run();
         // The insert above just landed, so the row must exist.
-        return toTemplate(row as TemplateRow);
+        const row = dbx.select(templateColumns).from(t).where(eq(t.id, id)).get() as TemplateRow;
+        return toTemplate(row);
       }),
     updateTemplate: (id, patch) =>
       Effect.sync(() => {
-        const result = db
-          .prepare("UPDATE templates SET name = ?, slots = ?, output_pattern = ? WHERE id = ?")
-          .run(patch.name, JSON.stringify(patch.slots), patch.outputPattern, id);
-        if (Number(result.changes) === 0) return Option.none();
-        const row = db
-          .prepare(
-            "SELECT id, name, file_path, type, slots, output_pattern, created_at FROM templates WHERE id = ?",
-          )
-          .get(id) as TemplateRow | undefined;
+        const result = dbx
+          .update(t)
+          .set({
+            name: patch.name,
+            slots: JSON.stringify(patch.slots),
+            outputPattern: patch.outputPattern,
+          })
+          .where(eq(t.id, id))
+          .run();
+        if (result.changes === 0) return Option.none();
+        const row = dbx.select(templateColumns).from(t).where(eq(t.id, id)).get() as
+          | TemplateRow
+          | undefined;
         return row === undefined ? Option.none() : Option.some(toTemplate(row));
       }),
     deleteTemplate: (id) =>
       Effect.sync(() => {
-        return Number(db.prepare("DELETE FROM templates WHERE id = ?").run(id).changes);
+        return dbx.delete(t).where(eq(t.id, id)).run().changes;
       }),
     insertGenerateJob: (templateId) =>
       Effect.sync(() => {
         const id = crypto.randomUUID();
-        db.prepare("INSERT INTO generate_jobs (id, template_id) VALUES (?, ?)").run(id, templateId);
+        dbx.insert(gj).values({ id, templateId }).run();
         return id;
       }),
     insertGenerateJobRecipients: (jobId, recipientIds) =>
       Effect.sync(() => {
         if (recipientIds.length === 0) return;
-        const insert = db.prepare(
-          "INSERT INTO generate_job_recipients (job_id, recipient_id) VALUES (?, ?)",
-        );
-        db.exec("BEGIN");
-        try {
-          for (const recipientId of recipientIds) insert.run(jobId, recipientId);
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
+        dbx.transaction((tx) => {
+          for (const recipientId of recipientIds) {
+            tx.insert(gjr).values({ jobId, recipientId }).run();
+          }
+        });
       }),
     setGenerateJobStatus: (jobId, status, completedAt = null) =>
       Effect.sync(() => {
-        db.prepare("UPDATE generate_jobs SET status = ?, completed_at = ? WHERE id = ?").run(
-          status,
-          completedAt,
-          jobId,
-        );
+        dbx.update(gj).set({ status, completedAt }).where(eq(gj.id, jobId)).run();
       }),
     getGenerateJob: (jobId) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            `SELECT gj.id, gj.template_id, COALESCE(t.name, '(deleted template)') AS template_name, gj.status, gj.created_at, gj.completed_at
-             FROM generate_jobs gj LEFT JOIN templates t ON t.id = gj.template_id WHERE gj.id = ?`,
-          )
-          .get(jobId) as
-          | {
-              id: string;
-              template_id: string;
-              template_name: string;
-              status: GenerateJobStatus;
-              created_at: string;
-              completed_at: string | null;
-            }
-          | undefined;
+        const row = dbx
+          .select({
+            id: gj.id,
+            templateId: gj.templateId,
+            templateName: sql<string>`COALESCE(${t.name}, '(deleted template)')`,
+            status: gj.status,
+            createdAt: gj.createdAt,
+            completedAt: gj.completedAt,
+          })
+          .from(gj)
+          .leftJoin(t, eq(t.id, gj.templateId))
+          .where(eq(gj.id, jobId))
+          .get();
         if (row === undefined) return Option.none();
         // LEFT JOIN so a recipient deleted after the job started still shows
         // its row (name falls back to "(deleted recipient)" in the service).
-        // Aliases are camelCase so the row keys match GenerateJobRecipientRow
-        // verbatim - a snake_case/camelCase mismatch here would silently
-        // null out every recipient name at runtime.
-        const recipients = db
-          .prepare(
-            `SELECT gjr.recipient_id AS recipientId, r.name AS recipientName, gjr.status, gjr.output_path AS outputPath, gjr.error_message AS errorMessage
-             FROM generate_job_recipients gjr
-             LEFT JOIN recipients r ON r.id = gjr.recipient_id
-             WHERE gjr.job_id = ? ORDER BY gjr.rowid`,
-          )
-          .all(jobId) as unknown as GenerateJobRecipientRow[];
+        // ORDER BY rowid keeps the insertion order - the job's processing order.
+        const recipients = dbx
+          .select({
+            recipientId: gjr.recipientId,
+            recipientName: r.name,
+            status: gjr.status,
+            outputPath: gjr.outputPath,
+            errorMessage: gjr.errorMessage,
+          })
+          .from(gjr)
+          .leftJoin(r, eq(r.id, gjr.recipientId))
+          .where(eq(gjr.jobId, jobId))
+          .orderBy(sql`${gjr}.rowid`)
+          .all() as unknown as GenerateJobRecipientRow[];
         return Option.some({
           job: {
             id: row.id,
-            templateId: row.template_id,
-            templateName: row.template_name,
+            templateId: row.templateId,
+            templateName: row.templateName,
             status: row.status,
-            createdAt: row.created_at,
-            completedAt: row.completed_at,
+            createdAt: row.createdAt,
+            completedAt: row.completedAt,
           },
           recipients,
         });
       }),
     setGenerateRecipientResult: (jobId, recipientId, result) =>
       Effect.sync(() => {
-        db.prepare(
-          "UPDATE generate_job_recipients SET status = ?, output_path = ?, error_message = ? WHERE job_id = ? AND recipient_id = ?",
-        ).run(result.status, result.outputPath, result.errorMessage, jobId, recipientId);
+        dbx
+          .update(gjr)
+          .set({
+            status: result.status,
+            outputPath: result.outputPath,
+            errorMessage: result.errorMessage,
+          })
+          .where(and(eq(gjr.jobId, jobId), eq(gjr.recipientId, recipientId)))
+          .run();
       }),
     getRecipientsByIds: (ids) =>
       Effect.sync(() => {
         if (ids.length === 0) return [];
-        const placeholders = ids.map(() => "?").join(", ");
-        const rows = db
-          .prepare(
-            `SELECT id, name, email, phone, metadata, import_batch, created_at FROM recipients WHERE id IN (${placeholders})`,
-          )
-          .all(...ids) as unknown as RecipientRow[];
+        const rows = dbx
+          .select(recipientColumns)
+          .from(r)
+          .where(inArray(r.id, ids as string[]))
+          .all() as unknown as RecipientRow[];
         const byId = new Map(rows.map((row) => [row.id, toRecipient(row)]));
         // Preserve the requested order - it is the job's processing order.
         return ids.flatMap((id) => (byId.has(id) ? [byId.get(id) as Recipient] : []));
       }),
     getGenerateRecipient: (jobId, recipientId) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            "SELECT status, output_path FROM generate_job_recipients WHERE job_id = ? AND recipient_id = ?",
-          )
-          .get(jobId, recipientId) as
-          | { status: "pending" | "generated" | "failed"; output_path: string | null }
+        const row = dbx
+          .select({ status: gjr.status, outputPath: gjr.outputPath })
+          .from(gjr)
+          .where(and(eq(gjr.jobId, jobId), eq(gjr.recipientId, recipientId)))
+          .get() as
+          | { status: "pending" | "generated" | "failed"; outputPath: string | null }
           | undefined;
         return row === undefined
           ? Option.none()
-          : Option.some({ status: row.status, outputPath: row.output_path });
+          : Option.some({ status: row.status, outputPath: row.outputPath });
       }),
     listSmtpProfiles: () =>
       Effect.sync(() => {
-        const rows = db
-          .prepare(
-            // rowid DESC breaks ties within the same creation second: the
-            // most recently added profile comes first.
-            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles ORDER BY created_at DESC, rowid DESC",
-          )
+        const rows = dbx
+          .select(smtpProfileColumns)
+          .from(sp)
+          // rowid DESC breaks ties within the same creation second: the
+          // most recently added profile comes first.
+          .orderBy(desc(sp.createdAt), sql`${sp}.rowid DESC`)
           .all() as unknown as SmtpProfileRow[];
         return rows.map(toSmtpStoredProfile);
       }),
     getSmtpProfile: (id) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles WHERE id = ?",
-          )
-          .get(id) as SmtpProfileRow | undefined;
+        const row = dbx.select(smtpProfileColumns).from(sp).where(eq(sp.id, id)).get() as
+          | SmtpProfileRow
+          | undefined;
         return row === undefined ? Option.none() : Option.some(toSmtpStoredProfile(row));
       }),
     insertSmtpProfile: (draft) =>
       Effect.sync(() => {
         const id = crypto.randomUUID();
-        db.prepare(
-          "INSERT INTO smtp_profiles (id, name, host, port, username, password) VALUES (?, ?, ?, ?, ?, ?)",
-        ).run(id, draft.name, draft.host, draft.port, draft.username, draft.password);
-        const row = db
-          .prepare(
-            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles WHERE id = ?",
-          )
-          .get(id) as SmtpProfileRow | undefined;
+        dbx
+          .insert(sp)
+          .values({
+            id,
+            name: draft.name,
+            host: draft.host,
+            port: draft.port,
+            username: draft.username,
+            password: draft.password,
+          })
+          .run();
         // The insert above just landed, so the row must exist.
-        return toSmtpStoredProfile(row as SmtpProfileRow);
+        const row = dbx
+          .select(smtpProfileColumns)
+          .from(sp)
+          .where(eq(sp.id, id))
+          .get() as SmtpProfileRow;
+        return toSmtpStoredProfile(row);
       }),
     updateSmtpProfile: (id, patch) =>
       Effect.sync(() => {
-        // null password keeps the stored one; the SQL COALESCE never sees the
-        // empty string because the service rejects "" before persisting.
-        const result = db
-          .prepare(
-            "UPDATE smtp_profiles SET name = ?, host = ?, port = ?, username = ?, password = COALESCE(?, password) WHERE id = ?",
-          )
-          .run(patch.name, patch.host, patch.port, patch.username, patch.password, id);
-        if (Number(result.changes) === 0) return Option.none();
-        const row = db
-          .prepare(
-            "SELECT id, name, host, port, username, password, created_at FROM smtp_profiles WHERE id = ?",
-          )
-          .get(id) as SmtpProfileRow | undefined;
+        // null password keeps the stored one: drizzle skips `undefined`
+        // columns in the SET clause, so a null patch never clears it (the
+        // service rejects "" before persisting, mirroring the old
+        // COALESCE(?, password)).
+        const result = dbx
+          .update(sp)
+          .set({
+            name: patch.name,
+            host: patch.host,
+            port: patch.port,
+            username: patch.username,
+            password: patch.password ?? undefined,
+          })
+          .where(eq(sp.id, id))
+          .run();
+        if (result.changes === 0) return Option.none();
+        const row = dbx.select(smtpProfileColumns).from(sp).where(eq(sp.id, id)).get() as
+          | SmtpProfileRow
+          | undefined;
         return row === undefined ? Option.none() : Option.some(toSmtpStoredProfile(row));
       }),
     deleteSmtpProfile: (id) =>
       Effect.sync(() => {
-        return Number(db.prepare("DELETE FROM smtp_profiles WHERE id = ?").run(id).changes);
+        return dbx.delete(sp).where(eq(sp.id, id)).run().changes;
       }),
     insertSendJob: (draft) =>
       Effect.sync(() => {
         const id = crypto.randomUUID();
-        db.prepare(
-          `INSERT INTO send_jobs (id, generate_job_id, smtp_profile_id, smtp_override, subject, body_html, sender_name, sender_address, delay_ms, total_count)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          id,
-          draft.generateJobId,
-          draft.smtpProfileId,
-          draft.smtpOverrideJson,
-          draft.subject,
-          draft.bodyHtml,
-          draft.senderName,
-          draft.senderAddress,
-          draft.delayMs,
-          draft.totalCount,
-        );
+        dbx
+          .insert(sj)
+          .values({
+            id,
+            generateJobId: draft.generateJobId,
+            smtpProfileId: draft.smtpProfileId,
+            smtpOverride: draft.smtpOverrideJson,
+            subject: draft.subject,
+            bodyHtml: draft.bodyHtml,
+            senderName: draft.senderName,
+            senderAddress: draft.senderAddress,
+            delayMs: draft.delayMs,
+            totalCount: draft.totalCount,
+          })
+          .run();
         return id;
       }),
     insertSendJobRecipients: (jobId, recipientIds) =>
       Effect.sync(() => {
         if (recipientIds.length === 0) return;
-        const insert = db.prepare(
-          "INSERT INTO send_job_recipients (job_id, recipient_id) VALUES (?, ?)",
-        );
-        db.exec("BEGIN");
-        try {
-          for (const recipientId of recipientIds) insert.run(jobId, recipientId);
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
+        dbx.transaction((tx) => {
+          for (const recipientId of recipientIds) {
+            tx.insert(sjr).values({ jobId, recipientId }).run();
+          }
+        });
       }),
     setSendJobStatus: (jobId, status, completedAt = null) =>
       Effect.sync(() => {
-        db.prepare("UPDATE send_jobs SET status = ?, completed_at = ? WHERE id = ?").run(
-          status,
-          completedAt,
-          jobId,
-        );
+        dbx.update(sj).set({ status, completedAt }).where(eq(sj.id, jobId)).run();
       }),
     persistSendOutcome: (jobId, recipientId, result, cursorIndex) =>
       Effect.sync(() => {
-        db.exec("BEGIN");
-        try {
-          db.prepare(
-            `UPDATE send_job_recipients SET status = ?, message_id = ?, error_message = ?, sent_at = ?
-             WHERE job_id = ? AND recipient_id = ?`,
-          ).run(
-            result.status,
-            result.messageId,
-            result.errorMessage,
-            result.sentAt,
-            jobId,
-            recipientId,
-          );
-          db.prepare("UPDATE send_jobs SET cursor_index = ? WHERE id = ?").run(cursorIndex, jobId);
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
+        dbx.transaction((tx) => {
+          tx.update(sjr)
+            .set({
+              status: result.status,
+              messageId: result.messageId,
+              errorMessage: result.errorMessage,
+              sentAt: result.sentAt,
+            })
+            .where(and(eq(sjr.jobId, jobId), eq(sjr.recipientId, recipientId)))
+            .run();
+          tx.update(sj).set({ cursorIndex }).where(eq(sj.id, jobId)).run();
+        });
       }),
     getSendJob: (jobId) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            `SELECT sj.id, sj.generate_job_id AS generateJobId, sj.status,
-                    sj.smtp_profile_id AS smtpProfileId, sp.name AS smtpProfileName,
-                    sj.smtp_override AS smtpOverrideJson,
-                    g.template_id AS templateId, t.name AS templateName,
-                    sj.subject, sj.body_html AS bodyHtml,
-                    sj.sender_name AS senderName, sj.sender_address AS senderAddress,
-                    sj.delay_ms AS delayMs, sj.cursor_index AS cursorIndex,
-                    sj.total_count AS totalCount, sj.created_at AS createdAt, sj.completed_at AS completedAt
-             FROM send_jobs sj
-             LEFT JOIN smtp_profiles sp ON sp.id = sj.smtp_profile_id
-             LEFT JOIN generate_jobs g ON g.id = sj.generate_job_id
-             LEFT JOIN templates t ON t.id = g.template_id
-             WHERE sj.id = ?`,
-          )
-          .get(jobId) as
-          | {
-              id: string;
-              generateJobId: string;
-              status: SendJobStatus;
-              smtpProfileId: string | null;
-              smtpProfileName: string | null;
-              smtpOverrideJson: string | null;
-              templateId: string | null;
-              templateName: string | null;
-              subject: string;
-              bodyHtml: string;
-              senderName: string;
-              senderAddress: string;
-              delayMs: number;
-              cursorIndex: number;
-              totalCount: number;
-              createdAt: string;
-              completedAt: string | null;
-            }
-          | undefined;
+        const row = dbx
+          .select({
+            id: sj.id,
+            generateJobId: sj.generateJobId,
+            status: sj.status,
+            smtpProfileId: sj.smtpProfileId,
+            smtpProfileName: sp.name,
+            smtpOverrideJson: sj.smtpOverride,
+            templateId: gj.templateId,
+            templateName: t.name,
+            subject: sj.subject,
+            bodyHtml: sj.bodyHtml,
+            senderName: sj.senderName,
+            senderAddress: sj.senderAddress,
+            delayMs: sj.delayMs,
+            cursorIndex: sj.cursorIndex,
+            totalCount: sj.totalCount,
+            createdAt: sj.createdAt,
+            completedAt: sj.completedAt,
+          })
+          .from(sj)
+          .leftJoin(sp, eq(sp.id, sj.smtpProfileId))
+          .leftJoin(gj, eq(gj.id, sj.generateJobId))
+          .leftJoin(t, eq(t.id, gj.templateId))
+          .where(eq(sj.id, jobId))
+          .get();
         if (row === undefined) return Option.none();
         // LEFT JOIN so a recipient deleted after the job started still shows
         // its row (name falls back to "(deleted recipient)" in the service).
-        const recipients = db
-          .prepare(
-            `SELECT sjr.recipient_id AS recipientId, r.name AS recipientName, r.email AS recipientEmail,
-                    sjr.status, sjr.message_id AS messageId, sjr.error_message AS errorMessage,
-                    sjr.sent_at AS sentAt
-             FROM send_job_recipients sjr
-             LEFT JOIN recipients r ON r.id = sjr.recipient_id
-             WHERE sjr.job_id = ? ORDER BY sjr.rowid`,
-          )
-          .all(jobId) as unknown as SendJobRecipientRow[];
+        const recipients = dbx
+          .select({
+            recipientId: sjr.recipientId,
+            recipientName: r.name,
+            recipientEmail: r.email,
+            status: sjr.status,
+            messageId: sjr.messageId,
+            errorMessage: sjr.errorMessage,
+            sentAt: sjr.sentAt,
+          })
+          .from(sjr)
+          .leftJoin(r, eq(r.id, sjr.recipientId))
+          .where(eq(sjr.jobId, jobId))
+          .orderBy(sql`${sjr}.rowid`)
+          .all() as unknown as SendJobRecipientRow[];
         return Option.some({
           job: {
             id: row.id,
-            generateJobId: row.generateJobId,
+            // The column is nullable in the schema (mirroring the on-disk
+            // format) but every insert provides it, so the repo's contract
+            // keeps it non-null, as before.
+            generateJobId: row.generateJobId as string,
             status: row.status,
             smtpProfileId: row.smtpProfileId,
             smtpProfileName: row.smtpProfileName,
@@ -1042,88 +1003,87 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
         // The date bounds are full UTC stamps bounding the user's local
         // calendar days (the renderer converts); string comparison works
         // because every stamp is the fixed-width "YYYY-MM-DD HH:MM:SS".
-        const rows = db
-          .prepare(
-            `SELECT sj.id, sj.status, sj.subject,
-                    g.template_id AS templateId, t.name AS templateName,
-                    (SELECT COUNT(*) FROM send_job_recipients sjr
-                     WHERE sjr.job_id = sj.id AND sjr.status = 'sent') AS sentCount,
-                    (SELECT COUNT(*) FROM send_job_recipients sjr
-                     WHERE sjr.job_id = sj.id AND sjr.status = 'failed') AS failedCount,
-                    (SELECT COUNT(*) FROM send_job_recipients sjr
-                     WHERE sjr.job_id = sj.id AND sjr.status = 'skipped') AS skippedCount,
-                    sj.total_count AS totalCount, sj.cursor_index AS cursorIndex,
-                    sj.created_at AS createdAt, sj.completed_at AS completedAt
-             FROM send_jobs sj
-             LEFT JOIN generate_jobs g ON g.id = sj.generate_job_id
-             LEFT JOIN templates t ON t.id = g.template_id
-             WHERE (? IS NULL OR sj.status = ?)
-               AND (? IS NULL OR sj.created_at >= ?)
-               AND (? IS NULL OR sj.created_at <= ?)
-             ORDER BY sj.created_at DESC, sj.rowid DESC`,
-          )
-          .all(
-            filter.statusFilter,
-            filter.statusFilter,
-            filter.dateFrom,
-            filter.dateFrom,
-            filter.dateTo,
-            filter.dateTo,
-          ) as unknown as SendJobSummaryRow[];
+        const conditions: SQL[] = [];
+        if (filter.statusFilter !== null) {
+          conditions.push(eq(sj.status, filter.statusFilter));
+        }
+        if (filter.dateFrom !== null) {
+          conditions.push(gte(sj.createdAt, filter.dateFrom));
+        }
+        if (filter.dateTo !== null) {
+          conditions.push(lte(sj.createdAt, filter.dateTo));
+        }
+        const rows = dbx
+          .select({
+            id: sj.id,
+            status: sj.status,
+            subject: sj.subject,
+            templateId: gj.templateId,
+            templateName: t.name,
+            sentCount: sql<number>`(SELECT COUNT(*) FROM ${sjr} WHERE ${sjr.jobId} = ${sj.id} AND ${sjr.status} = 'sent')`,
+            failedCount: sql<number>`(SELECT COUNT(*) FROM ${sjr} WHERE ${sjr.jobId} = ${sj.id} AND ${sjr.status} = 'failed')`,
+            skippedCount: sql<number>`(SELECT COUNT(*) FROM ${sjr} WHERE ${sjr.jobId} = ${sj.id} AND ${sjr.status} = 'skipped')`,
+            totalCount: sj.totalCount,
+            cursorIndex: sj.cursorIndex,
+            createdAt: sj.createdAt,
+            completedAt: sj.completedAt,
+          })
+          .from(sj)
+          .leftJoin(gj, eq(gj.id, sj.generateJobId))
+          .leftJoin(t, eq(t.id, gj.templateId))
+          .where(conditions.length === 0 ? undefined : and(...conditions))
+          .orderBy(desc(sj.createdAt), sql`${sj}.rowid DESC`)
+          .all() as unknown as SendJobSummaryRow[];
         return rows;
       }),
     cancelSendJob: (jobId) =>
       Effect.sync(() => {
-        db.exec("BEGIN");
-        try {
-          db.prepare(
-            "UPDATE send_job_recipients SET status = 'skipped' WHERE job_id = ? AND status = 'pending'",
-          ).run(jobId);
-          db.prepare(
-            "UPDATE send_jobs SET status = 'cancelled', completed_at = datetime('now') WHERE id = ?",
-          ).run(jobId);
-          db.exec("COMMIT");
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
+        dbx.transaction((tx) => {
+          tx.update(sjr)
+            .set({ status: "skipped" })
+            .where(and(eq(sjr.jobId, jobId), eq(sjr.status, "pending")))
+            .run();
+          tx.update(sj)
+            .set({ status: "cancelled", completedAt: sql`(datetime('now'))` })
+            .where(eq(sj.id, jobId))
+            .run();
+        });
       }),
     retryFailedSendJob: (jobId) =>
       Effect.sync(() => {
-        db.exec("BEGIN");
-        try {
-          const reset = db
-            .prepare(
-              `UPDATE send_job_recipients SET status = 'pending', message_id = NULL, error_message = NULL, sent_at = NULL
-             WHERE job_id = ? AND status = 'failed'`,
-            )
-            .run(jobId);
+        return dbx.transaction((tx) => {
+          const reset = tx
+            .update(sjr)
+            .set({
+              status: "pending",
+              messageId: null,
+              errorMessage: null,
+              sentAt: null,
+            })
+            .where(and(eq(sjr.jobId, jobId), eq(sjr.status, "failed")))
+            .run();
           // Rewind the cursor to the first retried recipient - its index
           // (how many rows precede it); the pipeline re-processes from
           // there, skipping rows already sent/skipped.
-          db.prepare(
-            `UPDATE send_jobs SET cursor_index = (
-               SELECT COUNT(*) FROM send_job_recipients
-               WHERE job_id = ? AND rowid < (
-                 SELECT MIN(rowid) FROM send_job_recipients WHERE job_id = ? AND status = 'pending'
-               )
-             ), status = 'pending', completed_at = NULL WHERE id = ?`,
-          ).run(jobId, jobId, jobId);
-          db.exec("COMMIT");
-          return Number(reset.changes);
-        } catch (error) {
-          db.exec("ROLLBACK");
-          throw error;
-        }
+          tx.update(sj)
+            .set({
+              cursorIndex: sql`(SELECT COUNT(*) FROM ${sjr} WHERE ${sjr.jobId} = ${jobId} AND rowid < (SELECT MIN(rowid) FROM ${sjr} WHERE ${sjr.jobId} = ${jobId} AND ${sjr.status} = 'pending'))`,
+              status: "pending",
+              completedAt: null,
+            })
+            .where(eq(sj.id, jobId))
+            .run();
+          return reset.changes;
+        });
       }),
     anySendJobActiveExcept: (jobId) =>
       Effect.sync(() => {
-        const row = db
-          .prepare(
-            "SELECT COUNT(*) AS n FROM send_jobs WHERE id != ? AND status IN ('sending', 'paused')",
-          )
-          .get(jobId) as { n: number };
-        return row.n > 0;
+        const row = dbx
+          .select({ n: count() })
+          .from(sj)
+          .where(and(ne(sj.id, jobId), inArray(sj.status, ["sending", "paused"])))
+          .get();
+        return (row?.n ?? 0) > 0;
       }),
   };
 }
@@ -1133,6 +1093,6 @@ export function makeSqliteRepo(db: DatabaseSync): SqliteRepoShape {
  * Domain services (Settings) and later tickets build on top of this.
  */
 export class SqliteRepo extends Context.Service<SqliteRepo, SqliteRepoShape>()("SqliteRepo") {
-  static readonly Live = (db: DatabaseSync): Layer.Layer<SqliteRepo> =>
+  static readonly Live = (db: Database.Database): Layer.Layer<SqliteRepo> =>
     Layer.succeed(SqliteRepo, makeSqliteRepo(db));
 }

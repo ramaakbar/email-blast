@@ -4,7 +4,7 @@ import { join } from "path";
 import { rootLayer } from "./runtime";
 import { AppInfo } from "./services/app-info";
 import { defaultPathsForHome } from "./services/default-paths";
-import { openDatabase } from "./services/sqlite-repo";
+import { openDatabase } from "./db/repository";
 import { tempDir } from "./services/test-helpers";
 
 /**

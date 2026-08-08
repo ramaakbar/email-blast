@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Layer, Option } from "effect";
 import { readFileSync } from "fs";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import type { Template } from "../../shared/ipc";
@@ -10,7 +10,7 @@ import {
   type SqliteRepoShape,
   type TemplateDraft,
   type TemplatePatch,
-} from "./sqlite-repo";
+} from "../db/repository";
 
 /**
  * The templates domain (ticket 12): registering DOCX letter and image
@@ -157,7 +157,7 @@ export function makeTemplatesService(repo: SqliteRepoShape): TemplatesServiceSha
 export class TemplatesService extends Context.Service<TemplatesService, TemplatesServiceShape>()(
   "TemplatesService",
 ) {
-  static readonly Live = (db: DatabaseSync): Layer.Layer<TemplatesService | SqliteRepo> =>
+  static readonly Live = (db: Database.Database): Layer.Layer<TemplatesService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         TemplatesService,

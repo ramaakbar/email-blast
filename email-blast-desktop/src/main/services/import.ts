@@ -1,6 +1,6 @@
 import { Context, Data, Effect, Layer } from "effect";
 import { readFile } from "fs/promises";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import * as XLSX from "@e965/xlsx";
 import type {
   ColumnMapping,
@@ -10,7 +10,7 @@ import type {
   ImportPreview,
   ImportRecipient,
 } from "../../shared/ipc";
-import { SqliteRepo, type SqliteRepoShape } from "./sqlite-repo";
+import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 
 /**
  * The import pipeline (ticket 10): parses a spreadsheet, auto-suggests the
@@ -295,7 +295,7 @@ export function makeImportService(repo: SqliteRepoShape): ImportServiceShape {
 export class ImportService extends Context.Service<ImportService, ImportServiceShape>()(
   "ImportService",
 ) {
-  static readonly Live = (db: DatabaseSync): Layer.Layer<ImportService | SqliteRepo> =>
+  static readonly Live = (db: Database.Database): Layer.Layer<ImportService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         ImportService,

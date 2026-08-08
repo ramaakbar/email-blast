@@ -5,8 +5,8 @@ import { basename, join } from "path";
 import { inflateSync } from "zlib";
 import { PDFDocument } from "pdf-lib";
 import PizZip from "pizzip";
-import type { DatabaseSync } from "node:sqlite";
-import { openDatabase, makeSqliteRepo } from "./sqlite-repo";
+import type Database from "better-sqlite3";
+import { openDatabase, makeSqliteRepo } from "../db/repository";
 import { LibreOfficeFailed, makeGenerateJobService, type GenerateEnv } from "./generate-jobs";
 import { makeProgressHub } from "./progress-hub";
 import type { HubEvent } from "../../shared/ipc";
@@ -107,7 +107,7 @@ function makeSvc() {
 }
 
 /** Inserts recipients synchronously and returns their ids in insertion order (rowid order). */
-function seedRecipients(db: DatabaseSync): string[] {
+function seedRecipients(db: Database.Database): string[] {
   Effect.runSync(makeSqliteRepo(db).insertRecipients(RECIPIENT_ROWS));
   return (db.prepare("SELECT id FROM recipients ORDER BY rowid").all() as { id: string }[]).map(
     (row) => row.id,

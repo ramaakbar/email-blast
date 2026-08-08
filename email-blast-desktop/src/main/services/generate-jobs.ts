@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { readFile as readFileAsync } from "fs/promises";
 import { tmpdir } from "os";
 import { basename, dirname, extname, join } from "path";
-import type { DatabaseSync } from "node:sqlite";
+import type Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -19,7 +19,7 @@ import {
   type GenerateJobRecipientRow,
   type GenerateJobWithRecipients,
   type SqliteRepoShape,
-} from "./sqlite-repo";
+} from "../db/repository";
 
 /**
  * The generate pipeline (ticket 13): one PDF per recipient against a
@@ -615,7 +615,7 @@ export class GenerateJobService extends Context.Service<
   GenerateJobServiceShape
 >()("GenerateJobService") {
   static readonly Live = (
-    db: DatabaseSync,
+    db: Database.Database,
     defaults: DefaultPaths,
   ): Layer.Layer<GenerateJobService | ProgressHub | Settings | SqliteRepo> =>
     Layer.provideMerge(

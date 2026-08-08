@@ -1,5 +1,5 @@
 import { Layer } from "effect";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { AppInfo } from "./services/app-info";
 import type { DefaultPaths } from "./services/default-paths";
 import { GenerateJobService } from "./services/generate-jobs";
@@ -9,7 +9,7 @@ import { RecipientsService } from "./services/recipients";
 import { SendJobService } from "./services/send-jobs";
 import { Settings } from "./services/settings";
 import { SmtpService } from "./services/smtp";
-import type { SqliteRepo } from "./services/sqlite-repo";
+import type { SqliteRepo } from "./db/repository";
 import { TemplatesService } from "./services/templates";
 
 export type AppServices =
@@ -30,7 +30,10 @@ export type AppServices =
  * (ticket 15); its Live layer provides GenerateJob, Smtp, ProgressHub,
  * Settings, and SqliteRepo alongside, so the duplicates merge away.
  */
-export const rootLayer = (db: DatabaseSync, defaults: DefaultPaths): Layer.Layer<AppServices> =>
+export const rootLayer = (
+  db: Database.Database,
+  defaults: DefaultPaths,
+): Layer.Layer<AppServices> =>
   Layer.mergeAll(
     Settings.Live(db, defaults),
     ImportService.Live(db),

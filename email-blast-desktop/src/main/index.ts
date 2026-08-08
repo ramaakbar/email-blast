@@ -53,7 +53,7 @@ import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
 import { SendJobService } from "./services/send-jobs";
 import { SmtpService } from "./services/smtp";
-import { openDatabase, SqliteRepo } from "./services/sqlite-repo";
+import { openDatabase, SqliteRepo } from "./db/repository";
 import { Settings } from "./services/settings";
 import { TemplatesService } from "./services/templates";
 

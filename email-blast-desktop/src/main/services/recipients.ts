@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option } from "effect";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import type {
   ImportBatch,
   PaginatedRecipients,
@@ -7,7 +7,7 @@ import type {
   RecipientListAllPayload,
   RecipientListPayload,
 } from "../../shared/ipc";
-import { SqliteRepo, type SqliteRepoShape } from "./sqlite-repo";
+import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 
 /**
  * The recipients directory (ticket 11): listing with search/filter/
@@ -52,7 +52,7 @@ export function makeRecipientsService(repo: SqliteRepoShape): RecipientsServiceS
 export class RecipientsService extends Context.Service<RecipientsService, RecipientsServiceShape>()(
   "RecipientsService",
 ) {
-  static readonly Live = (db: DatabaseSync): Layer.Layer<RecipientsService | SqliteRepo> =>
+  static readonly Live = (db: Database.Database): Layer.Layer<RecipientsService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         RecipientsService,

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import { writeFileSync } from "fs";
 import { join } from "path";
-import { openDatabase, SqliteRepo } from "./sqlite-repo";
+import { openDatabase, SqliteRepo } from "../db/repository";
 import { TemplatesService, scanDocxSlots, type TemplatesServiceShape } from "./templates";
 import { normalizeSlots, patternSlots, validateTemplate } from "../../shared/template-validation";
 import { tempDir, writeFixture } from "./test-helpers";

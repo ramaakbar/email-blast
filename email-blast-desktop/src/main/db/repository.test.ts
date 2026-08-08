@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
-import type { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import { join } from "path";
 import type { SendJobStatus } from "../../shared/ipc";
-import { openDatabase, SqliteRepo, type SqliteRepoShape } from "./sqlite-repo";
-import { tempDir } from "./test-helpers";
+import { openDatabase, SqliteRepo, type SqliteRepoShape } from "./repository";
+import { tempDir } from "../services/test-helpers";
 
 /**
  * Seam A (spec Testing Decisions): SqliteRepo against a temp database file.
@@ -163,6 +163,164 @@ describe("SqliteRepo (Seam A)", () => {
     expect(row.import_batch).toBe("b");
     db2.close();
   });
+
+  it("opens an existing database unmodified (ticket 22 migration proof)", () => {
+    const dbPath = join(tempDir(), "test.db");
+    // The historical pre-ticket-22 format, verbatim: the hand-written
+    // layer's SCHEMA_SQL. Seeding with it proves an existing user database
+    // - built before Drizzle - opens with its tables and data intact and
+    // its stored DDL untouched.
+    const HISTORICAL_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS recipients (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    email       TEXT,
+    phone       TEXT,
+    metadata    TEXT NOT NULL DEFAULT '{}',
+    import_batch TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_recipients_email ON recipients(email);
+CREATE INDEX IF NOT EXISTS idx_recipients_import_batch ON recipients(import_batch);
+
+CREATE TABLE IF NOT EXISTS templates (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    type            TEXT NOT NULL CHECK(type IN ('docx', 'image')),
+    slots           TEXT NOT NULL DEFAULT '[]',
+    output_pattern  TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS generate_jobs (
+    id              TEXT PRIMARY KEY,
+    template_id     TEXT NOT NULL REFERENCES templates(id),
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','generating','generated','cancelled')),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS generate_job_recipients (
+    job_id          TEXT NOT NULL REFERENCES generate_jobs(id),
+    recipient_id    TEXT NOT NULL REFERENCES recipients(id),
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','generated','failed')),
+    output_path     TEXT,
+    error_message   TEXT,
+    PRIMARY KEY (job_id, recipient_id)
+);
+
+CREATE TABLE IF NOT EXISTS send_jobs (
+    id              TEXT PRIMARY KEY,
+    generate_job_id TEXT REFERENCES generate_jobs(id),
+    channel         TEXT NOT NULL DEFAULT 'email'
+                    CHECK(channel IN ('email', 'whatsapp')),
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','sending','paused','completed','cancelled')),
+    smtp_profile_id TEXT REFERENCES smtp_profiles(id),
+    smtp_override   TEXT,
+    subject         TEXT NOT NULL,
+    body_html       TEXT NOT NULL,
+    sender_name     TEXT NOT NULL,
+    sender_address  TEXT NOT NULL,
+    delay_ms        INTEGER NOT NULL DEFAULT 1000,
+    cursor_index    INTEGER NOT NULL DEFAULT 0,
+    total_count     INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS send_job_recipients (
+    job_id          TEXT NOT NULL REFERENCES send_jobs(id),
+    recipient_id    TEXT NOT NULL REFERENCES recipients(id),
+    status          TEXT NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','sent','failed','skipped')),
+    message_id      TEXT,
+    error_message   TEXT,
+    sent_at         TEXT,
+    PRIMARY KEY (job_id, recipient_id)
+);
+
+CREATE TABLE IF NOT EXISTS smtp_profiles (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    host            TEXT NOT NULL,
+    port            INTEGER NOT NULL DEFAULT 587,
+    username        TEXT NOT NULL,
+    password        TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key             TEXT PRIMARY KEY,
+    value           TEXT NOT NULL
+);
+`;
+    const legacy = new Database(dbPath);
+    legacy.exec(HISTORICAL_SCHEMA_SQL);
+    legacy
+      .prepare(
+        "INSERT INTO recipients (id, name, email, phone, metadata, import_batch, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        "11111111-1111-4111-8111-111111111111",
+        "Budi",
+        "budi@example.com",
+        null,
+        '{"instansi":"Kampus A"}',
+        "batch-1",
+        "2026-08-01 09:00:00",
+      );
+    legacy
+      .prepare("INSERT INTO settings (key, value) VALUES (?, ?)")
+      .run("rate_limit_delay_ms", "2500");
+    legacy.close();
+
+    // The Drizzle layer opens the same file: data intact, tables intact,
+    // and the historical stored DDL untouched (the bootstrap migration is
+    // idempotent - it must never rewrite existing tables).
+    const db = openDatabase(dbPath);
+    const row = db
+      .prepare(
+        "SELECT name, email, metadata, import_batch, created_at FROM recipients WHERE id = ?",
+      )
+      .get("11111111-1111-4111-8111-111111111111") as {
+      name: string;
+      email: string;
+      metadata: string;
+      import_batch: string;
+      created_at: string;
+    };
+    expect(row).toEqual({
+      name: "Budi",
+      email: "budi@example.com",
+      metadata: '{"instansi":"Kampus A"}',
+      import_batch: "batch-1",
+      created_at: "2026-08-01 09:00:00",
+    });
+    expect(
+      (
+        db.prepare("SELECT value FROM settings WHERE key = ?").get("rate_limit_delay_ms") as {
+          value: string;
+        }
+      ).value,
+    ).toBe("2500");
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+      .all()
+      .map((tbl) => (tbl as { name: string }).name);
+    for (const table of ALL_TABLES) {
+      expect(tables, `table ${table} should exist`).toContain(table);
+    }
+    const recipientsDdl = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'recipients'")
+      .get() as { sql: string };
+    expect(recipientsDdl.sql).toContain("CREATE TABLE recipients");
+    expect(recipientsDdl.sql).not.toContain("`");
+    db.close();
+  });
 });
 
 describe("send job log queries (ticket 16)", () => {
@@ -172,7 +330,7 @@ describe("send job log queries (ticket 16)", () => {
    * overridden so the date-range filter is testable.
    */
   async function seedSendJob(
-    db: DatabaseSync,
+    db: Database.Database,
     layer: Layer.Layer<SqliteRepo>,
     options: {
       subject: string;

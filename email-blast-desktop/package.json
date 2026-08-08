@@ -19,12 +19,16 @@
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@e965/xlsx": "0.20.3",
     "@electron-toolkit/utils": "^4.0.0",
+    "better-sqlite3": "^13.0.3",
     "docxtemplater": "3.69.3",
+    "drizzle-orm": "^0.45.2",
     "effect": "4.0.0-beta.102",
     "nodemailer": "9.0.3",
     "pdf-lib": "^1.17.1",
@@ -46,6 +50,7 @@
     "@tanstack/react-router": "^1.170.18",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/router-plugin": "^1.168.23",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.19.1",
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.7",
@@ -54,6 +59,7 @@
     "@vitejs/plugin-react": "^5.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "drizzle-kit": "^0.31.10",
     "electron": "^43.0.0",
     "lucide-react": "^1.28.0",
     "oxfmt": "^0.61.0",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import { join } from "path";
-import { openDatabase, SqliteRepo, type RecipientDraft } from "./sqlite-repo";
+import { openDatabase, SqliteRepo, type RecipientDraft } from "../db/repository";
 import { RecipientsService, type RecipientsServiceShape } from "./recipients";
 import { tempDir } from "./test-helpers";
 

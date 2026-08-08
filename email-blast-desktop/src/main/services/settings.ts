@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Option, pipe } from "effect";
 import { mkdirSync } from "fs";
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import {
   DEFAULT_LIBREOFFICE_CHECKED,
   DEFAULT_RATE_LIMIT_DELAY_MS,
@@ -9,7 +9,7 @@ import {
   SETTING_KEYS,
 } from "../../shared/settings";
 import type { DefaultPaths } from "./default-paths";
-import { SqliteRepo, type SqliteRepoShape } from "./sqlite-repo";
+import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 
 /**
  * The settings the app lives by, typed instead of raw key/values:
@@ -25,7 +25,7 @@ import { SqliteRepo, type SqliteRepoShape } from "./sqlite-repo";
  * the same constants back the read fallbacks, so seed and fallback cannot
  * drift apart.
  */
-export function seedSettings(db: DatabaseSync, defaults: DefaultPaths): void {
+export function seedSettings(db: Database.Database, defaults: DefaultPaths): void {
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   insert.run(SETTING_KEYS.rateLimitDelayMs, String(DEFAULT_RATE_LIMIT_DELAY_MS));
   insert.run(SETTING_KEYS.templatesDir, defaults.templatesDir);
@@ -130,7 +130,7 @@ export function makeSettings(repo: SqliteRepoShape, defaults: DefaultPaths): Set
  */
 export class Settings extends Context.Service<Settings, SettingsShape>()("Settings") {
   static readonly Live = (
-    db: DatabaseSync,
+    db: Database.Database,
     defaults: DefaultPaths,
   ): Layer.Layer<Settings | SqliteRepo> => {
     seedSettings(db, defaults);

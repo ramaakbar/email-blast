@@ -4,7 +4,7 @@ import { TestClock } from "effect/testing";
 import { writeFileSync } from "fs";
 import { join } from "path";
 import { createServer } from "net";
-import type { DatabaseSync } from "node:sqlite";
+import type Database from "better-sqlite3";
 import { SMTPServer } from "smtp-server";
 import type { SendJob, SendStartPayload } from "../../shared/ipc";
 import { SETTING_KEYS } from "../../shared/settings";
@@ -24,7 +24,7 @@ import {
   SmtpSendFailed,
   type SmtpServiceShape,
 } from "./smtp";
-import { makeSqliteRepo, openDatabase } from "./sqlite-repo";
+import { makeSqliteRepo, openDatabase } from "../db/repository";
 import { tempDir } from "./test-helpers";
 
 /**
@@ -128,7 +128,7 @@ const RECIPIENT_ROWS = [
 ];
 
 /** Inserts recipients and returns their ids in insertion order (rowid order). */
-function seedRecipients(db: DatabaseSync): string[] {
+function seedRecipients(db: Database.Database): string[] {
   Effect.runSync(makeSqliteRepo(db).insertRecipients(RECIPIENT_ROWS));
   return (db.prepare("SELECT id FROM recipients ORDER BY rowid").all() as { id: string }[]).map(
     (row) => row.id,
@@ -146,7 +146,7 @@ function stubGenerateEnv(): GenerateEnv {
 }
 
 interface Svc {
-  db: DatabaseSync;
+  db: Database.Database;
   repo: ReturnType<typeof makeSqliteRepo>;
   service: SendJobServiceShape;
   events: Array<Record<string, unknown>>;

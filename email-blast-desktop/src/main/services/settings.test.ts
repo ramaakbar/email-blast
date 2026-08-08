@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { existsSync } from "fs";
 import { join } from "path";
-import { openDatabase } from "./sqlite-repo";
+import { openDatabase } from "../db/repository";
 import { seedSettings, Settings, type SettingsShape } from "./settings";
 import { defaultPathsForHome } from "./default-paths";
 import { tempDir } from "./test-helpers";

@@ -16,3 +16,4 @@ allowBuilds:
   # macOS packaging deps (Forge's packager / dmg maker)
   fs-xattr: true
   macos-alias: true
+  better-sqlite3: true

@@ -4,7 +4,7 @@ import { createServer } from "net";
 import { join } from "path";
 import { writeFileSync } from "fs";
 import { SMTPServer } from "smtp-server";
-import { openDatabase, SqliteRepo } from "./sqlite-repo";
+import { openDatabase, SqliteRepo } from "../db/repository";
 import { SmtpService, type SmtpServiceShape } from "./smtp";
 import { tempDir } from "./test-helpers";
 

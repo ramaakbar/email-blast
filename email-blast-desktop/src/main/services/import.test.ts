@@ -3,7 +3,7 @@ import { Effect, Layer } from "effect";
 import { writeFileSync } from "fs";
 import { join } from "path";
 import * as XLSX from "@e965/xlsx";
-import { openDatabase } from "./sqlite-repo";
+import { openDatabase } from "../db/repository";
 import { ImportService, UnreadableExcel, type ImportServiceShape } from "./import";
 import { tempDir } from "./test-helpers";
 import type { ColumnMapping, ExcelRow } from "../../shared/ipc";
