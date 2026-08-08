@@ -58,6 +58,9 @@ function seedDatabase(userDataDir, smtpPort) {
   const set = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
   set.run("libreoffice_checked", "true");
   set.run("rate_limit_delay_ms", "1000");
+  // This script drives the UI by its English strings - pin the language so
+  // a non-English OS locale cannot flip the assertions (ticket 24).
+  set.run("language", "en");
 
   const recipients = [
     { id: "rec-budi", name: "Budi Santoso", email: "budi@example.com" },

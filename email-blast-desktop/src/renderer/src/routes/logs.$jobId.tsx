@@ -8,6 +8,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowLeft, Loader2, Play, RotateCcw, Search } from "lucide-react";
+import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { SendStatusBadge } from "@/components/send-status-badge";
 import { Button } from "@/components/ui/button";
@@ -22,11 +23,11 @@ export const Route = createFileRoute("/logs/$jobId")({
 });
 
 const ALL_STATUSES = "all";
-const RECIPIENT_STATUS_OPTIONS: ReadonlyArray<{ value: SendRecipientStatus; label: string }> = [
-  { value: "sent", label: "Sent" },
-  { value: "failed", label: "Failed" },
-  { value: "skipped", label: "Skipped" },
-  { value: "pending", label: "Pending" },
+const RECIPIENT_STATUS_OPTIONS: ReadonlyArray<{ value: SendRecipientStatus; label: () => string }> = [
+  { value: "sent", label: () => m["status.sent"]() },
+  { value: "failed", label: () => m["status.failed"]() },
+  { value: "skipped", label: () => m["status.skipped"]() },
+  { value: "pending", label: () => m["status.pending"]() },
 ];
 
 const RECIPIENT_BADGE_STYLES: Record<SendRecipientStatus, string> = {
@@ -98,10 +99,10 @@ function JobDetailPage() {
 
   const smtpLabel = useMemo(() => {
     if (job === null || job === undefined) return "-";
-    if (job.smtpProfileId !== null) return job.smtpProfileName ?? "(deleted profile)";
+    if (job.smtpProfileId !== null) return job.smtpProfileName ?? m["jobDetail.deletedProfile"]();
     if (job.smtpOverride !== null) {
       const { host, port, username } = job.smtpOverride;
-      return `${username}@${host}:${port} (inline)`;
+      return `${username}@${host}:${port} ${m["jobDetail.inline"]()}`;
     }
     return "-";
   }, [job]);
@@ -130,34 +131,34 @@ function JobDetailPage() {
     () => [
       columnHelper.display({
         id: "recipient",
-        header: "Recipient",
+        header: m["jobDetail.recipient"],
         cell: (info) => (
           <div className="min-w-0">
             <p className="truncate font-medium">{info.row.original.recipientName}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {info.row.original.recipientEmail ?? "No email address"}
+              {info.row.original.recipientEmail ?? m["jobDetail.noEmailAddress"]()}
             </p>
           </div>
         ),
       }),
       columnHelper.accessor("status", {
-        header: "Status",
+        header: m["jobDetail.status"],
         cell: (info) => (
           <span
             className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${RECIPIENT_BADGE_STYLES[info.getValue()]}`}
           >
             {info.getValue() === "pending"
-              ? "Pending"
+              ? m["status.pending"]()
               : info.getValue() === "sent"
-                ? "Sent"
+                ? m["status.sent"]()
                 : info.getValue() === "failed"
-                  ? "Failed"
-                  : "Skipped"}
+                  ? m["status.failed"]()
+                  : m["status.skipped"]()}
           </span>
         ),
       }),
       columnHelper.accessor("errorMessage", {
-        header: "Error",
+        header: m["jobDetail.error"],
         cell: (info) => {
           const error = info.getValue();
           return error === null ? (
@@ -170,7 +171,7 @@ function JobDetailPage() {
         },
       }),
       columnHelper.accessor("sentAt", {
-        header: "Sent at",
+        header: m["jobDetail.sentAt"],
         cell: (info) => {
           const stamp = info.getValue();
           return stamp === null ? (
@@ -183,7 +184,7 @@ function JobDetailPage() {
         },
       }),
       columnHelper.accessor("messageId", {
-        header: "Message ID",
+        header: m["jobDetail.messageId"],
         cell: (info) => {
           const id = info.getValue();
           return id === null ? (
@@ -205,7 +206,7 @@ function JobDetailPage() {
               variant="outline"
               onClick={() => retry([info.row.original.recipientId])}
             >
-              Retry
+              {m["jobDetail.retry"]()}
             </Button>
           ) : null,
       }),
@@ -246,13 +247,19 @@ function JobDetailPage() {
               to="/logs"
               className="mb-2 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
-              <ArrowLeft className="size-3.5" /> All logs
+              <ArrowLeft className="size-3.5" /> {m["jobDetail.allLogs"]()}
             </Link>
-            <h1 className="truncate text-xl font-semibold">{job?.subject ?? "Job detail"}</h1>
+            <h1 className="truncate text-xl font-semibold">
+              {job?.subject ?? m["jobDetail.jobDetail"]()}
+            </h1>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
               <SendStatusBadge status={job?.status ?? "pending"} />
               <span>
-                {counts.sent} sent · {counts.failed} failed · {counts.skipped} skipped
+                {m["jobDetail.counts"]({
+                  sent: counts.sent,
+                  failed: counts.failed,
+                  skipped: counts.skipped,
+                })}
               </span>
               {job !== null &&
                 job !== undefined &&
@@ -260,8 +267,10 @@ function JobDetailPage() {
                   // The delivered count, not the cursor: a paused job whose
                   // last attempts failed should not claim them as sent.
                   <span className="text-amber-700">
-                    Paused - {job.recipients.filter((r) => r.status === "sent").length} of{" "}
-                    {job.total} sent
+                    {m["logs.pausedProgress"]({
+                      sent: job.recipients.filter((r) => r.status === "sent").length,
+                      total: job.total,
+                    })}
                   </span>
                 )}
             </div>
@@ -271,18 +280,18 @@ function JobDetailPage() {
               <Button disabled={resumingId !== null} onClick={() => void resume(job.id)}>
                 {resumingId === job.id ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" /> Resuming…
+                    <Loader2 className="size-4 animate-spin" /> {m["logs.resuming"]()}
                   </>
                 ) : (
                   <>
-                    <Play className="size-4" /> Resume
+                    <Play className="size-4" /> {m["jobDetail.resume"]()}
                   </>
                 )}
               </Button>
             )}
             {failedRecipients.length > 0 && (
               <Button onClick={() => retry(failedRecipients.map((r) => r.recipientId))}>
-                Retry All Failures ({failedRecipients.length})
+                {m["jobDetail.retryAllFailures"]({ count: failedRecipients.length })}
               </Button>
             )}
           </div>
@@ -291,19 +300,19 @@ function JobDetailPage() {
         <dl className="mt-4 grid grid-cols-2 gap-x-8 gap-y-2 text-sm md:grid-cols-4">
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Template
+              {m["jobDetail.template"]()}
             </dt>
             <dd className="mt-0.5">{job?.templateName ?? "-"}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              SMTP
+              {m["jobDetail.smtp"]()}
             </dt>
             <dd className="mt-0.5">{smtpLabel}</dd>
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Sender
+              {m["jobDetail.sender"]()}
             </dt>
             <dd className="mt-0.5 truncate">
               {job === null || job === undefined ? "-" : `${job.senderName} <${job.senderAddress}>`}
@@ -311,7 +320,7 @@ function JobDetailPage() {
           </div>
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Started / Duration
+              {m["jobDetail.startedDuration"]()}
             </dt>
             <dd className="mt-0.5">
               {job === null || job === undefined
@@ -327,7 +336,7 @@ function JobDetailPage() {
           <ErrorBanner message={resumeError} onDismiss={dismissResumeError} />
         )}
         {detailQuery.isError && (
-          <ErrorBanner message={errorMessage(detailQuery.error, "Could not load this job.")} />
+          <ErrorBanner message={errorMessage(detailQuery.error, m["jobDetail.couldNotLoad"]())} />
         )}
 
         <div className="flex items-center gap-3">
@@ -337,21 +346,21 @@ function JobDetailPage() {
               type="search"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Search recipient name or email…"
+              placeholder={m["jobDetail.searchPlaceholder"]()}
               className="h-9 w-72 rounded-md border bg-background pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              aria-label="Search recipients of this job"
+              aria-label={m["jobDetail.searchAria"]()}
             />
           </div>
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            aria-label="Filter recipients by status"
+            aria-label={m["jobDetail.filterByStatus"]()}
             className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
           >
-            <option value={ALL_STATUSES}>All statuses</option>
+            <option value={ALL_STATUSES}>{m["logs.allStatuses"]()}</option>
             {RECIPIENT_STATUS_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {option.label()}
               </option>
             ))}
           </select>
@@ -364,30 +373,28 @@ function JobDetailPage() {
                 setStatusFilter(ALL_STATUSES);
               }}
             >
-              <RotateCcw className="size-3.5" /> Clear
+              <RotateCcw className="size-3.5" /> {m["common.clear"]()}
             </Button>
           )}
           {detailQuery.isFetching && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3 animate-spin" /> Loading…
+              <Loader2 className="size-3 animate-spin" /> {m["common.loading"]()}
             </span>
           )}
         </div>
 
         {detailQuery.isLoading && (
           <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading job…
+            <Loader2 className="size-4 animate-spin" /> {m["jobDetail.loadingJob"]()}
           </div>
         )}
 
         {!detailQuery.isLoading && !detailQuery.isError && job === null && (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
-            <p className="text-sm font-medium">Job not found</p>
-            <p className="text-xs text-muted-foreground">
-              It may have been removed from the database.
-            </p>
+            <p className="text-sm font-medium">{m["jobDetail.jobNotFound"]()}</p>
+            <p className="text-xs text-muted-foreground">{m["jobDetail.jobNotFoundHint"]()}</p>
             <Button asChild variant="outline" size="sm" className="mt-2">
-              <Link to="/logs">Back to Logs</Link>
+              <Link to="/logs">{m["jobDetail.backToLogs"]()}</Link>
             </Button>
           </div>
         )}
@@ -396,10 +403,8 @@ function JobDetailPage() {
           <>
             {visibleRecipients.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
-                <p className="text-sm font-medium">No recipients match your search</p>
-                <p className="text-xs text-muted-foreground">
-                  Try a different name, email, or status.
-                </p>
+                <p className="text-sm font-medium">{m["jobDetail.noMatchSearch"]()}</p>
+                <p className="text-xs text-muted-foreground">{m["jobDetail.noMatchHint"]()}</p>
               </div>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto rounded-lg border">

@@ -36,7 +36,7 @@ function use<A, E>(
 describe("Settings (Seam A)", () => {
   it("seeds the default settings on first run without clobbering later values", () => {
     const db = openDatabase(join(tempDir(), "test.db"));
-    seedSettings(db, defaultPathsForHome("/Users/example"));
+    seedSettings(db, defaultPathsForHome("/Users/example"), "id-ID");
 
     const row = (key: string) =>
       db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
@@ -47,11 +47,22 @@ describe("Settings (Seam A)", () => {
     expect(row("templates_dir")?.value).toBe("/Users/example/Documents/EmailBlast/templates");
     expect(row("output_dir")?.value).toBe("/Users/example/Documents/EmailBlast/output");
     expect(row("libreoffice_checked")?.value).toBe("false");
+    // The system locale is normalized to a shipped UI locale (ADR-0004).
+    expect(row("language")?.value).toBe("id");
+    // An unsupported system locale falls back to English.
+    const db2 = openDatabase(join(tempDir(), "test2.db"));
+    seedSettings(db2, defaultPathsForHome("/Users/example"), "fr-FR");
+    const row2 = db2.prepare("SELECT value FROM settings WHERE key = 'language'").get() as
+      | { value: string }
+      | undefined;
+    expect(row2?.value).toBe("en");
 
     // Seeding again (a later launch) must not clobber user values.
     seedSettings(db, defaultPathsForHome("/Users/other"));
     expect(row("templates_dir")?.value).toBe("/Users/example/Documents/EmailBlast/templates");
+    expect(row("language")?.value).toBe("id");
     db.close();
+    db2.close();
   });
 
   it("seeds defaults and reads them back through the Effect Layer", async () => {
@@ -63,6 +74,26 @@ describe("Settings (Seam A)", () => {
     await expect(use(layer, (s) => s.getTemplatesDir())).resolves.toBe(home.templatesDir);
     await expect(use(layer, (s) => s.getOutputDir())).resolves.toBe(home.outputDir);
     await expect(use(layer, (s) => s.getLibreOfficeChecked())).resolves.toBe(false);
+    db.close();
+  });
+
+  it("round-trips the UI language through the Effect Layer", async () => {
+    const home = tempHome();
+    const db = openDatabase(join(home.home, "test.db"));
+    const layer = Settings.Live(db, home, "id-ID");
+
+    // Seeded from the system locale at first launch.
+    await expect(use(layer, (s) => s.getLanguage())).resolves.toBe("id");
+
+    await use(layer, (s) => s.setLanguage("en"));
+    await expect(use(layer, (s) => s.getLanguage())).resolves.toBe("en");
+
+    // A raw (untyped) write still comes back normalized.
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run(
+      "language",
+      "en-US",
+    );
+    await expect(use(layer, (s) => s.getLanguage())).resolves.toBe("en");
     db.close();
   });
 

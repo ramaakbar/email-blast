@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { ChevronLeft, ChevronRight, Loader2, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
@@ -77,7 +78,11 @@ function RecipientsPage() {
   const deleteMutation = useMutation({
     mutationFn: (ids: string[]) => window.api.recipients.delete(ids),
     onSuccess: (result) => {
-      toast.success(`Deleted ${result.deleted} recipient${result.deleted === 1 ? "" : "s"}.`);
+      toast.success(
+        result.deleted === 1
+          ? m["recipients.deletedCountOne"]({ count: result.deleted })
+          : m["recipients.deletedCountOther"]({ count: result.deleted }),
+      );
       setRowSelection({});
       setSelectedId(null);
       setConfirmOpen(false);
@@ -94,7 +99,7 @@ function RecipientsPage() {
     },
     onError: (err) => {
       setConfirmOpen(false);
-      setLoadError(errorMessage(err, "Could not delete the selected recipients."));
+      setLoadError(errorMessage(err, m["recipients.couldNotDelete"]()));
     },
   });
 
@@ -125,30 +130,30 @@ function RecipientsPage() {
               className="size-4 accent-primary"
               checked={row.getIsSelected()}
               onChange={row.getToggleSelectedHandler()}
-              aria-label={`Select ${row.original.name}`}
+              aria-label={m["recipients.selectRecipient"]({ name: row.original.name })}
             />
           </div>
         ),
       }),
       columnHelper.accessor("name", {
-        header: "Name",
+        header: m["recipients.name"],
         cell: (info) => <span className="font-medium">{info.getValue()}</span>,
       }),
       columnHelper.accessor("email", {
-        header: "Email",
+        header: m["recipients.email"],
         cell: (info) => info.getValue() ?? "-",
       }),
       columnHelper.accessor("phone", {
-        header: "Phone",
+        header: m["recipients.phone"],
         cell: (info) => info.getValue() ?? "-",
       }),
       columnHelper.display({
         id: "importBatch",
-        header: "Import batch",
+        header: m["recipients.importBatch"],
         cell: ({ row }) => batchLabel(row.original.importBatch, batchesQuery.data),
       }),
       columnHelper.accessor("createdAt", {
-        header: "Imported",
+        header: m["recipients.imported"],
         cell: (info) => formatTimestamp(info.getValue()),
       }),
     ],
@@ -210,9 +215,11 @@ function RecipientsPage() {
     <div className="relative flex h-full flex-col">
       <header className="flex items-center justify-between px-6 pb-4 pt-6">
         <div>
-          <h1 className="text-2xl font-semibold">Recipients</h1>
+          <h1 className="text-2xl font-semibold">{m["recipients.title"]()}</h1>
           <p className="text-sm text-muted-foreground">
-            {total} recipient{total === 1 ? "" : "s"} in the directory
+            {total === 1
+              ? m["recipients.countInDirectoryOne"]({ count: total })
+              : m["recipients.countInDirectoryOther"]({ count: total })}
           </p>
         </div>
         <Button
@@ -222,10 +229,10 @@ function RecipientsPage() {
         >
           <Trash2 className="size-4" />
           {deleteMutation.isPending
-            ? "Deleting…"
+            ? m["common.deleting"]()
             : selectedCount === 0
-              ? "Delete selected"
-              : `Delete selected (${selectedCount})`}
+              ? m["recipients.deleteSelected"]()
+              : m["recipients.deleteSelectedCount"]({ count: selectedCount })}
         </Button>
       </header>
 
@@ -237,18 +244,18 @@ function RecipientsPage() {
               type="search"
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
-              placeholder="Search name, email, phone, or any field…"
+              placeholder={m["recipients.searchPlaceholder"]()}
               className="h-9 w-80 rounded-md border bg-background pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-              aria-label="Search recipients"
+              aria-label={m["recipients.searchAria"]()}
             />
           </div>
           <select
             value={batchFilter}
             onChange={(event) => setBatchFilter(event.target.value)}
-            aria-label="Filter by import batch"
+            aria-label={m["recipients.filterByBatch"]()}
             className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
           >
-            <option value={ALL_BATCHES}>All batches</option>
+            <option value={ALL_BATCHES}>{m["recipients.allBatches"]()}</option>
             {batchesQuery.data?.map((batch) => (
               <option key={batch.id} value={batch.id}>
                 {formatTimestamp(batch.createdAt)} ({batch.count})
@@ -257,7 +264,7 @@ function RecipientsPage() {
           </select>
           {listQuery.isFetching && !listQuery.isPlaceholderData && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="size-3 animate-spin" /> Loading…
+              <Loader2 className="size-3 animate-spin" /> {m["common.loading"]()}
             </span>
           )}
         </div>
@@ -267,12 +274,12 @@ function RecipientsPage() {
         )}
 
         {listQuery.isError && (
-          <ErrorBanner message={errorMessage(listQuery.error, "Could not load recipients.")} />
+          <ErrorBanner message={errorMessage(listQuery.error, m["recipients.couldNotLoad"]())} />
         )}
 
         {listQuery.isLoading && (
           <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading recipients…
+            <Loader2 className="size-4 animate-spin" /> {m["recipients.loadingRecipients"]()}
           </div>
         )}
 
@@ -281,22 +288,20 @@ function RecipientsPage() {
         never flashes "No recipients yet". */}
         {!listQuery.isLoading && !listQuery.isError && total === 0 && !hasFilters && (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
-            <p className="text-sm font-medium">No recipients yet</p>
-            <p className="text-xs text-muted-foreground">
-              Import an Excel file to fill the directory.
-            </p>
+            <p className="text-sm font-medium">{m["recipients.noRecipientsYet"]()}</p>
+            <p className="text-xs text-muted-foreground">{m["recipients.noRecipientsHint"]()}</p>
             <Button asChild size="sm" className="mt-2">
-              <Link to="/import">Go to Import</Link>
+              <Link to="/import">{m["recipients.goToImport"]()}</Link>
             </Button>
           </div>
         )}
 
         {!listQuery.isLoading && !listQuery.isError && total === 0 && hasFilters && (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
-            <p className="text-sm font-medium">No recipients match your filters</p>
-            <p className="text-xs text-muted-foreground">Try a different search or batch.</p>
+            <p className="text-sm font-medium">{m["recipients.noMatchFilters"]()}</p>
+            <p className="text-xs text-muted-foreground">{m["recipients.noMatchHint"]()}</p>
             <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
-              Clear filters
+              {m["recipients.clearFilters"]()}
             </Button>
           </div>
         )}
@@ -345,7 +350,11 @@ function RecipientsPage() {
 
             <div className="flex items-center justify-between text-sm">
               <p className="text-muted-foreground">
-                Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)} of {total}
+                {m["recipients.showingRange"]({
+                  from: (page - 1) * PAGE_SIZE + 1,
+                  to: Math.min(page * PAGE_SIZE, total),
+                  total,
+                })}
               </p>
               <div className="flex items-center gap-2">
                 <Button
@@ -354,10 +363,10 @@ function RecipientsPage() {
                   disabled={page <= 1 || listQuery.isFetching}
                   onClick={() => setPage((current) => current - 1)}
                 >
-                  <ChevronLeft className="size-4" /> Previous
+                  <ChevronLeft className="size-4" /> {m["recipients.previous"]()}
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Page {page} of {pageCount}
+                  {m["recipients.pageOf"]({ page, count: pageCount })}
                 </span>
                 <Button
                   variant="outline"
@@ -365,7 +374,7 @@ function RecipientsPage() {
                   disabled={page >= pageCount || listQuery.isFetching}
                   onClick={() => setPage((current) => current + 1)}
                 >
-                  Next <ChevronRight className="size-4" />
+                  {m["recipients.next"]()} <ChevronRight className="size-4" />
                 </Button>
               </div>
             </div>
@@ -413,7 +422,7 @@ function HeaderCheckbox({
       className="size-4 accent-primary"
       checked={checked}
       onChange={onChange}
-      aria-label="Select all recipients on this page"
+      aria-label={m["recipients.selectAllOnPage"]()}
     />
   );
 }
@@ -434,34 +443,34 @@ function DetailPanel({
         <div className="min-w-0">
           <h2 className="truncate text-lg font-semibold">{recipient.name}</h2>
           <p className="truncate text-sm text-muted-foreground">
-            {recipient.email ?? "No email address"}
+            {recipient.email ?? m["recipients.noEmailAddress"]()}
           </p>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close details">
+        <Button variant="ghost" size="icon" onClick={onClose} aria-label={m["common.closeDetails"]()}>
           <X className="size-4" />
         </Button>
       </header>
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
         <dl className="space-y-2 text-sm">
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Phone</dt>
+            <dt className="text-muted-foreground">{m["recipients.phone"]()}</dt>
             <dd className="text-right">{recipient.phone ?? "-"}</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Import batch</dt>
+            <dt className="text-muted-foreground">{m["recipients.importBatch"]()}</dt>
             <dd className="text-right">{batch}</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Imported</dt>
+            <dt className="text-muted-foreground">{m["recipients.imported"]()}</dt>
             <dd className="text-right">{formatTimestamp(recipient.createdAt)}</dd>
           </div>
         </dl>
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Custom fields
+            {m["recipients.customFields"]()}
           </h3>
           {metadataEntries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No custom fields.</p>
+            <p className="text-sm text-muted-foreground">{m["recipients.noCustomFields"]()}</p>
           ) : (
             <dl className="space-y-2">
               {metadataEntries.map(([key, value]) => (
@@ -502,22 +511,22 @@ function ConfirmDeleteDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <h2 id="confirm-delete-title" className="text-lg font-semibold">
-          Delete {count} recipient{count === 1 ? "" : "s"}?
+          {count === 1
+            ? m["recipients.deleteTitleOne"]({ count })
+            : m["recipients.deleteTitleOther"]({ count })}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          They will be removed from the directory. Past job history is kept.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{m["recipients.deleteDescription"]()}</p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" onClick={onCancel} disabled={pending}>
-            Cancel
+            {m["common.cancel"]()}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={pending} autoFocus>
             {pending ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Deleting…
+                <Loader2 className="size-4 animate-spin" /> {m["common.deleting"]()}
               </>
             ) : (
-              "Delete"
+              m["common.delete"]()
             )}
           </Button>
         </div>

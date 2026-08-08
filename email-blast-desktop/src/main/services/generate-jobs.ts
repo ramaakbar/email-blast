@@ -8,6 +8,7 @@ import type Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { m } from "@paraglide/messages";
 import type { GenerateJob, Recipient, Template } from "../../shared/ipc";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
 import type { DefaultPaths } from "./default-paths";
@@ -166,7 +167,7 @@ function uniquePath(target: string): string {
     const candidate = join(dir, `${stem}-${i}${ext}`);
     if (!existsSync(candidate)) return candidate;
   }
-  throw new Error(`Could not find a free file name for "${target}".`);
+  throw new Error(m["generateJob.noFreeFileName"]({ name: target }));
 }
 
 /**
@@ -265,7 +266,7 @@ export function makeGenerateJobService(
       const template = yield* repo.getTemplate(templateId);
       if (Option.isNone(template)) {
         return yield* Effect.fail(
-          new TemplateNotFound({ message: "The template no longer exists." }),
+          new TemplateNotFound({ message: m["generateJob.templateMissing"]() }),
         );
       }
       return template.value;
@@ -376,7 +377,7 @@ export function makeGenerateJobService(
             return yield* Effect.fail(
               new LibreOfficeFailed({
                 message:
-                  "LibreOffice is not installed, so DOCX letters cannot be converted to PDF.",
+                  m["generateJob.libreOfficeMissing"](),
               }),
             );
           }
@@ -393,21 +394,21 @@ export function makeGenerateJobService(
               state,
               jobId,
               row.recipientId,
-              "Recipient no longer exists in the database.",
+              m["generateJob.recipientDeleted"](),
             );
           } else if (outcome.kind === "missing") {
             yield* failRecipient(
               state,
               jobId,
               row.recipientId,
-              `Missing data for slot "${outcome.slot}".`,
+              m["generateJob.missingSlotData"]({ slot: outcome.slot }),
             );
           } else if (outcome.kind === "fill-error") {
             yield* failRecipient(
               state,
               jobId,
               row.recipientId,
-              `Could not fill the letter: ${outcome.message}`,
+              m["generateJob.couldNotFill"]({ message: outcome.message }),
             );
           } else {
             const converted = join(pdfDir, `${basename(outcome.docxPath, ".docx")}.pdf`);
@@ -416,7 +417,7 @@ export function makeGenerateJobService(
                 state,
                 jobId,
                 row.recipientId,
-                "LibreOffice produced no PDF for this letter.",
+                m["generateJob.noPdfProduced"](),
               );
               continue;
             }
@@ -454,7 +455,7 @@ export function makeGenerateJobService(
             state,
             jobId,
             row.recipientId,
-            "Recipient no longer exists in the database.",
+            m["generateJob.recipientDeleted"](),
           );
           continue;
         }
@@ -464,7 +465,7 @@ export function makeGenerateJobService(
             state,
             jobId,
             row.recipientId,
-            `Missing data for slot "${resolved.slot}".`,
+            m["generateJob.missingSlotData"]({ slot: resolved.slot }),
           );
           continue;
         }
@@ -502,7 +503,7 @@ export function makeGenerateJobService(
       if (!existsSync(template.filePath)) {
         return yield* Effect.fail(
           new TemplateNotFound({
-            message: `The template file is missing: "${template.filePath}". It may have been moved or deleted.`,
+            message: m["generateJob.templateFileMissing"]({ path: template.filePath }),
           }),
         );
       }
@@ -524,14 +525,14 @@ export function makeGenerateJobService(
         const template = yield* loadTemplate(templateId);
         if (recipientIds.length === 0) {
           return yield* Effect.fail(
-            new InvalidGenerateRequest({ message: "Select at least one recipient." }),
+            new InvalidGenerateRequest({ message: m["generateJob.selectRecipients"]() }),
           );
         }
         const recipients = yield* repo.getRecipientsByIds(recipientIds);
         if (recipients.length === 0) {
           return yield* Effect.fail(
             new InvalidGenerateRequest({
-              message: "None of the selected recipients still exist.",
+              message: m["generateJob.noRecipientsExist"](),
             }),
           );
         }
@@ -544,7 +545,7 @@ export function makeGenerateJobService(
         // The insert above just landed, so the row must exist.
         if (Option.isNone(loaded)) {
           return yield* Effect.fail(
-            new InvalidGenerateRequest({ message: "The job could not be created." }),
+            new InvalidGenerateRequest({ message: m["generateJob.jobCouldNotBeCreated"]() }),
           );
         }
         return toGenerateJob(loaded.value);

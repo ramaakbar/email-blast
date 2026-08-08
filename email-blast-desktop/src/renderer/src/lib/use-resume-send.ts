@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { m } from "@paraglide/messages";
 import { errorMessage } from "./error-message";
 
 /**
@@ -29,7 +30,7 @@ export function useResumeSend(): {
         await window.api.send.resumeSend(jobId);
         await window.api.send.runSend(jobId);
       } catch (error) {
-        setResumeError(errorMessage(error, "Could not resume this job."));
+        setResumeError(errorMessage(error, m["sendJob.couldNotResumeJob"]()));
       } finally {
         setResumingId(null);
         void queryClient.invalidateQueries({ queryKey: ["logs"] });

@@ -1,13 +1,17 @@
 /**
  * Template-domain pure logic shared by both processes: slot and pattern
- * validation, and the accepted template file extensions. Zero dependencies
- * by design - the renderer imports this module, so nothing here may import
- * from `effect` or any other package.
+ * validation, and the accepted template file extensions. Zero Effect
+ * dependencies by design - the renderer imports this module. The only
+ * import is the compiled Paraglide catalog (ADR-0004), plain generated
+ * code with no runtime dependencies, so both processes can produce the
+ * user's language for the same validation rules.
  *
  * The main process re-validates every create/update at the boundary; the
  * renderer uses the same functions for instant feedback, so the error
  * messages a user sees can never drift from what the main process rejects.
  */
+
+import { m } from "@paraglide/messages";
 
 /** The file extensions each template type accepts (native dialog filter + type detection). */
 export const TEMPLATE_EXTENSIONS: Record<"docx" | "image", readonly string[]> = {
@@ -54,16 +58,16 @@ export function validateTemplate(
   slots: readonly string[],
   outputPattern: string,
 ): string | null {
-  if (name.trim() === "") return "Template name is required.";
+  if (name.trim() === "") return m["validation.templateNameRequired"]();
   const normalized = normalizeSlots(slots);
-  if (normalized.length === 0) return "A template needs at least one slot.";
+  if (normalized.length === 0) return m["validation.templateNeedsSlot"]();
   const referenced = patternSlots(outputPattern);
   if (referenced.length === 0) {
-    return 'The output pattern must reference at least one slot, e.g. "LOA_{name}.pdf".';
+    return m["validation.templatePatternNeedsSlot"]({ name: "{name}" });
   }
   for (const slot of referenced) {
     if (!normalized.includes(slot)) {
-      return `The output pattern references "{${slot}}", which is not one of the template's slots.`;
+      return m["validation.templatePatternUnknownSlot"]({ slot: `{${slot}}` });
     }
   }
   return null;

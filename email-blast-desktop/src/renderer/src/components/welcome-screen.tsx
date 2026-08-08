@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckCircle2, FolderOpen, Loader2, Mail, XCircle } from "lucide-react";
+import { m } from "@paraglide/messages";
 import { Button } from "@/components/ui/button";
 import { SETTING_KEYS } from "../../../shared/settings";
 
@@ -73,10 +74,8 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
         <div className="mb-6 flex items-center gap-3">
           <Mail className="size-8 text-primary" />
           <div>
-            <h1 className="text-xl font-semibold">Welcome to Email Blast</h1>
-            <p className="text-sm text-muted-foreground">
-              One last check before you start sending.
-            </p>
+            <h1 className="text-xl font-semibold">{m["welcome.title"]()}</h1>
+            <p className="text-sm text-muted-foreground">{m["welcome.subtitle"]()}</p>
           </div>
         </div>
 
@@ -84,14 +83,14 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
           {loState === "checking" && (
             <CheckRow
               icon={<Loader2 className="mt-0.5 size-4 animate-spin text-muted-foreground" />}
-              label="Checking for LibreOffice..."
-              detail="Used to convert letters to PDF"
+              label={m["welcome.checkingLibreOffice"]()}
+              detail={m["welcome.libreOfficePurpose"]()}
             />
           )}
           {loState === "found" && (
             <CheckRow
               icon={<CheckCircle2 className="mt-0.5 size-4 text-emerald-600" />}
-              label="LibreOffice found"
+              label={m["welcome.libreOfficeFound"]()}
               detail={loPath ?? ""}
             />
           )}
@@ -99,10 +98,10 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
             <li className="flex items-start gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3">
               <XCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">LibreOffice is not installed</p>
+                <p className="text-sm font-medium">{m["welcome.libreOfficeMissing"]()}</p>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Email Blast uses LibreOffice to convert filled letters to PDF.
-                  {isMac ? " Install it with" : " Download it from"}
+                  {m["welcome.libreOfficeMissingDetail"]()}{" "}
+                  {isMac ? m["welcome.installWith"]() : m["welcome.downloadFrom"]()}
                 </p>
                 {isMac && (
                   <code className="mt-1 block rounded bg-muted px-2 py-1 font-mono text-xs">
@@ -119,18 +118,18 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
                 </a>
               </div>
               <Button variant="outline" size="sm" className="shrink-0" onClick={() => void check()}>
-                Check Again
+                {m["welcome.checkAgain"]()}
               </Button>
             </li>
           )}
           <CheckRow
             icon={<FolderOpen className="mt-0.5 size-4 text-muted-foreground" />}
-            label="Templates folder"
+            label={m["welcome.templatesFolder"]()}
             detail={templatesDir ?? "…"}
           />
           <CheckRow
             icon={<FolderOpen className="mt-0.5 size-4 text-muted-foreground" />}
-            label="Output folder"
+            label={m["welcome.outputFolder"]()}
             detail={outputDir ?? "…"}
           />
         </ul>
@@ -141,7 +140,7 @@ export function WelcomeScreen({ onComplete }: { onComplete: () => void }) {
           disabled={loState !== "found" || busy}
           onClick={() => void handleGetStarted()}
         >
-          {busy ? "Setting up…" : "Get Started"}
+          {busy ? m["welcome.settingUp"]() : m["welcome.getStarted"]()}
         </Button>
       </div>
     </div>

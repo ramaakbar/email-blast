@@ -18,12 +18,14 @@ import {
   Users,
   X,
 } from "lucide-react";
+import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { PatternPreview } from "@/components/pattern-preview";
 import { PdfPreview } from "@/components/pdf-preview";
 import { TemplateBadge } from "@/components/template-badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
+import { plural } from "@/lib/plural";
 import { slotCoverage } from "../../../shared/generate";
 import {
   availableSlots,
@@ -62,12 +64,12 @@ export const Route = createFileRoute("/compose")({
  */
 
 const WIZARD_STEPS = [
-  { n: 1, label: "Recipients" },
-  { n: 2, label: "Template" },
-  { n: 3, label: "Message" },
-  { n: 4, label: "SMTP" },
-  { n: 5, label: "Generate & Review" },
-  { n: 6, label: "Send" },
+  { n: 1, label: () => m["compose.stepRecipients"]() },
+  { n: 2, label: () => m["compose.stepTemplate"]() },
+  { n: 3, label: () => m["compose.stepMessage"]() },
+  { n: 4, label: () => m["compose.stepSmtp"]() },
+  { n: 5, label: () => m["compose.stepGenerate"]() },
+  { n: 6, label: () => m["compose.stepSend"]() },
 ] as const;
 
 const PAGE_SIZE = 25;
@@ -288,16 +290,18 @@ function ComposePage() {
       });
       const missing = prefill.recipientIds.length - recipients.length;
       const parts = [
-        `Retry pre-filled from Logs: ${recipients.length} failed recipient${
-          recipients.length === 1 ? "" : "s"
-        }, the same template, message, and SMTP.`,
+        plural(
+          recipients.length,
+          m["compose.prefillRetryOne"],
+          m["compose.prefillRetryOther"],
+        ),
       ];
       if (prefill.smtp.mode === "inline") {
-        parts.push("Re-enter the app password to send again - passwords never leave this app.");
+        parts.push(m["compose.prefillReenterPassword"]());
       }
       if (missing > 0) {
         parts.push(
-          `${missing} previously failed recipient${missing === 1 ? " was" : "s were"} deleted.`,
+          plural(missing, m["compose.prefillDeletedOne"], m["compose.prefillDeletedOther"]),
         );
       }
       setPrefillNotice(parts.join(" "));
@@ -308,10 +312,8 @@ function ComposePage() {
   return (
     <div className="flex h-full flex-col">
       <header className="px-6 pb-4 pt-6">
-        <h1 className="text-2xl font-semibold">Compose</h1>
-        <p className="text-sm text-muted-foreground">
-          Pick who receives the documents, write the message, and send the emails.
-        </p>
+        <h1 className="text-2xl font-semibold">{m["compose.title"]()}</h1>
+        <p className="text-sm text-muted-foreground">{m["compose.description"]()}</p>
       </header>
 
       <WizardStepper
@@ -370,33 +372,36 @@ function ComposePage() {
 
       <footer className="flex items-center justify-between border-t px-6 py-4">
         <Button variant="outline" onClick={backStep} disabled={step === 1}>
-          <ChevronLeft className="size-4" /> Back
+          <ChevronLeft className="size-4" /> {m["common.back"]()}
         </Button>
         <span className="text-sm text-muted-foreground">
-          {step === 1 && `${selection.size} recipient${selection.size === 1 ? "" : "s"} selected`}
+          {step === 1 &&
+            plural(selection.size, m["compose.recipientsSelectedOne"], m["compose.recipientsSelectedOther"])}
           {step === 2 &&
             coverage.ok &&
-            `${selectedRecipients.length} recipients, data covers all slots`}
+            m["compose.dataCoversAllSlots"]({ count: selectedRecipients.length })}
           {step === 3 &&
             (messageReport.unknownSlots.length > 0
-              ? `Unknown slot: {${messageReport.unknownSlots[0]}}`
+              ? m["compose.unknownSlotFooter"]({ slot: `{${messageReport.unknownSlots[0]}}` })
               : message.subject.trim() === ""
-                ? "Write a subject to continue"
+                ? m["compose.writeSubjectToContinue"]()
                 : message.bodyHtml.trim() === ""
-                  ? "Write an email body to continue"
-                  : "Message looks good")}
+                  ? m["compose.writeBodyToContinue"]()
+                  : m["compose.messageLooksGood"]())}
           {step === 4 &&
-            (smtpValid ? "Connection details ready" : "Complete the SMTP and sender details")}
+            (smtpValid ? m["compose.connectionDetailsReady"]() : m["compose.completeSmtpDetails"]())}
           {step === 5 && generate.kind === "done" && (
             <>
-              {generate.job.recipients.filter((r) => r.status === "generated").length} generated,{" "}
-              {failedCount} failed
+              {m["compose.generatedFailedFooter"]({
+                generated: generate.job.recipients.filter((r) => r.status === "generated").length,
+                failed: failedCount,
+              })}
             </>
           )}
         </span>
         {step !== 6 && (
           <Button onClick={nextStep} disabled={!canNext}>
-            Next
+            {m["common.next"]()}
             <ChevronRight className="size-4" />
           </Button>
         )}
@@ -455,7 +460,7 @@ function WizardStepper({
               ) : (
                 <span className="shrink-0">{s.n}</span>
               )}
-              <span className="truncate">{s.label}</span>
+              <span className="truncate">{s.label()}</span>
             </button>
           </li>
         );
@@ -536,12 +541,12 @@ function RecipientsStep({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex min-w-52 flex-1 items-center gap-2">
-          <span className="sr-only">Search recipients</span>
+          <span className="sr-only">{m["compose.searchRecipients"]()}</span>
           <input
             type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search name, email, or any field…"
+            placeholder={m["compose.searchPlaceholder"]()}
             className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
           />
         </label>
@@ -550,13 +555,13 @@ function RecipientsStep({
           onChange={(event) =>
             setImportBatch(event.target.value === "" ? null : event.target.value)
           }
-          aria-label="Filter by import batch"
+          aria-label={m["compose.filterByBatch"]()}
           className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring"
         >
-          <option value="">All batches</option>
+          <option value="">{m["compose.allBatches"]()}</option>
           {batches.map((batch) => (
             <option key={batch.id} value={batch.id}>
-              {batch.count} recipients · {formatStamp(batch.createdAt)}
+              {m["compose.batchOption"]({ count: batch.count, stamp: formatStamp(batch.createdAt) })}
             </option>
           ))}
         </select>
@@ -565,15 +570,15 @@ function RecipientsStep({
             variant="outline"
             size="sm"
             onClick={() => void selectAllMatching()}
-            title={`Select all ${total} recipients matching the current filter`}
+            title={m["compose.selectAllMatchingTitle"]({ total })}
           >
-            <Users className="size-4" /> Select all {total}
+            <Users className="size-4" /> {m["compose.selectAllCount"]({ total })}
           </Button>
         )}
       </div>
 
       {listQuery.isError && (
-        <ErrorBanner message={errorMessage(listQuery.error, "Could not load recipients.")} />
+        <ErrorBanner message={errorMessage(listQuery.error, m["compose.couldNotLoadRecipients"]())} />
       )}
 
       {!listQuery.isError && total === 0 && (
@@ -581,22 +586,22 @@ function RecipientsStep({
           <Users className="size-10 text-muted-foreground" />
           <p className="text-sm font-medium">
             {debouncedSearch === "" && importBatch === null
-              ? "No recipients yet"
-              : "No recipients match this filter"}
+              ? m["compose.noRecipientsYet"]()
+              : m["compose.noRecipientsMatchFilter"]()}
           </p>
           <p className="max-w-sm text-xs text-muted-foreground">
             {debouncedSearch === "" && importBatch === null ? (
               <>
-                Import an Excel file first, then come back here to build a campaign.
+                {m["compose.noRecipientsHint"]()}
                 <Link
                   to="/import"
                   className="block text-primary underline-offset-2 hover:underline"
                 >
-                  Go to Import
+                  {m["compose.goToImport"]()}
                 </Link>
               </>
             ) : (
-              "Try a different search or batch filter."
+              m["compose.tryDifferentFilter"]()
             )}
           </p>
         </div>
@@ -611,7 +616,7 @@ function RecipientsStep({
                   <th className="w-10 px-3 py-2">
                     <input
                       type="checkbox"
-                      aria-label="Select all on this page"
+                      aria-label={m["compose.selectAllOnPage"]()}
                       checked={pageSelected}
                       ref={(node) => {
                         if (node !== null) node.indeterminate = pagePartial && !pageSelected;
@@ -627,9 +632,9 @@ function RecipientsStep({
                       className="size-4 accent-primary"
                     />
                   </th>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Email</th>
-                  <th className="hidden px-3 py-2 sm:table-cell">Phone</th>
+                  <th className="px-3 py-2">{m["compose.name"]()}</th>
+                  <th className="px-3 py-2">{m["compose.email"]()}</th>
+                  <th className="hidden px-3 py-2 sm:table-cell">{m["compose.phone"]()}</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -643,7 +648,7 @@ function RecipientsStep({
                     <td className="px-3 py-2">
                       <input
                         type="checkbox"
-                        aria-label={`Select ${recipient.name}`}
+                        aria-label={m["compose.selectRecipient"]({ name: recipient.name })}
                         checked={selection.has(recipient.id)}
                         onChange={() => toggle(recipient)}
                         className="size-4 accent-primary"
@@ -661,9 +666,7 @@ function RecipientsStep({
           </div>
 
           <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <span>
-              {selection.size} selected · {total} matching
-            </span>
+            <span>{m["compose.selectionCount"]({ selected: selection.size, total })}</span>
             <div className="flex items-center gap-2">
               <Button
                 variant="outline"
@@ -671,10 +674,10 @@ function RecipientsStep({
                 disabled={page <= 1}
                 onClick={() => setPage((p) => p - 1)}
               >
-                <ChevronLeft className="size-4" /> Prev
+                <ChevronLeft className="size-4" /> {m["common.prev"]()}
               </Button>
               <span>
-                Page {Math.min(page, totalPages)} of {totalPages}
+                {m["compose.pageOf"]({ page: Math.min(page, totalPages), total: totalPages })}
               </span>
               <Button
                 variant="outline"
@@ -682,7 +685,7 @@ function RecipientsStep({
                 disabled={page >= totalPages}
                 onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
               >
-                Next <ChevronRight className="size-4" />
+                {m["common.next"]()} <ChevronRight className="size-4" />
               </Button>
             </div>
           </div>
@@ -711,7 +714,7 @@ function TemplateStep({
     <div className="flex max-w-2xl flex-col gap-4">
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-muted-foreground">
-          Letter or certificate template
+          {m["compose.templateLabel"]()}
         </span>
         <select
           value={template?.id ?? ""}
@@ -720,7 +723,7 @@ function TemplateStep({
           }
           className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring"
         >
-          <option value="">Choose a template…</option>
+          <option value="">{m["compose.chooseTemplate"]()}</option>
           {templates.map((t) => (
             <option key={t.id} value={t.id}>
               {t.name}
@@ -731,11 +734,11 @@ function TemplateStep({
 
       {templates.length === 0 && (
         <p className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
-          No templates registered yet.{" "}
+          {m["compose.noTemplatesRegistered"]()}{" "}
           <Link to="/templates" className="underline underline-offset-2">
-            Register a template
+            {m["compose.registerTemplateLink"]()}
           </Link>{" "}
-          first, then come back.
+          {m["compose.noTemplatesRegisteredHint"]()}
         </p>
       )}
 
@@ -755,7 +758,7 @@ function TemplateStep({
           <div className="mt-3 space-y-3">
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Required slots
+                {m["compose.requiredSlots"]()}
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {template.slots.map((slot) => (
@@ -772,7 +775,7 @@ function TemplateStep({
             </div>
             <div>
               <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Output pattern
+                {m["compose.outputPattern"]()}
               </p>
               <p className="rounded-md border bg-background px-3 py-2">
                 <PatternPreview pattern={template.outputPattern} slots={template.slots} />
@@ -785,7 +788,7 @@ function TemplateStep({
       {template !== null && coverage.ok && (
         <p className="flex items-center gap-2 text-sm text-emerald-700">
           <Check className="size-4" />
-          All {selectedRecipients.length} selected recipients have data for every required slot.
+          {m["compose.allCovered"]({ count: selectedRecipients.length })}
         </p>
       )}
 
@@ -794,22 +797,27 @@ function TemplateStep({
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           <div>
             <p className="font-medium">
-              {coverage.recipientsMissing} of {selectedRecipients.length} selected recipients are
-              missing data for:
+              {m["compose.missingDataSummary"]({
+                missing: coverage.recipientsMissing,
+                count: selectedRecipients.length,
+              })}
             </p>
             <ul className="mt-1 list-inside list-disc">
               {coverage.slots.map((entry) => (
                 <li key={entry.slot}>
-                  {"{"}
-                  {entry.slot}
-                  {"}"} - {entry.missingCount} recipient{entry.missingCount === 1 ? "" : "s"}
+                  {entry.missingCount === 1
+                    ? m["compose.slotMissingCountOne"]({
+                        slot: `{${entry.slot}}`,
+                        count: entry.missingCount,
+                      })
+                    : m["compose.slotMissingCountOther"]({
+                        slot: `{${entry.slot}}`,
+                        count: entry.missingCount,
+                      })}
                 </li>
               ))}
             </ul>
-            <p className="mt-1">
-              Fix the recipients' data or pick another template before continuing - missing slots
-              produce broken PDFs.
-            </p>
+            <p className="mt-1">{m["compose.missingDataHint"]()}</p>
           </div>
         </div>
       )}
@@ -920,19 +928,21 @@ function MessageStep({
   return (
     <div className="flex max-w-3xl flex-col gap-4">
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-muted-foreground">Subject</span>
+        <span className="mb-1 block text-xs font-medium text-muted-foreground">
+          {m["compose.subject"]()}
+        </span>
         <input
           type="text"
           value={message.subject}
           onChange={(event) => onChange({ ...message, subject: event.target.value })}
-          placeholder="LOA for {name} - {instansi}"
+          placeholder={m["compose.subjectPlaceholder"]({ name: "{name}", instansi: "{instansi}" })}
           className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
         />
       </label>
 
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-muted-foreground">
-          HTML body - type {"{"} to insert a recipient field
+          {m["compose.bodyLabel"]()}
         </span>
         <div className="relative">
           <textarea
@@ -946,7 +956,7 @@ function MessageStep({
             onKeyDown={onBodyKeyDown}
             onSelect={(event) => updateCompletion(event.currentTarget)}
             onClick={(event) => updateCompletion(event.currentTarget)}
-            placeholder={"<p>Dear {name},</p>\n<p>Congratulations on your scholarship.</p>"}
+            placeholder={m["compose.bodyPlaceholder"]({ name: "{name}" })}
             className="w-full resize-y rounded-md border bg-background px-3 py-2 font-mono text-xs leading-relaxed outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
           />
           {completion !== null && suggestions.length > 0 && (
@@ -979,13 +989,15 @@ function MessageStep({
           <X className="mt-0.5 size-3.5 shrink-0" />
           <div>
             <p className="font-medium">
-              Unknown slot{report.unknownSlots.length === 1 ? "" : "s"}:{" "}
-              {report.unknownSlots.map((s) => `{${s}}`).join(", ")}
+              {report.unknownSlots.length === 1
+                ? m["compose.unknownSlotTitleOne"]({
+                    list: report.unknownSlots.map((s) => `{${s}}`).join(", "),
+                  })
+                : m["compose.unknownSlotTitleOther"]({
+                    list: report.unknownSlots.map((s) => `{${s}}`).join(", "),
+                  })}
             </p>
-            <p className="mt-1">
-              No selected recipient has this field. Fix the placeholder or the recipients' data -
-              sending would fail for everyone.
-            </p>
+            <p className="mt-1">{m["compose.unknownSlotHint"]()}</p>
           </div>
         </div>
       )}
@@ -994,13 +1006,11 @@ function MessageStep({
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
           <div>
             <p className="font-medium">
-              Some recipients are missing data for:{" "}
-              {report.missing.map((m) => `{${m.slot}} (${m.missingCount})`).join(", ")}
+              {m["compose.missingSlotTitle"]({
+                list: report.missing.map((entry) => `{${entry.slot}} (${entry.missingCount})`).join(", "),
+              })}
             </p>
-            <p className="mt-1">
-              Those recipients will fail at send time while the rest of the batch continues. Fix
-              their data to avoid failures.
-            </p>
+            <p className="mt-1">{m["compose.missingSlotHint"]()}</p>
           </div>
         </div>
       )}
@@ -1008,11 +1018,12 @@ function MessageStep({
       {previews.length > 0 && (
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Live preview
+            {m["compose.livePreview"]()}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Rendered for the first {previews.length} selected recipient
-            {previews.length === 1 ? "" : "s"} - the message updates as you type.
+            {previews.length === 1
+              ? m["compose.livePreviewHintOne"]({ count: previews.length })
+              : m["compose.livePreviewHintOther"]({ count: previews.length })}
           </p>
           <div className="mt-3 grid gap-3">
             {previews.map((preview) => (
@@ -1032,7 +1043,7 @@ function MessageStep({
                   <>
                     <p className="mt-2 text-sm font-medium">{preview.subject}</p>
                     <iframe
-                      title={`Preview for ${preview.recipient.name}`}
+                      title={m["compose.previewFor"]({ name: preview.recipient.name })}
                       sandbox=""
                       srcDoc={`<!doctype html><html><head><style>body{font-family:system-ui,sans-serif;font-size:13px;margin:0}</style></head><body>${preview.body}</body></html>`}
                       className="mt-1 h-28 w-full rounded border bg-white"
@@ -1108,7 +1119,7 @@ function SmtpStep({
       }
       setTestState({ kind: "ok" });
     } catch (error) {
-      setTestState({ kind: "error", message: errorMessage(error, "Connection failed.") });
+      setTestState({ kind: "error", message: errorMessage(error, m["compose.connectionFailed"]()) });
     }
   };
 
@@ -1130,7 +1141,7 @@ function SmtpStep({
         profileName: "",
       });
     } catch (error) {
-      setSaveError(errorMessage(error, "Could not save the profile."));
+      setSaveError(errorMessage(error, m["smtp.couldNotSaveProfile"]()));
     }
   };
 
@@ -1141,7 +1152,7 @@ function SmtpStep({
     <div className="flex max-w-2xl flex-col gap-4">
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Email connection
+          {m["compose.emailConnection"]()}
         </h3>
         <div className="mt-3 flex gap-2">
           <button
@@ -1151,7 +1162,7 @@ function SmtpStep({
               config.mode === "profile" ? "border-primary bg-primary/5" : "hover:bg-muted"
             }`}
           >
-            Saved profile
+            {m["compose.savedProfile"]()}
           </button>
           <button
             type="button"
@@ -1160,7 +1171,7 @@ function SmtpStep({
               config.mode === "inline" ? "border-primary bg-primary/5" : "hover:bg-muted"
             }`}
           >
-            Enter details (this job only)
+            {m["compose.enterDetails"]()}
           </button>
         </div>
 
@@ -1168,7 +1179,7 @@ function SmtpStep({
           <div className="mt-3 space-y-3">
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                Saved profile
+                {m["compose.savedProfile"]()}
               </span>
               <select
                 value={config.profileId ?? ""}
@@ -1181,7 +1192,7 @@ function SmtpStep({
                 }}
                 className={inputClass}
               >
-                <option value="">Choose a profile…</option>
+                <option value="">{m["compose.chooseProfile"]()}</option>
                 {profiles.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} · {p.host}:{p.port}
@@ -1191,10 +1202,9 @@ function SmtpStep({
             </label>
             {profiles.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                No saved profiles yet - switch to "Enter details" and use "Save as profile", or add
-                one in{" "}
+                {m["compose.noSavedProfilesHint"]()}{" "}
                 <Link to="/settings" className="text-primary underline underline-offset-2">
-                  Settings
+                  {m["compose.settingsLink"]()}
                 </Link>
                 .
               </p>
@@ -1209,7 +1219,9 @@ function SmtpStep({
         ) : (
           <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-xs font-medium text-muted-foreground">Host</span>
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                {m["compose.host"]()}
+              </span>
               <input
                 type="text"
                 value={config.host}
@@ -1220,7 +1232,7 @@ function SmtpStep({
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                Port (465 = implicit TLS, else STARTTLS)
+                {m["compose.portLabel"]()}
               </span>
               <input
                 type="number"
@@ -1231,7 +1243,7 @@ function SmtpStep({
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                Username (email address)
+                {m["compose.usernameLabel"]()}
               </span>
               <input
                 type="text"
@@ -1243,13 +1255,13 @@ function SmtpStep({
             </label>
             <label className="block">
               <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                App password
+                {m["compose.appPasswordLabel"]()}
               </span>
               <input
                 type="password"
                 value={config.password}
                 onChange={(event) => onChange({ ...config, password: event.target.value })}
-                placeholder="16-character app password"
+                placeholder={m["compose.appPasswordPlaceholder"]()}
                 className={inputClass}
               />
             </label>
@@ -1261,7 +1273,7 @@ function SmtpStep({
                   onChange={(event) => onChange({ ...config, saveAsProfile: event.target.checked })}
                   className="size-4 accent-primary"
                 />
-                Save as profile
+                {m["compose.saveAsProfile"]()}
               </label>
               {config.saveAsProfile && (
                 <div className="mt-2 flex items-center gap-2">
@@ -1269,7 +1281,7 @@ function SmtpStep({
                     type="text"
                     value={config.profileName}
                     onChange={(event) => onChange({ ...config, profileName: event.target.value })}
-                    placeholder="Profile name, e.g. Gmail utama"
+                    placeholder={m["compose.profileNamePlaceholder"]()}
                     className={inputClass}
                   />
                   <Button
@@ -1278,7 +1290,7 @@ function SmtpStep({
                     disabled={config.profileName.trim() === ""}
                     onClick={() => void saveProfile()}
                   >
-                    Save
+                    {m["common.save"]()}
                   </Button>
                 </div>
               )}
@@ -1306,11 +1318,11 @@ function SmtpStep({
             ) : (
               <Plug className="size-4" />
             )}
-            Test Connection
+            {m["compose.testConnectionButton"]()}
           </Button>
           {testState.kind === "ok" && (
             <p className="flex items-center gap-1.5 text-xs text-emerald-700">
-              <Check className="size-4" /> Connected - the server accepted these credentials.
+              <Check className="size-4" /> {m["smtp.connected"]()}
             </p>
           )}
           {testState.kind === "error" && (
@@ -1321,12 +1333,12 @@ function SmtpStep({
 
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Sender identity
+          {m["compose.senderIdentity"]()}
         </h3>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              Sender name
+              {m["compose.senderName"]()}
             </span>
             <input
               type="text"
@@ -1338,7 +1350,7 @@ function SmtpStep({
           </label>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              Sender address
+              {m["compose.senderAddress"]()}
             </span>
             <input
               type="email"
@@ -1354,9 +1366,9 @@ function SmtpStep({
       <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Sending rate
+            {m["compose.sendingRate"]()}
           </h3>
-          <span className="font-mono text-sm">{config.delayMs} ms / email</span>
+          <span className="font-mono text-sm">{m["compose.sendingRateMs"]({ ms: config.delayMs })}</span>
         </div>
         <input
           type="range"
@@ -1371,9 +1383,7 @@ function SmtpStep({
           }}
           className="mt-3 w-full accent-primary"
         />
-        <p className="mt-1 text-xs text-muted-foreground">
-          Applies live - a running job picks up changes without restarting.
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{m["compose.sendingRateHint"]()}</p>
       </div>
     </div>
   );
@@ -1493,12 +1503,12 @@ function GenerateStep({
     } catch (error) {
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
-      onStateChange({ kind: "error", message: errorMessage(error, "Generation failed.") });
+      onStateChange({ kind: "error", message: errorMessage(error, m["compose.generationFailed"]()) });
     }
   };
 
   if (template === null) {
-    return <p className="text-sm text-muted-foreground">Go back and choose a template first.</p>;
+    return <p className="text-sm text-muted-foreground">{m["compose.chooseTemplateFirst"]()}</p>;
   }
 
   const counts =
@@ -1514,28 +1524,25 @@ function GenerateStep({
     <div className="flex max-w-3xl flex-col gap-4">
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Campaign summary
+          {m["compose.campaignSummary"]()}
         </h3>
         <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-muted-foreground">Recipients</dt>
+            <dt className="text-muted-foreground">{m["compose.recipients"]()}</dt>
             <dd className="font-medium">{recipients.length}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Template</dt>
+            <dt className="text-muted-foreground">{m["compose.template"]()}</dt>
             <dd className="font-medium">{template.name}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Output folder</dt>
+            <dt className="text-muted-foreground">{m["compose.outputFolder"]()}</dt>
             <dd className="truncate font-mono text-xs" title={outputDir ?? undefined}>
               {outputDir ?? "-"}
             </dd>
           </div>
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">
-          One PDF per recipient, named by the template's output pattern. Failures are reported per
-          recipient while the rest of the batch continues.
-        </p>
+        <p className="mt-2 text-xs text-muted-foreground">{m["compose.campaignSummaryHint"]()}</p>
       </div>
 
       {generateError !== null && (
@@ -1545,7 +1552,7 @@ function GenerateStep({
       {state.kind === "idle" && (
         <div>
           <Button onClick={() => void startGeneration()}>
-            <FileText className="size-4" /> Generate PDFs
+            <FileText className="size-4" /> {m["compose.generatePdfs"]()}
           </Button>
         </div>
       )}
@@ -1554,10 +1561,10 @@ function GenerateStep({
         <div className="rounded-lg border bg-card p-4">
           <div className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2 font-medium">
-              <Loader2 className="size-4 animate-spin" /> Generating…
+              <Loader2 className="size-4 animate-spin" /> {m["compose.generating"]()}
             </span>
             <span className="text-muted-foreground">
-              {state.current} of {state.total}
+              {m["compose.ofTotal"]({ current: state.current, total: state.total })}
             </span>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
@@ -1567,14 +1574,18 @@ function GenerateStep({
             />
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            {counts.generated} generated · {counts.failed} failed · {counts.pending} pending
+            {m["compose.generatedCounts"]({
+              generated: counts.generated,
+              failed: counts.failed,
+              pending: counts.pending,
+            })}
           </p>
         </div>
       )}
 
       {state.kind === "error" && (
         <div className="flex items-center gap-2">
-          <Button onClick={() => void startGeneration()}>Try again</Button>
+          <Button onClick={() => void startGeneration()}>{m["compose.tryAgain"]()}</Button>
         </div>
       )}
 
@@ -1590,13 +1601,15 @@ function GenerateStep({
             {failed.length === 0 ? (
               <>
                 <Check className="size-4 shrink-0" />
-                All {generated.length} PDFs generated.
+                {m["compose.allGenerated"]({ count: generated.length })}
               </>
             ) : (
               <>
                 <AlertTriangle className="size-4 shrink-0" />
-                {generated.length} generated, {failed.length} failed. Failed recipients are excluded
-                from the send automatically.
+                {m["compose.generatedWithFailures"]({
+                  generated: generated.length,
+                  failed: failed.length,
+                })}
               </>
             )}
           </div>
@@ -1604,7 +1617,7 @@ function GenerateStep({
           {failed.length > 0 && (
             <div className="rounded-lg border bg-card p-4">
               <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Failed recipients ({failed.length})
+                {m["compose.failedRecipientsTitle"]({ count: failed.length })}
               </h3>
               <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto text-sm">
                 {failed.map((f) => {
@@ -1630,17 +1643,17 @@ function GenerateStep({
             <div className="rounded-lg border bg-card p-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Spot-check
+                  {m["compose.spotCheck"]()}
                 </h3>
                 <span className="text-xs text-muted-foreground">
-                  {clampedIndex + 1} of {spotRecipients.length}
+                  {m["compose.spotIndex"]({ index: clampedIndex + 1, total: spotRecipients.length })}
                 </span>
               </div>
               <div className="mt-3 grid gap-4 sm:grid-cols-2">
                 <div>
                   {spotPdf === null ? (
                     <div className="flex h-48 items-center justify-center rounded-md border bg-muted/30 text-sm text-muted-foreground">
-                      <Loader2 className="mr-2 size-4 animate-spin" /> Loading preview…
+                      <Loader2 className="mr-2 size-4 animate-spin" /> {m["compose.loadingPreview"]()}
                     </div>
                   ) : (
                     <PdfPreview dataBase64={spotPdf.dataBase64} />
@@ -1678,7 +1691,7 @@ function GenerateStep({
                   disabled={clampedIndex <= 0}
                   onClick={() => setSpotIndex((i) => Math.max(0, i - 1))}
                 >
-                  <ChevronLeft className="size-4" /> Prev
+                  <ChevronLeft className="size-4" /> {m["common.prev"]()}
                 </Button>
                 <Button
                   variant="outline"
@@ -1686,7 +1699,7 @@ function GenerateStep({
                   disabled={clampedIndex >= spotRecipients.length - 1}
                   onClick={() => setSpotIndex((i) => i + 1)}
                 >
-                  Next <ChevronRight className="size-4" />
+                  {m["common.next"]()} <ChevronRight className="size-4" />
                 </Button>
               </div>
             </div>
@@ -1783,7 +1796,11 @@ function SendStep({
       );
     } catch (error) {
       if (flow !== runRef.current) return;
-      onStateChange({ kind: "error", message: errorMessage(error, "Sending failed."), jobId });
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, m["compose.sendingFailed"]()),
+        jobId,
+      });
     }
   };
 
@@ -1823,7 +1840,7 @@ function SendStep({
     } catch (error) {
       onStateChange({
         kind: "error",
-        message: errorMessage(error, "Could not start the send."),
+        message: errorMessage(error, m["compose.couldNotStartSend"]()),
         jobId: null,
       });
     }
@@ -1840,7 +1857,7 @@ function SendStep({
     } catch (error) {
       onStateChange({
         kind: "error",
-        message: errorMessage(error, "Could not pause the send."),
+        message: errorMessage(error, m["compose.couldNotPauseSend"]()),
         jobId,
       });
     }
@@ -1859,14 +1876,14 @@ function SendStep({
   };
 
   const cancelSend = async (jobId: string, current: number, total: number): Promise<void> => {
-    if (!window.confirm(`${current} of ${total} sent - cancel anyway?`)) return;
+    if (!window.confirm(m["compose.cancelSendConfirm"]({ current, total }))) return;
     try {
       const job = await window.api.send.cancelSend(jobId);
       onStateChange({ kind: "cancelled", jobId, job });
     } catch (error) {
       onStateChange({
         kind: "error",
-        message: errorMessage(error, "Could not cancel the send."),
+        message: errorMessage(error, m["compose.couldNotCancelSend"]()),
         jobId,
       });
     }
@@ -1887,7 +1904,7 @@ function SendStep({
     } catch (error) {
       onStateChange({
         kind: "error",
-        message: errorMessage(error, "Could not retry the failures."),
+        message: errorMessage(error, m["compose.couldNotRetryFailures"]()),
         jobId: job.id,
       });
     }
@@ -1900,7 +1917,7 @@ function SendStep({
       if (job === null) {
         onStateChange({
           kind: "error",
-          message: "The send job no longer exists.",
+          message: m["compose.sendJobNoLongerExists"](),
           jobId: null,
         });
         return;
@@ -1909,7 +1926,7 @@ function SendStep({
     } catch (error) {
       onStateChange({
         kind: "error",
-        message: errorMessage(error, "Could not resume the send."),
+        message: errorMessage(error, m["compose.couldNotResumeSend"]()),
         jobId,
       });
     }
@@ -1923,7 +1940,7 @@ function SendStep({
 
   const smtpLabel =
     smtp.mode === "profile" && smtp.profileId !== null
-      ? "Saved profile"
+      ? m["compose.savedProfile"]()
       : `${smtp.host}:${smtp.port}`;
 
   // The per-recipient log rows, one shape for every state: the live
@@ -1965,21 +1982,21 @@ function SendStep({
     <div className="flex max-w-3xl flex-col gap-4">
       <div className="rounded-lg border bg-card p-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Send summary
+          {m["compose.sendSummary"]()}
         </h3>
         <dl className="mt-2 grid grid-cols-1 gap-2 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-muted-foreground">Recipients</dt>
+            <dt className="text-muted-foreground">{m["compose.recipients"]()}</dt>
             <dd className="font-medium">{recipientIds.length}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Subject</dt>
+            <dt className="text-muted-foreground">{m["compose.subject"]()}</dt>
             <dd className="truncate font-medium" title={message.subject}>
               {message.subject}
             </dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Sender</dt>
+            <dt className="text-muted-foreground">{m["compose.sender"]()}</dt>
             <dd
               className="truncate font-medium"
               title={`${smtp.senderName} <${smtp.senderAddress}>`}
@@ -1988,41 +2005,40 @@ function SendStep({
             </dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Connection</dt>
+            <dt className="text-muted-foreground">{m["compose.connection"]()}</dt>
             <dd className="font-medium">{smtpLabel}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Pacing</dt>
-            <dd className="font-medium">{smtp.delayMs} ms / email</dd>
+            <dt className="text-muted-foreground">{m["compose.pacing"]()}</dt>
+            <dd className="font-medium">{m["compose.sendingRateMs"]({ ms: smtp.delayMs })}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Attachments</dt>
-            <dd className="font-medium">{recipientIds.length} generated PDFs</dd>
+            <dt className="text-muted-foreground">{m["compose.attachments"]()}</dt>
+            <dd className="font-medium">
+              {m["compose.generatedPdfsCount"]({ count: recipientIds.length })}
+            </dd>
           </div>
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">
-          The pre-flight checks the SMTP connection and confirms the generated attachments before
-          the first email goes out.
-        </p>
+        <p className="mt-2 text-xs text-muted-foreground">{m["compose.preflightHint"]()}</p>
       </div>
 
       {state.kind === "idle" && (
         <div className="flex flex-col items-start gap-2">
           <Button disabled={recipientIds.length === 0} onClick={() => void startSending()}>
-            <Send className="size-4" /> Send {recipientIds.length} email
-            {recipientIds.length === 1 ? "" : "s"}
+            <Send className="size-4" />{" "}
+            {recipientIds.length === 1
+              ? m["compose.sendCountOne"]({ count: recipientIds.length })
+              : m["compose.sendCountOther"]({ count: recipientIds.length })}
           </Button>
           {recipientIds.length === 0 && (
-            <p className="text-xs text-muted-foreground">
-              No recipients have a generated attachment - go back and generate the PDFs first.
-            </p>
+            <p className="text-xs text-muted-foreground">{m["compose.noGeneratedAttachments"]()}</p>
           )}
         </div>
       )}
 
       {state.kind === "starting" && (
         <div className="flex items-center gap-2 rounded-lg border bg-card p-4 text-sm">
-          <Loader2 className="size-4 animate-spin" /> Preparing the send…
+          <Loader2 className="size-4 animate-spin" /> {m["compose.preparingSend"]()}
         </div>
       )}
 
@@ -2032,16 +2048,20 @@ function SendStep({
             <span className="flex items-center gap-2 font-medium">
               {state.kind === "paused" || (state.kind === "running" && state.paused) ? (
                 <>
-                  <Pause className="size-4" /> Paused
+                  <Pause className="size-4" /> {m["status.paused"]()}
                 </>
               ) : (
                 <>
-                  <Loader2 className="size-4 animate-spin" /> Sending…
+                  <Loader2 className="size-4 animate-spin" /> {m["compose.sending"]()}
                 </>
               )}
             </span>
             <span className="text-muted-foreground">
-              {sentCount} sent · {failedCount} failed · {Math.max(0, total - current)} pending
+              {m["compose.sendCounts"]({
+                sent: sentCount,
+                failed: failedCount,
+                pending: Math.max(0, total - current),
+              })}
             </span>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
@@ -2053,21 +2073,17 @@ function SendStep({
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {state.kind === "running" && !state.paused && (
               <Button variant="outline" size="sm" onClick={() => void pauseSend(state.jobId)}>
-                <Pause className="size-4" /> Pause
+                <Pause className="size-4" /> {m["common.pause"]()}
               </Button>
             )}
             {state.kind === "paused" && (
               <Button
                 size="sm"
                 disabled={state.windingDown}
-                title={
-                  state.windingDown
-                    ? "The in-flight email is finishing - resume in a moment"
-                    : undefined
-                }
+                title={state.windingDown ? m["compose.windingDownTitle"]() : undefined}
                 onClick={() => resumeSend(state.job)}
               >
-                <Play className="size-4" /> Resume
+                <Play className="size-4" /> {m["common.resume"]()}
               </Button>
             )}
             <Button
@@ -2075,7 +2091,7 @@ function SendStep({
               size="sm"
               onClick={() => void cancelSend(state.jobId, current, total)}
             >
-              <CircleStop className="size-4" /> Cancel
+              <CircleStop className="size-4" /> {m["common.cancel"]()}
             </Button>
           </div>
         </div>
@@ -2084,11 +2100,11 @@ function SendStep({
       {(state.kind === "running" || state.kind === "paused") && (
         <div className="rounded-lg border bg-card p-4">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Per-recipient log
+            {m["compose.perRecipientLog"]()}
           </h3>
           <ul ref={logRef} className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
             {rowList.length === 0 && (
-              <li className="text-xs text-muted-foreground">Waiting for the first email…</li>
+              <li className="text-xs text-muted-foreground">{m["compose.waitingFirstEmail"]()}</li>
             )}
             {rowList.map(([recipientId, row]) => (
               <SendLogRowView key={recipientId} row={row} />
@@ -2109,25 +2125,25 @@ function SendStep({
             {failedCount === 0 ? (
               <>
                 <Check className="size-4 shrink-0" />
-                All {sentCount} emails sent.
+                {m["compose.allEmailsSent"]({ count: sentCount })}
               </>
             ) : (
               <>
                 <AlertTriangle className="size-4 shrink-0" />
-                {sentCount} sent, {failedCount} failed. Retry the failures below.
+                {m["compose.sentWithFailures"]({ sent: sentCount, failed: failedCount })}
               </>
             )}
           </div>
           {failedCount > 0 && (
             <div>
               <Button onClick={() => void retryFailures(state.job)}>
-                <RotateCcw className="size-4" /> Retry Failures
+                <RotateCcw className="size-4" /> {m["common.retryFailures"]()}
               </Button>
             </div>
           )}
           <div className="rounded-lg border bg-card p-4">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Per-recipient log
+              {m["compose.perRecipientLog"]()}
             </h3>
             <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
               {rowList.map(([recipientId, row]) => (
@@ -2143,17 +2159,18 @@ function SendStep({
           <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700">
             <CircleStop className="mt-0.5 size-4 shrink-0" />
             <div>
-              <p className="font-medium">Send cancelled.</p>
+              <p className="font-medium">{m["compose.sendCancelled"]()}</p>
               <p className="mt-1 text-xs">
-                {sentCount} sent, {Math.max(0, state.job.total - sentCount - failedCount)} skipped.
-                No one was double-sent. To send to the skipped recipients, go back and start a new
-                send from the same generated PDFs.
+                {m["compose.cancelledDetail"]({
+                  sent: sentCount,
+                  skipped: Math.max(0, state.job.total - sentCount - failedCount),
+                })}
               </p>
             </div>
           </div>
           <div className="rounded-lg border bg-card p-4">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Per-recipient log
+              {m["compose.perRecipientLog"]()}
             </h3>
             <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
               {rowList.map(([recipientId, row]) => (
@@ -2173,11 +2190,11 @@ function SendStep({
               <div className="flex gap-2">
                 {jobId !== null && (
                   <Button onClick={() => void resumeFromError(jobId)}>
-                    <Play className="size-4" /> Resume
+                    <Play className="size-4" /> {m["common.resume"]()}
                   </Button>
                 )}
                 <Button variant="outline" onClick={() => void startSending()}>
-                  Try again
+                  {m["compose.tryAgain"]()}
                 </Button>
               </div>
             </div>
@@ -2199,14 +2216,16 @@ function SendLogRowView({ row }: { row: SendLogRow }) {
         <span className="mt-0.5 size-3.5 shrink-0 text-muted-foreground">·</span>
       )}
       <span className="min-w-0">
-        <span className="font-medium">{row.name ?? "Recipient"}</span>
+        <span className="font-medium">{row.name ?? m["compose.recipient"]()}</span>
         {row.status === "sent" && row.messageId !== null && (
           <span className="text-muted-foreground"> - {row.messageId}</span>
         )}
         {row.status === "failed" && row.error !== null && (
           <span className="text-destructive"> - {row.error}</span>
         )}
-        {row.status === "skipped" && <span className="text-muted-foreground"> - skipped</span>}
+        {row.status === "skipped" && (
+          <span className="text-muted-foreground">{m["compose.rowSkipped"]()}</span>
+        )}
       </span>
     </li>
   );

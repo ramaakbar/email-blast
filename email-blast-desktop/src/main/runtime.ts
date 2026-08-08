@@ -33,9 +33,10 @@ export type AppServices =
 export const rootLayer = (
   db: Database.Database,
   defaults: DefaultPaths,
+  systemLocale: string = "en",
 ): Layer.Layer<AppServices> =>
   Layer.mergeAll(
-    Settings.Live(db, defaults),
+    Settings.Live(db, defaults, systemLocale),
     ImportService.Live(db),
     RecipientsService.Live(db),
     TemplatesService.Live(db),

@@ -4,33 +4,42 @@ import Database from "better-sqlite3";
 import {
   DEFAULT_LIBREOFFICE_CHECKED,
   DEFAULT_RATE_LIMIT_DELAY_MS,
+  DEFAULT_UI_LOCALE,
+  normalizeUiLocale,
   RATE_LIMIT_MAX_MS,
   RATE_LIMIT_MIN_MS,
   SETTING_KEYS,
+  type UiLocale,
 } from "../../shared/settings";
 import type { DefaultPaths } from "./default-paths";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 
 /**
  * The settings the app lives by, typed instead of raw key/values:
- * the sending rate limit, the templates/output directories, and the
- * first-launch LibreOffice check flag. Values persist in SQLite and
- * round-trip through the Settings layer; missing rows fall back to
- * the defaults from spec decision 7.
+ * the sending rate limit, the templates/output directories, the
+ * first-launch LibreOffice check flag, and the UI language (ADR-0004).
+ * Values persist in SQLite and round-trip through the Settings layer;
+ * missing rows fall back to the defaults from spec decision 7.
  */
 
 /**
  * Seeds the default settings on first run. INSERT OR IGNORE means a later
  * launch never clobbers user-changed values. Owned by the Settings domain;
  * the same constants back the read fallbacks, so seed and fallback cannot
- * drift apart.
+ * drift apart. The UI language (ADR-0004) is seeded from the OS locale
+ * normalized against the shipped locales, defaulting to English.
  */
-export function seedSettings(db: Database.Database, defaults: DefaultPaths): void {
+export function seedSettings(
+  db: Database.Database,
+  defaults: DefaultPaths,
+  systemLocale: string = DEFAULT_UI_LOCALE,
+): void {
   const insert = db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)");
   insert.run(SETTING_KEYS.rateLimitDelayMs, String(DEFAULT_RATE_LIMIT_DELAY_MS));
   insert.run(SETTING_KEYS.templatesDir, defaults.templatesDir);
   insert.run(SETTING_KEYS.outputDir, defaults.outputDir);
   insert.run(SETTING_KEYS.libreofficeChecked, String(DEFAULT_LIBREOFFICE_CHECKED));
+  insert.run(SETTING_KEYS.language, normalizeUiLocale(systemLocale));
 }
 
 export interface SettingsShape {
@@ -42,6 +51,9 @@ export interface SettingsShape {
   readonly setOutputDir: (dir: string) => Effect.Effect<void>;
   readonly getLibreOfficeChecked: () => Effect.Effect<boolean>;
   readonly setLibreOfficeChecked: (checked: boolean) => Effect.Effect<void>;
+  /** The persisted UI language (ADR-0004), normalized to a shipped locale. */
+  readonly getLanguage: () => Effect.Effect<UiLocale>;
+  readonly setLanguage: (locale: UiLocale) => Effect.Effect<void>;
   /** Creates the configured templates/output directories if absent. */
   readonly ensureDirectories: () => Effect.Effect<void>;
 }
@@ -109,6 +121,12 @@ export function makeSettings(repo: SqliteRepoShape, defaults: DefaultPaths): Set
     getLibreOfficeChecked: () =>
       readBoolSetting(get, SETTING_KEYS.libreofficeChecked, DEFAULT_LIBREOFFICE_CHECKED),
     setLibreOfficeChecked: (checked) => set(SETTING_KEYS.libreofficeChecked, String(checked)),
+    getLanguage: () =>
+      pipe(
+        readStringSetting(get, SETTING_KEYS.language, DEFAULT_UI_LOCALE),
+        Effect.map((raw) => normalizeUiLocale(raw)),
+      ),
+    setLanguage: (locale) => set(SETTING_KEYS.language, locale),
     ensureDirectories: () =>
       Effect.gen(function* () {
         const templatesDir = yield* readStringSetting(
@@ -132,8 +150,9 @@ export class Settings extends Context.Service<Settings, SettingsShape>()("Settin
   static readonly Live = (
     db: Database.Database,
     defaults: DefaultPaths,
+    systemLocale: string = DEFAULT_UI_LOCALE,
   ): Layer.Layer<Settings | SqliteRepo> => {
-    seedSettings(db, defaults);
+    seedSettings(db, defaults, systemLocale);
     return Layer.provideMerge(
       Layer.effect(
         Settings,

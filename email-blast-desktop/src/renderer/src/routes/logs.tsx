@@ -8,6 +8,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { Calendar, Loader2, Play, RotateCcw } from "lucide-react";
+import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { SendStatusBadge } from "@/components/send-status-badge";
 import { Button } from "@/components/ui/button";
@@ -21,12 +22,12 @@ export const Route = createFileRoute("/logs")({
 });
 
 const ALL_STATUSES = "all";
-const STATUS_OPTIONS: ReadonlyArray<{ value: SendJobStatus; label: string }> = [
-  { value: "pending", label: "Pending" },
-  { value: "sending", label: "Sending" },
-  { value: "paused", label: "Paused" },
-  { value: "completed", label: "Completed" },
-  { value: "cancelled", label: "Cancelled" },
+const STATUS_OPTIONS: ReadonlyArray<{ value: SendJobStatus; label: () => string }> = [
+  { value: "pending", label: () => m["status.pending"]() },
+  { value: "sending", label: () => m["status.sending"]() },
+  { value: "paused", label: () => m["status.paused"]() },
+  { value: "completed", label: () => m["status.completed"]() },
+  { value: "cancelled", label: () => m["status.cancelled"]() },
 ];
 
 const columnHelper = createColumnHelper<SendJobSummary>();
@@ -90,7 +91,7 @@ function LogsPage() {
   const columns = useMemo(
     () => [
       columnHelper.accessor("status", {
-        header: "Status",
+        header: m["logs.status"],
         cell: (info) => (
           <span className="flex items-center gap-2">
             <SendStatusBadge status={info.getValue()} />
@@ -98,22 +99,25 @@ function LogsPage() {
               // The delivered count, not the cursor: a paused job whose
               // last attempts failed should not claim them as sent.
               <span className="whitespace-nowrap text-xs text-amber-700">
-                Paused - {info.row.original.sentCount} of {info.row.original.total} sent
+                {m["logs.pausedProgress"]({
+                  sent: info.row.original.sentCount,
+                  total: info.row.original.total,
+                })}
               </span>
             )}
           </span>
         ),
       }),
       columnHelper.accessor("subject", {
-        header: "Subject",
+        header: m["logs.subject"],
         cell: (info) => <span className="font-medium">{info.getValue()}</span>,
       }),
       columnHelper.accessor("templateName", {
-        header: "Template",
+        header: m["logs.template"],
         cell: (info) => info.getValue() ?? "-",
       }),
       columnHelper.accessor("sentCount", {
-        header: "Sent / Failed / Skipped",
+        header: m["logs.sentFailedSkipped"],
         cell: (info) => {
           const row = info.row.original;
           return (
@@ -128,7 +132,7 @@ function LogsPage() {
         },
       }),
       columnHelper.accessor("createdAt", {
-        header: "Started",
+        header: m["logs.started"],
         cell: (info) => (
           <span className="whitespace-nowrap text-muted-foreground">
             {formatTimestamp(info.getValue())}
@@ -137,7 +141,7 @@ function LogsPage() {
       }),
       columnHelper.display({
         id: "duration",
-        header: "Duration",
+        header: m["logs.duration"],
         cell: ({ row }) => {
           const duration = formatDuration(row.original.createdAt, row.original.completedAt);
           return <span className="whitespace-nowrap text-muted-foreground">{duration ?? "-"}</span>;
@@ -158,11 +162,11 @@ function LogsPage() {
               >
                 {resumingId === row.original.id ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" /> Resuming…
+                    <Loader2 className="size-4 animate-spin" /> {m["logs.resuming"]()}
                   </>
                 ) : (
                   <>
-                    <Play className="size-4" /> Resume
+                    <Play className="size-4" /> {m["common.resume"]()}
                   </>
                 )}
               </Button>
@@ -191,10 +195,8 @@ function LogsPage() {
       ) : (
         <>
           <header className="px-6 pb-4 pt-6">
-            <h1 className="text-2xl font-semibold">Logs</h1>
-            <p className="text-sm text-muted-foreground">
-              Every send job, most recent first - open one for the per-recipient detail.
-            </p>
+            <h1 className="text-2xl font-semibold">{m["logs.title"]()}</h1>
+            <p className="text-sm text-muted-foreground">{m["logs.description"]()}</p>
           </header>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 pb-6">
@@ -202,49 +204,49 @@ function LogsPage() {
               <select
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value)}
-                aria-label="Filter by status"
+                aria-label={m["logs.filterByStatus"]()}
                 className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
               >
-                <option value={ALL_STATUSES}>All statuses</option>
+                <option value={ALL_STATUSES}>{m["logs.allStatuses"]()}</option>
                 {STATUS_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
-                    {option.label}
+                    {option.label()}
                   </option>
                 ))}
               </select>
               <div className="flex items-center gap-2">
                 <Calendar className="size-4 text-muted-foreground" />
                 <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  From
+                  {m["logs.from"]()}
                   <input
                     type="date"
                     value={dateFrom}
                     max={dateTo === "" ? undefined : dateTo}
                     onChange={(event) => setDateFrom(event.target.value)}
-                    aria-label="Jobs created from"
+                    aria-label={m["logs.jobsCreatedFrom"]()}
                     className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                   />
                 </label>
                 <label className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  To
+                  {m["logs.to"]()}
                   <input
                     type="date"
                     value={dateTo}
                     min={dateFrom === "" ? undefined : dateFrom}
                     onChange={(event) => setDateTo(event.target.value)}
-                    aria-label="Jobs created up to"
+                    aria-label={m["logs.jobsCreatedUpTo"]()}
                     className="h-9 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                   />
                 </label>
               </div>
               {hasFilters && (
                 <Button variant="ghost" size="sm" onClick={clearFilters}>
-                  <RotateCcw className="size-3.5" /> Clear
+                  <RotateCcw className="size-3.5" /> {m["common.clear"]()}
                 </Button>
               )}
               {listQuery.isFetching && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="size-3 animate-spin" /> Loading…
+                  <Loader2 className="size-3 animate-spin" /> {m["common.loading"]()}
                 </span>
               )}
             </div>
@@ -253,12 +255,12 @@ function LogsPage() {
               <ErrorBanner message={resumeError} onDismiss={dismissResumeError} />
             )}
             {listQuery.isError && (
-              <ErrorBanner message={errorMessage(listQuery.error, "Could not load the logs.")} />
+              <ErrorBanner message={errorMessage(listQuery.error, m["logs.couldNotLoad"]())} />
             )}
 
             {listQuery.isLoading && (
               <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" /> Loading logs…
+                <Loader2 className="size-4 animate-spin" /> {m["logs.loadingLogs"]()}
               </div>
             )}
 
@@ -266,20 +268,16 @@ function LogsPage() {
               <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
                 {hasFilters ? (
                   <>
-                    <p className="text-sm font-medium">No jobs match your filters</p>
-                    <p className="text-xs text-muted-foreground">
-                      Try a different status or date range.
-                    </p>
+                    <p className="text-sm font-medium">{m["logs.noJobsMatchFilters"]()}</p>
+                    <p className="text-xs text-muted-foreground">{m["logs.noJobsHint"]()}</p>
                     <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
-                      Clear filters
+                      {m["recipients.clearFilters"]()}
                     </Button>
                   </>
                 ) : (
                   <>
-                    <p className="text-sm font-medium">No send jobs yet</p>
-                    <p className="text-xs text-muted-foreground">
-                      Send a campaign from the compose wizard and it will appear here.
-                    </p>
+                    <p className="text-sm font-medium">{m["logs.noSendJobsYet"]()}</p>
+                    <p className="text-xs text-muted-foreground">{m["logs.noSendJobsHint"]()}</p>
                   </>
                 )}
               </div>

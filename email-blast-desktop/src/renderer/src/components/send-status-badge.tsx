@@ -1,3 +1,4 @@
+import { m } from "@paraglide/messages";
 import type { SendJobStatus } from "../../../shared/ipc";
 
 const STATUS_STYLES: Record<SendJobStatus, string> = {
@@ -8,12 +9,12 @@ const STATUS_STYLES: Record<SendJobStatus, string> = {
   cancelled: "border-rose-600/40 bg-rose-600/10 text-rose-700",
 };
 
-const STATUS_LABELS: Record<SendJobStatus, string> = {
-  pending: "Pending",
-  sending: "Sending",
-  paused: "Paused",
-  completed: "Completed",
-  cancelled: "Cancelled",
+const STATUS_LABELS: Record<SendJobStatus, () => string> = {
+  pending: m["status.pending"],
+  sending: m["status.sending"],
+  paused: m["status.paused"],
+  completed: m["status.completed"],
+  cancelled: m["status.cancelled"],
 };
 
 /**
@@ -25,7 +26,7 @@ export function SendStatusBadge({ status }: { status: SendJobStatus }) {
     <span
       className={`inline-block rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[status]}`}
     >
-      {STATUS_LABELS[status]}
+      {STATUS_LABELS[status]()}
     </span>
   );
 }

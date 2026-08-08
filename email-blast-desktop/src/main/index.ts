@@ -42,6 +42,9 @@ import {
   TemplateUpdatePayload,
 } from "../shared/ipc";
 import { TEMPLATE_EXTENSIONS } from "../shared/template-validation";
+import { normalizeUiLocale, SETTING_KEYS } from "../shared/settings";
+import { m } from "@paraglide/messages";
+import { setLocale } from "@paraglide/runtime";
 import { decodePayload, registerWindowHandler } from "./ipc";
 import { rootLayer, type AppServices } from "./runtime";
 import { AppInfo } from "./services/app-info";
@@ -171,7 +174,7 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
     return dialog
       .showOpenDialog({
         properties: ["openFile"],
-        filters: [{ name: "Excel", extensions: ["xlsx", "xls"] }],
+        filters: [{ name: m["dialogs.excelFilter"](), extensions: ["xlsx", "xls"] }],
       })
       .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
   });
@@ -185,7 +188,7 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
     return dialog
       .showOpenDialog({
         properties: ["openFile"],
-        filters: [{ name: "Template", extensions }],
+        filters: [{ name: m["dialogs.templateFilter"](), extensions }],
       })
       .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
   });
@@ -215,6 +218,12 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
       Effect.gen(function* () {
         const repo = yield* SqliteRepo;
         yield* repo.setSetting(key, value);
+        // The language row IS the main process's locale (ADR-0004): keep
+        // the runtime in sync so main-produced strings (service errors,
+        // dialog filter names) switch language live, not only at boot.
+        if (key === SETTING_KEYS.language) {
+          setLocale(normalizeUiLocale(value), { reload: false });
+        }
       }),
     );
   });
@@ -605,15 +614,19 @@ app.whenReady().then(async () => {
   // (schema applied, defaults seeded) and the configured templates/output
   // directories are ensured. The DB handle stays open for the app lifetime.
   const db = openDatabase(join(app.getPath("userData"), "email-blast.db"));
-  const layer = rootLayer(db, defaultPathsForHome(homedir()));
+  // The OS locale seeds the UI language setting on first run (ADR-0004).
+  const layer = rootLayer(db, defaultPathsForHome(homedir()), app.getLocale());
   app.on("will-quit", () => db.close());
 
   // Awaited before window creation, so the first paint always sees the
-  // finished first-run state (directories exist, defaults seeded).
+  // finished first-run state (directories exist, defaults seeded) and the
+  // main-process locale matches the persisted UI language - every
+  // user-facing string a service produces from here on is in that language.
   await Effect.runPromise(
     Effect.gen(function* () {
       const settings = yield* Settings;
       yield* settings.ensureDirectories();
+      setLocale(yield* settings.getLanguage(), { reload: false });
       const info = yield* AppInfo;
       console.log(`[boot] Effect layer ready: ${info.name} v${info.version}`);
     }).pipe(Effect.provide(layer)),

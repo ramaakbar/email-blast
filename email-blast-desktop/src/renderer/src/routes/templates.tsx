@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FileText, Loader2, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
+import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { PatternPreview } from "@/components/pattern-preview";
 import { TemplateBadge } from "@/components/template-badge";
@@ -60,12 +61,12 @@ function TemplatesPage() {
     mutationFn: (payload: Parameters<typeof window.api.templates.create>[0]) =>
       window.api.templates.create(payload),
     onSuccess: (created) => {
-      toast.success(`Template "${created.name}" registered.`);
+      toast.success(m["templates.templateRegistered"]({ name: created.name }));
       setForm(null);
       void queryClient.invalidateQueries({ queryKey: ["templates"] });
     },
     onError: (err) => {
-      setLoadError(errorMessage(err, "Could not register the template."));
+      setLoadError(errorMessage(err, m["templates.couldNotRegister"]()));
     },
   });
 
@@ -73,27 +74,27 @@ function TemplatesPage() {
     mutationFn: (payload: Parameters<typeof window.api.templates.update>[0]) =>
       window.api.templates.update(payload),
     onSuccess: (updated) => {
-      toast.success(`Template "${updated.name}" saved.`);
+      toast.success(m["templates.templateSaved"]({ name: updated.name }));
       setForm(null);
       setSelectedId(null);
       void queryClient.invalidateQueries({ queryKey: ["templates"] });
     },
     onError: (err) => {
-      setLoadError(errorMessage(err, "Could not save the template."));
+      setLoadError(errorMessage(err, m["templates.couldNotSave"]()));
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => window.api.templates.delete(id),
     onSuccess: () => {
-      toast.success("Template deleted.");
+      toast.success(m["templates.templateDeleted"]());
       setSelectedId(null);
       setConfirmOpen(false);
       void queryClient.invalidateQueries({ queryKey: ["templates"] });
     },
     onError: (err) => {
       setConfirmOpen(false);
-      setLoadError(errorMessage(err, "Could not delete the template."));
+      setLoadError(errorMessage(err, m["templates.couldNotDelete"]()));
     },
   });
 
@@ -124,9 +125,7 @@ function TemplatesPage() {
     const fileName = filePath.split(/[\\/]/).pop() ?? filePath;
     const type = templateTypeForFile(fileName);
     if (type === null) {
-      setLoadError(
-        `"${fileName}" is not a supported template. Choose a .docx letter or a .png/.jpg/.jpeg certificate image.`,
-      );
+      setLoadError(m["templates.unsupportedFile"]({ fileName }));
       return;
     }
     setLoadError(null);
@@ -142,13 +141,15 @@ function TemplatesPage() {
     <div className="relative flex h-full flex-col">
       <header className="flex items-center justify-between px-6 pb-4 pt-6">
         <div>
-          <h1 className="text-2xl font-semibold">Templates</h1>
+          <h1 className="text-2xl font-semibold">{m["templates.title"]()}</h1>
           <p className="text-sm text-muted-foreground">
-            {templates.length} template{templates.length === 1 ? "" : "s"} registered
+            {templates.length === 1
+              ? m["templates.countRegisteredOne"]({ count: templates.length })
+              : m["templates.countRegisteredOther"]({ count: templates.length })}
           </p>
         </div>
         <Button onClick={() => void handleAddTemplate()}>
-          <Plus className="size-4" /> Add template
+          <Plus className="size-4" /> {m["templates.addTemplate"]()}
         </Button>
       </header>
 
@@ -158,25 +159,22 @@ function TemplatesPage() {
         )}
 
         {listQuery.isError && (
-          <ErrorBanner message={errorMessage(listQuery.error, "Could not load templates.")} />
+          <ErrorBanner message={errorMessage(listQuery.error, m["templates.couldNotLoad"]())} />
         )}
 
         {listQuery.isLoading && (
           <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Loading templates…
+            <Loader2 className="size-4 animate-spin" /> {m["templates.loadingTemplates"]()}
           </div>
         )}
 
         {!listQuery.isLoading && !listQuery.isError && templates.length === 0 && (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
             <FileText className="size-10 text-muted-foreground" />
-            <p className="text-sm font-medium">No templates yet</p>
-            <p className="max-w-sm text-xs text-muted-foreground">
-              Register a DOCX letter template or an image certificate template to generate
-              personalized documents.
-            </p>
+            <p className="text-sm font-medium">{m["templates.noTemplatesYet"]()}</p>
+            <p className="max-w-sm text-xs text-muted-foreground">{m["templates.noTemplatesHint"]()}</p>
             <Button size="sm" className="mt-2" onClick={() => void handleAddTemplate()}>
-              <Plus className="size-4" /> Add template
+              <Plus className="size-4" /> {m["templates.addTemplate"]()}
             </Button>
           </div>
         )}
@@ -200,8 +198,15 @@ function TemplatesPage() {
                     <TemplateBadge type={template.type} />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {template.slots.length} slot{template.slots.length === 1 ? "" : "s"} ·{" "}
-                    {formatTimestamp(template.createdAt)}
+                    {template.slots.length === 1
+                      ? m["templates.slotCountOne"]({
+                          count: template.slots.length,
+                          stamp: formatTimestamp(template.createdAt),
+                        })
+                      : m["templates.slotCountOther"]({
+                          count: template.slots.length,
+                          stamp: formatTimestamp(template.createdAt),
+                        })}
                   </p>
                 </button>
               ))}
@@ -239,7 +244,7 @@ function TemplatesPage() {
 
       {confirmOpen && selectedId !== null && (
         <ConfirmDeleteDialog
-          name={detailQuery.data?.name ?? "this template"}
+          name={detailQuery.data?.name ?? m["templates.thisTemplate"]()}
           pending={deleteMutation.isPending}
           onCancel={() => setConfirmOpen(false)}
           onConfirm={() => deleteMutation.mutate(selectedId)}
@@ -272,28 +277,28 @@ function DetailPanel({
             {template.filePath}
           </p>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close details">
+        <Button variant="ghost" size="icon" onClick={onClose} aria-label={m["common.closeDetails"]()}>
           <X className="size-4" />
         </Button>
       </header>
       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
         <dl className="space-y-2 text-sm">
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Registered</dt>
+            <dt className="text-muted-foreground">{m["templates.registered"]()}</dt>
             <dd className="text-right">{formatTimestamp(template.createdAt)}</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Slots</dt>
+            <dt className="text-muted-foreground">{m["templates.slots"]()}</dt>
             <dd className="text-right">{template.slots.length}</dd>
           </div>
         </dl>
 
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Required slots
+            {m["compose.requiredSlots"]()}
           </h3>
           {template.slots.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No slots declared.</p>
+            <p className="text-sm text-muted-foreground">{m["templates.noSlotsDeclared"]()}</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {template.slots.map((slot) => (
@@ -312,27 +317,24 @@ function DetailPanel({
 
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Output pattern
+            {m["compose.outputPattern"]()}
           </h3>
           <p className="rounded-md border bg-background px-3 py-2">
             <PatternPreview pattern={template.outputPattern} slots={template.slots} />
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Generated files are named with this pattern, one per recipient.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{m["templates.outputPatternHint"]()}</p>
         </section>
 
         <div className="rounded-lg border border-muted bg-muted/40 p-3 text-xs text-muted-foreground">
-          Edit the template file itself in Word (DOCX) or Figma/Photoshop (images) - Email Blast
-          fills it exactly as saved.
+          {m["templates.editExternallyHint"]()}
         </div>
       </div>
       <footer className="flex gap-2 border-t px-5 py-4">
         <Button variant="outline" className="flex-1" onClick={onEdit}>
-          <Pencil className="size-4" /> Edit
+          <Pencil className="size-4" /> {m["templates.edit"]()}
         </Button>
         <Button variant="destructive" className="flex-1" onClick={onDelete}>
-          <Trash2 className="size-4" /> Delete
+          <Trash2 className="size-4" /> {m["common.delete"]()}
         </Button>
       </footer>
     </aside>
@@ -398,7 +400,7 @@ function TemplateFormDialog({
           if (token !== scanToken.current) return;
           setScanState({
             kind: "error",
-            message: errorMessage(err, "Could not scan the template for slots."),
+            message: errorMessage(err, m["templates.couldNotScan"]()),
           });
         });
     },
@@ -434,14 +436,14 @@ function TemplateFormDialog({
         <header className="flex items-start justify-between gap-3 border-b px-6 py-4">
           <div>
             <h2 id="template-form-title" className="text-lg font-semibold">
-              {form.kind === "create" ? "Add template" : `Edit "${form.template.name}"`}
+              {form.kind === "create" ? m["templates.addTitle"]() : m["templates.editTitle"]({ name: form.template.name })}
             </h2>
             <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="max-w-64 truncate font-mono">{fileLabel}</span>
               <TemplateBadge type={form.kind === "create" ? form.type : form.template.type} />
             </p>
           </div>
-          <Button variant="ghost" size="icon" onClick={onCancel} aria-label="Cancel">
+          <Button variant="ghost" size="icon" onClick={onCancel} aria-label={m["common.cancel"]()}>
             <X className="size-4" />
           </Button>
         </header>
@@ -449,7 +451,7 @@ function TemplateFormDialog({
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-4">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              Template name
+              {m["templates.templateName"]()}
             </span>
             <input
               type="text"
@@ -463,11 +465,11 @@ function TemplateFormDialog({
           <section>
             <div className="mb-1 flex items-baseline justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Slots
+                {m["templates.slots"]()}
               </h3>
               {isDocx && scanState.kind === "scanning" && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Loader2 className="size-3 animate-spin" /> Scanning…
+                  <Loader2 className="size-3 animate-spin" /> {m["templates.scanning"]()}
                 </span>
               )}
             </div>
@@ -483,12 +485,12 @@ function TemplateFormDialog({
                   }
                 }}
               >
-                <RefreshCw className="size-3" /> Rescan from file
+                <RefreshCw className="size-3" /> {m["templates.rescanFromFile"]()}
               </button>
             )}
             {isDocx && form.kind === "edit" && rescanConfirming && (
               <span className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-                Replace the slots below with the file's placeholders?
+                {m["templates.rescanConfirm"]()}
                 <Button
                   type="button"
                   variant="outline"
@@ -499,7 +501,7 @@ function TemplateFormDialog({
                     runScan(form.template.filePath);
                   }}
                 >
-                  Replace slots
+                  {m["templates.replaceSlots"]()}
                 </Button>
                 <Button
                   type="button"
@@ -508,22 +510,20 @@ function TemplateFormDialog({
                   className="h-7 px-2"
                   onClick={() => setRescanConfirming(false)}
                 >
-                  Keep my slots
+                  {m["templates.keepMySlots"]()}
                 </Button>
               </span>
             )}
             <p className="mb-2 text-xs text-muted-foreground">
               {isDocx
-                ? "Detected from the {placeholders} in the document. Add, rename, or remove slots freely."
-                : "Enter the slot names the certificate needs, e.g. nama, instansi."}
+                ? m["templates.docxSlotsHint"]({ placeholders: "{placeholders}" })
+                : m["templates.imageSlotsHint"]()}
             </p>
             {scanState.kind === "error" && (
               <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                 <span className="flex-1">{scanState.message}</span>
-                <span className="shrink-0 text-amber-700/70">
-                  Slots can be typed below instead.
-                </span>
+                <span className="shrink-0 text-amber-700/70">{m["templates.slotsCanBeTyped"]()}</span>
               </div>
             )}
             <div className="space-y-1.5">
@@ -540,7 +540,7 @@ function TemplateFormDialog({
                         ),
                       )
                     }
-                    aria-label={`Slot ${index + 1}`}
+                    aria-label={m["templates.slotAria"]({ index: index + 1 })}
                     className="h-8 w-full rounded-md border bg-background px-2 font-mono text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
                   />
                   <code className="shrink-0 text-xs text-muted-foreground">{"}"}</code>
@@ -549,7 +549,7 @@ function TemplateFormDialog({
                     variant="ghost"
                     size="icon"
                     className="size-8 shrink-0"
-                    aria-label={`Remove slot ${index + 1}`}
+                    aria-label={m["templates.removeSlotAria"]({ index: index + 1 })}
                     onClick={() => setSlotRows(slotRows.filter((r) => r.id !== row.id))}
                   >
                     <X className="size-4" />
@@ -564,19 +564,19 @@ function TemplateFormDialog({
               className="mt-2"
               onClick={() => setSlotRows([...slotRows, { id: crypto.randomUUID(), value: "" }])}
             >
-              <Plus className="size-4" /> Add slot
+              <Plus className="size-4" /> {m["templates.addSlot"]()}
             </Button>
           </section>
 
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              Output pattern
+              {m["templates.outputPatternField"]()}
             </span>
             <input
               type="text"
               value={pattern}
               onChange={(event) => setPattern(event.target.value)}
-              placeholder="e.g. LOA_{no}_{name}.pdf"
+              placeholder={m["templates.outputPatternPlaceholder"]({ no: "{no}", name: "{name}" })}
               className="h-9 w-full rounded-md border bg-background px-3 font-mono text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
             />
             {pattern.trim() !== "" && (
@@ -592,7 +592,7 @@ function TemplateFormDialog({
 
         <footer className="flex items-center justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onCancel} disabled={saving}>
-            Cancel
+            {m["common.cancel"]()}
           </Button>
           <Button
             disabled={error !== null || saving}
@@ -609,12 +609,12 @@ function TemplateFormDialog({
           >
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Saving…
+                <Loader2 className="size-4 animate-spin" /> {m["common.saving"]()}
               </>
             ) : form.kind === "create" ? (
-              "Register template"
+              m["templates.registerTemplate"]()
             ) : (
-              "Save changes"
+              m["templates.saveChanges"]()
             )}
           </Button>
         </footer>
@@ -647,22 +647,20 @@ function ConfirmDeleteDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <h2 id="confirm-delete-title" className="text-lg font-semibold">
-          Delete "{name}"?
+          {m["templates.deleteTitle"]({ name })}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The template is removed from the app. The file itself stays where it is.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{m["templates.deleteDescription"]()}</p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" onClick={onCancel} disabled={pending}>
-            Cancel
+            {m["common.cancel"]()}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={pending} autoFocus>
             {pending ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Deleting…
+                <Loader2 className="size-4 animate-spin" /> {m["common.deleting"]()}
               </>
             ) : (
-              "Delete"
+              m["common.delete"]()
             )}
           </Button>
         </div>

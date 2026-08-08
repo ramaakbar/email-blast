@@ -36,6 +36,7 @@ import {
   type SqliteRepoShape,
 } from "../db/repository";
 import { Settings } from "./settings";
+import { m } from "@paraglide/messages";
 
 /**
  * The send pipeline (ticket 15): one email per recipient against the job's
@@ -319,7 +320,7 @@ export function makeSendJobService(
         return yield* Effect.fail(
           new InvalidSendRequest({
             message:
-              "None of the recipients has a confirmed generated attachment. Generate the PDFs first.",
+              m["sendJob.noConfirmedAttachments"](),
           }),
         );
       }
@@ -327,7 +328,7 @@ export function makeSendJobService(
         return yield* Effect.fail(
           new InvalidSendRequest({
             message:
-              "The generated attachment files no longer exist on disk. Generate the PDFs again.",
+              m["sendJob.attachmentsMissingOnDisk"](),
           }),
         );
       }
@@ -375,15 +376,15 @@ export function makeSendJobService(
   > =>
     Effect.gen(function* () {
       if (recipient === undefined) {
-        return { kind: "failed", errorMessage: "Recipient no longer exists in the database." };
+        return { kind: "failed", errorMessage: m["sendJob.recipientDeleted"]() };
       }
       if (recipient.email === null || recipient.email.trim() === "") {
-        return { kind: "failed", errorMessage: "This recipient has no email address." };
+        return { kind: "failed", errorMessage: m["sendJob.recipientNoEmail"]() };
       }
       if (attachmentPath === undefined || !existsSync(attachmentPath)) {
         return {
           kind: "failed",
-          errorMessage: "No confirmed generated attachment for this recipient.",
+          errorMessage: m["sendJob.noAttachmentForRecipient"](),
         };
       }
       let subject: string;
@@ -425,7 +426,7 @@ export function makeSendJobService(
       }
       return {
         kind: "retry-exhausted",
-        errorMessage: `Retries exhausted: ${sendErrorMessage(lastError as SendError)}`,
+        errorMessage: m["sendJob.retriesExhausted"]({ message: sendErrorMessage(lastError as SendError) }),
       };
     });
 
@@ -536,31 +537,31 @@ export function makeSendJobService(
         const hasOverride = payload.smtpOverride !== null;
         if (payload.recipientIds.length === 0) {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "Select at least one recipient to send to." }),
+            new InvalidSendRequest({ message: m["sendJob.selectRecipients"]() }),
           );
         }
         if (payload.subject.trim() === "") {
-          return yield* Effect.fail(new InvalidSendRequest({ message: "Write a subject." }));
+          return yield* Effect.fail(new InvalidSendRequest({ message: m["sendJob.writeSubject"]() }));
         }
         if (payload.bodyHtml.trim() === "") {
-          return yield* Effect.fail(new InvalidSendRequest({ message: "Write an email body." }));
+          return yield* Effect.fail(new InvalidSendRequest({ message: m["sendJob.writeBody"]() }));
         }
         if (payload.senderName.trim() === "" || payload.senderAddress.trim() === "") {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "Enter the sender name and address." }),
+            new InvalidSendRequest({ message: m["sendJob.enterSender"]() }),
           );
         }
         if (hasProfile === hasOverride) {
           return yield* Effect.fail(
             new InvalidSendRequest({
-              message: "Choose either a saved SMTP profile or enter connection details, not both.",
+              message: m["sendJob.chooseOneIdentity"](),
             }),
           );
         }
         const recipients = yield* repo.getRecipientsByIds(payload.recipientIds);
         if (recipients.length === 0) {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "None of the selected recipients still exist." }),
+            new InvalidSendRequest({ message: m["sendJob.noRecipientsExist"]() }),
           );
         }
         if (hasProfile) {
@@ -599,7 +600,7 @@ export function makeSendJobService(
         }
         if (loaded.job.status === "sending") {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "This job is already sending." }),
+            new InvalidSendRequest({ message: m["sendJob.alreadySending"]() }),
           );
         }
         // One active send at a time (spec section 5): a running OR a
@@ -614,7 +615,7 @@ export function makeSendJobService(
           yield* revertResumedJob(repo, loaded);
           return yield* Effect.fail(
             new InvalidSendRequest({
-              message: "Another send is in progress or paused. Pause or finish it first.",
+              message: m["sendJob.anotherSendActive"](),
             }),
           );
         }
@@ -627,7 +628,7 @@ export function makeSendJobService(
           yield* revertResumedJob(repo, loaded);
           return yield* Effect.fail(
             new InvalidSendRequest({
-              message: "This job is still pausing - try again in a moment.",
+              message: m["sendJob.stillPausing"](),
             }),
           );
         }
@@ -669,7 +670,7 @@ export function makeSendJobService(
         if (loaded.job.status === "paused") return toSendJob(loaded);
         if (loaded.job.status !== "sending") {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "Only a sending job can be paused." }),
+            new InvalidSendRequest({ message: m["sendJob.onlySendingCanPause"]() }),
           );
         }
         yield* repo.setSendJobStatus(jobId, "paused", null);
@@ -686,7 +687,7 @@ export function makeSendJobService(
         const loaded = yield* loadJob(jobId);
         if (loaded.job.status !== "paused") {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "Only a paused job can be resumed." }),
+            new InvalidSendRequest({ message: m["sendJob.onlyPausedCanResume"]() }),
           );
         }
         yield* repo.setSendJobStatus(jobId, "pending", null);
@@ -700,7 +701,7 @@ export function makeSendJobService(
         if (loaded.job.status === "completed") {
           return yield* Effect.fail(
             new InvalidSendRequest({
-              message: "This job already finished; it cannot be cancelled.",
+              message: m["sendJob.finishedCannotCancel"](),
             }),
           );
         }
@@ -721,13 +722,13 @@ export function makeSendJobService(
         const loaded = yield* loadJob(jobId);
         if (loaded.job.status !== "completed") {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "Only a finished job can be retried." }),
+            new InvalidSendRequest({ message: m["sendJob.onlyFinishedCanRetry"]() }),
           );
         }
         const failed = loaded.recipients.filter((row) => row.status === "failed");
         if (failed.length === 0) {
           return yield* Effect.fail(
-            new InvalidSendRequest({ message: "No failed recipients to retry." }),
+            new InvalidSendRequest({ message: m["sendJob.noFailedRecipients"]() }),
           );
         }
         yield* repo.retryFailedSendJob(jobId);

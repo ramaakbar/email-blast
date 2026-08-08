@@ -5,9 +5,14 @@
     "vitest.config.ts",
     "src/main/**/*",
     "src/preload/**/*",
-    "src/shared/**/*"
+    "src/shared/**/*",
+    "src/paraglide/**/*"
   ],
   "compilerOptions": {
-    "composite": true
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@paraglide/*": ["src/paraglide/*"]
+    }
   }
 }

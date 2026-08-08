@@ -2,17 +2,19 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, Outlet, createRootRoute } from "@tanstack/react-router";
 import { FileText, History, Send, Settings, Upload, Users } from "lucide-react";
 import { Toaster } from "sonner";
+import { m } from "@paraglide/messages";
 import { Button } from "@/components/ui/button";
+import { useLocale } from "@/lib/locale";
 import { WelcomeScreen } from "@/components/welcome-screen";
 import { SETTING_KEYS } from "../../../shared/settings";
 
 const NAV_ITEMS = [
-  { to: "/import", label: "Import", icon: Upload },
-  { to: "/recipients", label: "Recipients", icon: Users },
-  { to: "/templates", label: "Templates", icon: FileText },
-  { to: "/compose", label: "Compose", icon: Send },
-  { to: "/logs", label: "Logs", icon: History },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/import", label: () => m["nav.import"](), icon: Upload },
+  { to: "/recipients", label: () => m["nav.recipients"](), icon: Users },
+  { to: "/templates", label: () => m["nav.templates"](), icon: FileText },
+  { to: "/compose", label: () => m["nav.compose"](), icon: Send },
+  { to: "/logs", label: () => m["nav.logs"](), icon: History },
+  { to: "/settings", label: () => m["nav.settings"](), icon: Settings },
 ] as const;
 
 export const Route = createRootRoute({
@@ -28,6 +30,10 @@ function RootLayout() {
   const [setupDone, setSetupDone] = useState<boolean | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Subscribed at the root so the whole tree re-renders when the language
+  // changes - message functions read the locale at call time, so a single
+  // re-render flips every string in the current screen (ADR-0004).
+  useLocale();
 
   useEffect(() => {
     let cancelled = false;
@@ -53,10 +59,8 @@ function RootLayout() {
   if (loadError) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-background p-8">
-        <p className="text-sm text-muted-foreground">
-          Could not reach the app backend. The database may not be ready yet.
-        </p>
-        <Button onClick={retry}>Retry</Button>
+        <p className="text-sm text-muted-foreground">{m["app.backendUnreachable"]()}</p>
+        <Button onClick={retry}>{m["common.retry"]()}</Button>
       </div>
     );
   }
@@ -91,7 +95,7 @@ function RootLayout() {
               }}
             >
               <item.icon className="size-4" />
-              {item.label}
+              {item.label()}
             </Link>
           ))}
         </nav>

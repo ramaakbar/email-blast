@@ -28,14 +28,12 @@ const config: ForgeConfig = {
       if (!file) return false;
       if (file.startsWith("/.vite")) return false;
       if (file === "/node_modules") return false;
-      // The published prebuilds target the stock-Node ABI and would win
-      // over the Electron-ABI binary Forge rebuilds into build/Release
-      // (binding.js prefers prebuilds/); shipping them breaks the app.
-      if (file.startsWith("/node_modules/better-sqlite3/prebuilds")) return true;
+      // better-sqlite3 v13 is Node-API (gypfile: false): the published
+      // prebuilds are ABI-stable and load in Electron as-is, so they ship
+      // with the app (the `unpack` above moves the .node binaries to
+      // app.asar.unpacked) and binding.js resolves them - no node-gyp
+      // rebuild step is involved at all.
       if (file.startsWith("/node_modules/better-sqlite3")) return false;
-      // better-sqlite3's build dependency: Forge's native rebuild (node-gyp)
-      // resolves it from the staging copy.
-      if (file.startsWith("/node_modules/node-addon-api")) return false;
       return true;
     },
   },

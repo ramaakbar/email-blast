@@ -3,6 +3,7 @@ import { readFileSync } from "fs";
 import Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
+import { m } from "@paraglide/messages";
 import type { Template } from "../../shared/ipc";
 import { normalizeSlots, validateTemplate } from "../../shared/template-validation";
 import {
@@ -132,7 +133,7 @@ export function makeTemplatesService(repo: SqliteRepoShape): TemplatesServiceSha
       Effect.gen(function* () {
         if (!docxPath.toLowerCase().endsWith(".docx")) {
           return yield* Effect.fail(
-            new UnreadableDocx({ message: "Slot scanning works on .docx files only." }),
+            new UnreadableDocx({ message: m["templatesService.docxOnly"]() }),
           );
         }
         try {
@@ -142,7 +143,7 @@ export function makeTemplatesService(repo: SqliteRepoShape): TemplatesServiceSha
           // prefix the path to make the failure actionable for the user.
           return yield* Effect.fail(
             new UnreadableDocx({
-              message: `Could not read "${docxPath}": ${error instanceof Error ? error.message : String(error)}`,
+              message: m["templatesService.couldNotRead"]({ path: docxPath, detail: error instanceof Error ? error.message : String(error) }),
             }),
           );
         }

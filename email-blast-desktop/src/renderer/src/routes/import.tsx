@@ -9,8 +9,10 @@ import {
   Upload,
 } from "lucide-react";
 import { toast } from "sonner";
+import { m } from "@paraglide/messages";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
+import { plural } from "@/lib/plural";
 import type {
   ColumnMapping,
   ColumnRole,
@@ -29,12 +31,12 @@ const PREVIEW_ROWS = 50;
 /** Matches a full file name, not just an extension substring. */
 const EXCEL_FILE_PATTERN = /\.(xlsx|xls)$/i;
 
-const ROLE_OPTIONS: { value: ColumnRole; label: string }[] = [
-  { value: "name", label: "Name" },
-  { value: "email", label: "Email" },
-  { value: "phone", label: "Phone" },
-  { value: "metadata", label: "Metadata" },
-  { value: "skip", label: "Skip" },
+const ROLE_OPTIONS: { value: ColumnRole; label: () => string }[] = [
+  { value: "name", label: () => m["importPage.roleName"]() },
+  { value: "email", label: () => m["importPage.roleEmail"]() },
+  { value: "phone", label: () => m["importPage.rolePhone"]() },
+  { value: "metadata", label: () => m["importPage.roleMetadata"]() },
+  { value: "skip", label: () => m["importPage.roleSkip"]() },
 ];
 
 const EXCLUSIVE_ROLES: ReadonlySet<ColumnRole> = new Set(["name", "email", "phone"]);
@@ -81,7 +83,7 @@ function ImportPage() {
     } catch (err) {
       if (token !== loadToken.current) return;
       setState({ kind: "idle" });
-      setError(errorMessage(err, "Could not read the file. It may not be a valid Excel file."));
+      setError(errorMessage(err, m["importPage.couldNotRead"]()));
     }
   }, []);
 
@@ -93,7 +95,7 @@ function ImportPage() {
       const file = event.dataTransfer.files[0];
       if (file === undefined) return;
       if (!isExcelFile(file.name)) {
-        setError(`"${file.name}" is not an Excel file. Choose a .xlsx or .xls file.`);
+        setError(m["importPage.notExcelFile"]({ fileName: file.name }));
         return;
       }
       void loadFile(window.api.system.getPathForFile(file), file.name);
@@ -142,23 +144,29 @@ function ImportPage() {
       toast.success(
         <div className="space-y-2">
           <p>
-            Imported <span className="font-semibold">{result.imported}</span> recipients.{" "}
-            <span className="font-semibold">{result.duplicatesSkipped}</span> duplicate
-            {result.duplicatesSkipped === 1 ? "" : "s"} skipped.
+            {result.duplicatesSkipped === 1
+              ? m["importPage.importedToastOne"]({
+                  imported: result.imported,
+                  duplicatesSkipped: result.duplicatesSkipped,
+                })
+              : m["importPage.importedToastOther"]({
+                  imported: result.imported,
+                  duplicatesSkipped: result.duplicatesSkipped,
+                })}
           </p>
           <div className="flex gap-2">
             <Button asChild size="sm">
-              <Link to="/compose">Go to Compose</Link>
+              <Link to="/compose">{m["importPage.goToCompose"]()}</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link to="/recipients">Go to Recipients</Link>
+              <Link to="/recipients">{m["importPage.goToRecipients"]()}</Link>
             </Button>
           </div>
         </div>,
       );
     } catch (err) {
       if (token !== loadToken.current) return;
-      setError(errorMessage(err, "Could not commit the import."));
+      setError(errorMessage(err, m["importPage.couldNotCommit"]()));
       setState({ kind: "preview", fileName, preview, mapping, committing: false });
     }
   }, [state]);
@@ -177,14 +185,12 @@ function ImportPage() {
     >
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Import</h1>
-          <p className="text-sm text-muted-foreground">
-            Load recipients from an Excel file, review the preview, and commit them to the database.
-          </p>
+          <h1 className="text-2xl font-semibold">{m["importPage.title"]()}</h1>
+          <p className="text-sm text-muted-foreground">{m["importPage.description"]()}</p>
         </div>
         {state.kind === "preview" && (
           <Button variant="outline" onClick={reset} disabled={state.committing}>
-            <RefreshCw className="size-4" /> Import another file
+            <RefreshCw className="size-4" /> {m["importPage.importAnotherFile"]()}
           </Button>
         )}
       </header>
@@ -198,7 +204,7 @@ function ImportPage() {
             className="text-xs underline-offset-2 hover:underline"
             onClick={() => setError(null)}
           >
-            Dismiss
+            {m["common.dismiss"]()}
           </button>
         </div>
       )}
@@ -215,19 +221,17 @@ function ImportPage() {
           }`}
         >
           <Upload className="size-10 text-muted-foreground" />
-          <p className="text-sm font-medium">Drag and drop an Excel file here</p>
-          <p className="text-xs text-muted-foreground">
-            .xlsx or .xls, with the recipient list in the first sheet
-          </p>
+          <p className="text-sm font-medium">{m["importPage.dragDropHint"]()}</p>
+          <p className="text-xs text-muted-foreground">{m["importPage.fileFormatHint"]()}</p>
           <Button onClick={() => void handleBrowse()} className="mt-2">
-            <FileSpreadsheet className="size-4" /> Browse…
+            <FileSpreadsheet className="size-4" /> {m["common.browse"]()}
           </Button>
         </div>
       )}
 
       {state.kind === "loading" && (
         <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Parsing {state.fileName}…
+          <Loader2 className="size-4 animate-spin" /> {m["importPage.parsing"]({ fileName: state.fileName })}
         </div>
       )}
 
@@ -246,26 +250,38 @@ function ImportPage() {
       {state.kind === "done" && (
         <div className="flex flex-col items-center gap-3 rounded-lg border border-emerald-600/40 bg-emerald-600/5 p-10 text-center">
           <CheckCircle2 className="size-10 text-emerald-600" />
-          <h2 className="text-lg font-semibold">Import complete</h2>
+          <h2 className="text-lg font-semibold">{m["importPage.importComplete"]()}</h2>
           <p className="text-sm text-muted-foreground">
-            Imported {state.result.imported} recipients from {state.fileName}.{" "}
-            {state.result.duplicatesSkipped} duplicate
-            {state.result.duplicatesSkipped === 1 ? "" : "s"} skipped.
+            {state.result.duplicatesSkipped === 1
+              ? m["importPage.importCompleteDetailOne"]({
+                  imported: state.result.imported,
+                  fileName: state.fileName,
+                  duplicatesSkipped: state.result.duplicatesSkipped,
+                })
+              : m["importPage.importCompleteDetailOther"]({
+                  imported: state.result.imported,
+                  fileName: state.fileName,
+                  duplicatesSkipped: state.result.duplicatesSkipped,
+                })}
           </p>
           {state.result.rowsSkippedNoName > 0 && (
             <p className="text-xs text-muted-foreground">
-              {state.result.rowsSkippedNoName} row(s) skipped: the name column was empty for them.
+              {plural(
+                state.result.rowsSkippedNoName,
+                m["importPage.rowsSkippedNoNameOne"],
+                m["importPage.rowsSkippedNoNameOther"],
+              )}
             </p>
           )}
           <div className="mt-2 flex gap-2">
             <Button asChild>
-              <Link to="/compose">Go to Compose</Link>
+              <Link to="/compose">{m["importPage.goToCompose"]()}</Link>
             </Button>
             <Button asChild variant="outline">
-              <Link to="/recipients">Go to Recipients</Link>
+              <Link to="/recipients">{m["importPage.goToRecipients"]()}</Link>
             </Button>
             <Button variant="outline" onClick={reset}>
-              Import another file
+              {m["importPage.importAnotherFile"]()}
             </Button>
           </div>
         </div>
@@ -311,26 +327,24 @@ function PreviewContent({
 
       <section>
         <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold">Preview</h2>
+          <h2 className="text-sm font-semibold">{m["importPage.preview"]()}</h2>
           <p className="text-xs text-muted-foreground">
-            {fileName} - showing {shown} of {preview.rows.length} rows
+            {m["importPage.previewRows"]({ fileName, shown, total: preview.rows.length })}
           </p>
         </div>
         <PreviewTable columns={preview.columns} rows={preview.rows} />
         {preview.skippedDuplicates > 0 && (
           <p className="mt-2 text-xs text-muted-foreground">
-            {preview.skippedDuplicates} duplicate
-            {preview.skippedDuplicates === 1 ? "" : "s"} already skipped during parsing.
+            {preview.skippedDuplicates === 1
+              ? m["importPage.duplicatesSkippedParsingOne"]({ count: preview.skippedDuplicates })
+              : m["importPage.duplicatesSkippedParsingOther"]({ count: preview.skippedDuplicates })}
           </p>
         )}
       </section>
 
       <section>
-        <h2 className="mb-1 text-sm font-semibold">Column mapping</h2>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Match each Excel column to a recipient field. Name, email, and phone can each be used
-          once; other columns become metadata available to template placeholders.
-        </p>
+        <h2 className="mb-1 text-sm font-semibold">{m["importPage.columnMapping"]()}</h2>
+        <p className="mb-3 text-xs text-muted-foreground">{m["importPage.columnMappingHint"]()}</p>
         <div className="space-y-1.5">
           {preview.columns.map((column) => (
             <div
@@ -342,13 +356,13 @@ function PreviewContent({
               </span>
               <select
                 value={mapping[column] ?? "metadata"}
-                aria-label={`Role of the "${column}" column`}
+                aria-label={m["importPage.columnRoleAria"]({ column })}
                 onChange={(event) => onRoleChange(column, event.target.value as ColumnRole)}
                 className="h-8 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
               >
                 {ROLE_OPTIONS.map((role) => (
                   <option key={role.value} value={role.value}>
-                    {role.label}
+                    {role.label()}
                   </option>
                 ))}
               </select>
@@ -364,19 +378,19 @@ function PreviewContent({
 
       <footer className="flex items-center justify-end gap-2 border-t pt-4">
         <Button variant="outline" onClick={onResetMapping}>
-          Reset mapping
+          {m["importPage.resetMapping"]()}
         </Button>
         <Button
           disabled={nameColumn === undefined || committing}
-          title={nameColumn === undefined ? "Select a name column to import" : undefined}
+          title={nameColumn === undefined ? m["importPage.selectNameColumn"]() : undefined}
           onClick={onCommit}
         >
           {committing ? (
             <>
-              <Loader2 className="size-4 animate-spin" /> Importing…
+              <Loader2 className="size-4 animate-spin" /> {m["importPage.importing"]()}
             </>
           ) : (
-            <>Import recipients</>
+            <>{m["importPage.importRecipients"]()}</>
           )}
         </Button>
       </footer>
@@ -430,7 +444,7 @@ function PreviewTable({
                 colSpan={Math.max(columns.length, 1)}
                 className="px-3 py-8 text-center text-muted-foreground"
               >
-                No data rows found in the first sheet.
+                {m["importPage.noDataRows"]()}
               </td>
             </tr>
           )}

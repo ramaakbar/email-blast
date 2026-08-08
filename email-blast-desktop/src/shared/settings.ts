@@ -11,8 +11,30 @@ export const SETTING_KEYS = {
   templatesDir: "templates_dir",
   outputDir: "output_dir",
   libreofficeChecked: "libreoffice_checked",
+  language: "language",
 } as const;
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
+
+/**
+ * The UI locales the app ships in (ADR-0004). The renderer's system locale
+ * is normalized against this list; anything else falls back to English.
+ */
+export const UI_LOCALES = ["en", "id"] as const;
+export type UiLocale = (typeof UI_LOCALES)[number];
+export const DEFAULT_UI_LOCALE: UiLocale = "en";
+
+/**
+ * Normalizes any locale string ("id", "id-ID", "EN_us") to a supported UI
+ * locale, falling back to English. Shared by the main-process seed
+ * (Electron `app.getLocale()`) and the renderer boot (`navigator.language`),
+ * so both processes can never disagree on what a stored value means.
+ */
+export function normalizeUiLocale(raw: string | null): UiLocale {
+  const normalized = (raw ?? "").split("-")[0]!.toLowerCase();
+  return (UI_LOCALES as readonly string[]).includes(normalized)
+    ? (normalized as UiLocale)
+    : DEFAULT_UI_LOCALE;
+}
 
 /** The send-rate bounds (spec decision 8: slider 500-5000ms, step 100). */
 export const RATE_LIMIT_MIN_MS = 500;

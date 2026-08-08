@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   FolderOpen,
+  Languages,
   Loader2,
   Mail,
   Pencil,
@@ -13,16 +14,20 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
+import { applyLocale, useLocale } from "@/lib/locale";
 import {
   DEFAULT_RATE_LIMIT_DELAY_MS,
   RATE_LIMIT_MAX_MS,
   RATE_LIMIT_MIN_MS,
   RATE_LIMIT_STEP_MS,
   SETTING_KEYS,
+  UI_LOCALES,
   type SettingKey,
+  type UiLocale,
 } from "../../../shared/settings";
 import { validateSmtpProfile } from "../../../shared/smtp-validation";
 import type { SmtpProfile } from "../../../shared/ipc";
@@ -31,11 +36,18 @@ export const Route = createFileRoute("/settings")({
   component: SettingsPage,
 });
 
+/** The catalog names the language options by their own names. */
+const LOCALE_LABELS: Record<UiLocale, string> = {
+  en: "English",
+  id: "Bahasa Indonesia",
+};
+
 /** "1000" -> "1 email per second", "500" -> "2 emails per second". */
 function rateLabel(ms: number): string {
   const rate = Math.round((1000 / ms) * 10) / 10;
-  const text = Number.isInteger(rate) ? String(rate) : rate.toFixed(1);
-  return `${text} ${rate === 1 ? "email" : "emails"} per second`;
+  return rate === 1
+    ? m["settingsPage.ratePerSecondOne"]({ rate })
+    : m["settingsPage.ratePerSecondOther"]({ rate });
 }
 
 function SettingsPage() {
@@ -45,6 +57,7 @@ function SettingsPage() {
   const [appInfo, setAppInfo] = useState<{ name: string; version: string } | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const locale = useLocale();
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -64,7 +77,7 @@ function SettingsPage() {
         setOutputDir(output);
         setAppInfo(info);
       } catch {
-        if (!cancelled) setError("Could not load settings.");
+        if (!cancelled) setError(m["settingsPage.couldNotLoad"]());
       }
     })();
     return () => {
@@ -93,7 +106,22 @@ function SettingsPage() {
         setError(null);
         flashSaved();
       } catch {
-        setError(`Could not save ${key}.`);
+        setError(m["common.couldNotSave"]({ key }));
+      }
+    },
+    [flashSaved],
+  );
+
+  /** Applies the language immediately and persists the choice (ADR-0004). */
+  const changeLanguage = useCallback(
+    async (next: UiLocale) => {
+      applyLocale(next);
+      try {
+        await window.api.settings.set(SETTING_KEYS.language, next);
+        setError(null);
+        flashSaved();
+      } catch {
+        setError(m["common.couldNotSave"]({ key: SETTING_KEYS.language }));
       }
     },
     [flashSaved],
@@ -141,14 +169,12 @@ function SettingsPage() {
     <div className="mx-auto max-w-2xl space-y-8 p-6">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Settings</h1>
-          <p className="text-sm text-muted-foreground">
-            SMTP profiles, sending rate, default folders, and app information.
-          </p>
+          <h1 className="text-2xl font-semibold">{m["settingsPage.title"]()}</h1>
+          <p className="text-sm text-muted-foreground">{m["settingsPage.description"]()}</p>
         </div>
         {saved && (
           <span className="flex items-center gap-1 text-sm text-emerald-600">
-            <CheckCircle2 className="size-4" /> Saved
+            <CheckCircle2 className="size-4" /> {m["common.saved"]()}
           </span>
         )}
         {error !== null && <span className="text-sm text-destructive">{error}</span>}
@@ -156,20 +182,22 @@ function SettingsPage() {
 
       {rateMs === null || templatesDir === null || outputDir === null ? (
         <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading settings…
+          <Loader2 className="size-4 animate-spin" /> {m["common.loading"]()}
         </div>
       ) : (
         <>
           <SmtpProfilesSection />
 
           <section>
-            <h2 className="text-sm font-semibold">Rate limiting</h2>
+            <h2 className="text-sm font-semibold">{m["settingsPage.rateLimiting"]()}</h2>
             <p className="mb-4 text-xs text-muted-foreground">
-              The delay between each email while a send job runs.
+              {m["settingsPage.rateLimitingDescription"]()}
             </p>
             <div className="rounded-lg border p-4">
               <div className="mb-2 flex items-baseline justify-between">
-                <span className="text-sm font-medium">{rateMs} ms per email</span>
+                <span className="text-sm font-medium">
+                  {m["settingsPage.msPerEmail"]({ ms: rateMs })}
+                </span>
                 <span className="text-sm text-muted-foreground">{rateLabel(rateMs)}</span>
               </div>
               <input
@@ -178,7 +206,7 @@ function SettingsPage() {
                 max={RATE_LIMIT_MAX_MS}
                 step={RATE_LIMIT_STEP_MS}
                 value={rateMs}
-                aria-label="Delay between emails"
+                aria-label={m["settingsPage.delayBetweenEmails"]()}
                 onChange={(event) => {
                   const ms = Number(event.target.value);
                   setRateMs(ms);
@@ -191,15 +219,34 @@ function SettingsPage() {
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold">Default folders</h2>
+            <h2 className="text-sm font-semibold">{m["settingsPage.language"]()}</h2>
             <p className="mb-4 text-xs text-muted-foreground">
-              Where templates live and where generated PDFs are written. The app creates them when
-              missing.
+              {m["settingsPage.languageDescription"]()}
+            </p>
+            <div className="flex gap-2 rounded-lg border p-4">
+              <Languages className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              {UI_LOCALES.map((option) => (
+                <Button
+                  key={option}
+                  type="button"
+                  variant={locale === option ? "default" : "outline"}
+                  onClick={() => void changeLanguage(option)}
+                >
+                  {LOCALE_LABELS[option]}
+                </Button>
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-sm font-semibold">{m["settingsPage.defaultFolders"]()}</h2>
+            <p className="mb-4 text-xs text-muted-foreground">
+              {m["settingsPage.defaultFoldersDescription"]()}
             </p>
             <div className="space-y-3">
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Templates folder
+                  {m["settingsPage.templatesFolder"]()}
                 </span>
                 <span className="flex gap-2">
                   <input
@@ -212,13 +259,13 @@ function SettingsPage() {
                     variant="outline"
                     onClick={() => void pickAndSetDir(SETTING_KEYS.templatesDir, setTemplatesDir)}
                   >
-                    <FolderOpen className="size-4" /> Browse…
+                    <FolderOpen className="size-4" /> {m["common.browse"]()}
                   </Button>
                 </span>
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Output folder
+                  {m["settingsPage.outputFolder"]()}
                 </span>
                 <span className="flex gap-2">
                   <input
@@ -231,7 +278,7 @@ function SettingsPage() {
                     variant="outline"
                     onClick={() => void pickAndSetDir(SETTING_KEYS.outputDir, setOutputDir)}
                   >
-                    <FolderOpen className="size-4" /> Browse…
+                    <FolderOpen className="size-4" /> {m["common.browse"]()}
                   </Button>
                 </span>
               </label>
@@ -239,19 +286,19 @@ function SettingsPage() {
           </section>
 
           <section>
-            <h2 className="text-sm font-semibold">About</h2>
+            <h2 className="text-sm font-semibold">{m["settingsPage.about"]()}</h2>
             <dl className="rounded-lg border p-4 text-sm">
               <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">App</dt>
+                <dt className="text-muted-foreground">{m["settingsPage.app"]()}</dt>
                 <dd className="font-medium">{appInfo?.name ?? "…"}</dd>
               </div>
               <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">Version</dt>
+                <dt className="text-muted-foreground">{m["settingsPage.version"]()}</dt>
                 <dd className="font-medium">{appInfo?.version ?? "…"}</dd>
               </div>
               <div className="flex justify-between py-1">
-                <dt className="text-muted-foreground">Data</dt>
-                <dd className="font-medium">Stored locally on this machine</dd>
+                <dt className="text-muted-foreground">{m["settingsPage.data"]()}</dt>
+                <dd className="font-medium">{m["settingsPage.storedLocally"]()}</dd>
               </div>
             </dl>
           </section>
@@ -290,13 +337,13 @@ function SmtpProfilesSection() {
     mutationFn: (payload: Parameters<typeof window.api.smtp.create>[0]) =>
       window.api.smtp.create(payload),
     onSuccess: (created) => {
-      toast.success(`Profile "${created.name}" saved.`);
+      toast.success(m["smtp.profileSaved"]({ name: created.name }));
       setLoadError(null);
       setForm(null);
       void queryClient.invalidateQueries({ queryKey: ["smtp", "profiles"] });
     },
     onError: (err) => {
-      setLoadError(errorMessage(err, "Could not save the profile."));
+      setLoadError(errorMessage(err, m["smtp.couldNotSaveProfile"]()));
     },
   });
 
@@ -304,27 +351,27 @@ function SmtpProfilesSection() {
     mutationFn: (payload: Parameters<typeof window.api.smtp.update>[0]) =>
       window.api.smtp.update(payload),
     onSuccess: (updated) => {
-      toast.success(`Profile "${updated.name}" saved.`);
+      toast.success(m["smtp.profileSaved"]({ name: updated.name }));
       setLoadError(null);
       setForm(null);
       void queryClient.invalidateQueries({ queryKey: ["smtp", "profiles"] });
     },
     onError: (err) => {
-      setLoadError(errorMessage(err, "Could not save the profile."));
+      setLoadError(errorMessage(err, m["smtp.couldNotSaveProfile"]()));
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => window.api.smtp.delete(id),
     onSuccess: () => {
-      toast.success("Profile deleted.");
+      toast.success(m["smtp.profileDeleted"]());
       setLoadError(null);
       setConfirmProfile(null);
       void queryClient.invalidateQueries({ queryKey: ["smtp", "profiles"] });
     },
     onError: (err) => {
       setConfirmProfile(null);
-      setLoadError(errorMessage(err, "Could not delete the profile."));
+      setLoadError(errorMessage(err, m["smtp.couldNotDeleteProfile"]()));
     },
   });
 
@@ -332,10 +379,10 @@ function SmtpProfilesSection() {
     mutationFn: (profileId: string) => window.api.smtp.testProfile(profileId),
     onSuccess: (_result, profileId) => {
       setTestState({ kind: "ok", profileId });
-      toast.success("Connection OK - the server accepted the credentials.");
+      toast.success(m["smtp.connectionOk"]());
     },
     onError: (err, profileId) => {
-      setTestState({ kind: "error", profileId, message: errorMessage(err, "Connection failed.") });
+      setTestState({ kind: "error", profileId, message: errorMessage(err, m["smtp.connectionFailed"]()) });
     },
   });
 
@@ -370,11 +417,8 @@ function SmtpProfilesSection() {
     <section>
       <div className="mb-4 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold">SMTP profiles</h2>
-          <p className="text-xs text-muted-foreground">
-            Saved sender identities the compose wizard can pick from. Passwords are stored locally
-            and never shown.
-          </p>
+          <h2 className="text-sm font-semibold">{m["smtp.title"]()}</h2>
+          <p className="text-xs text-muted-foreground">{m["smtp.description"]()}</p>
         </div>
         <Button
           size="sm"
@@ -383,7 +427,7 @@ function SmtpProfilesSection() {
             setForm({ kind: "create" });
           }}
         >
-          <Plus className="size-4" /> Add profile
+          <Plus className="size-4" /> {m["smtp.addProfile"]()}
         </Button>
       </div>
 
@@ -394,23 +438,20 @@ function SmtpProfilesSection() {
       )}
 
       {listQuery.isError && (
-        <ErrorBanner message={errorMessage(listQuery.error, "Could not load SMTP profiles.")} />
+        <ErrorBanner message={errorMessage(listQuery.error, m["smtp.couldNotLoadProfiles"]())} />
       )}
 
       {listQuery.isLoading && (
         <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> Loading profiles…
+          <Loader2 className="size-4 animate-spin" /> {m["smtp.loadingProfiles"]()}
         </div>
       )}
 
       {!listQuery.isLoading && !listQuery.isError && profiles.length === 0 && (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center">
           <Mail className="size-8 text-muted-foreground" />
-          <p className="text-sm font-medium">No SMTP profiles yet</p>
-          <p className="max-w-sm text-xs text-muted-foreground">
-            Save your SMTP server details once (e.g. Gmail with an app password) and reuse them for
-            every campaign.
-          </p>
+          <p className="text-sm font-medium">{m["smtp.noProfilesYet"]()}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">{m["smtp.noProfilesDescription"]()}</p>
           <Button
             size="sm"
             className="mt-1"
@@ -419,7 +460,7 @@ function SmtpProfilesSection() {
               setForm({ kind: "create" });
             }}
           >
-            <Plus className="size-4" /> Add profile
+            <Plus className="size-4" /> {m["smtp.addProfile"]()}
           </Button>
         </div>
       )}
@@ -439,18 +480,18 @@ function SmtpProfilesSection() {
                       </span>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {profile.username} · password{" "}
+                      {profile.username} · {m["smtp.passwordLabel"]()}{" "}
                       {profile.hasPassword ? (
                         <span className="tracking-widest">••••••••</span>
                       ) : (
-                        "not set"
+                        m["smtp.passwordNotSet"]()
                       )}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {rowTest.kind === "testing" && rowTest.profileId === profile.id ? (
                       <Button size="sm" variant="outline" disabled>
-                        <Loader2 className="size-4 animate-spin" /> Testing…
+                        <Loader2 className="size-4 animate-spin" /> {m["common.testing"]()}
                       </Button>
                     ) : (
                       <Button
@@ -459,7 +500,7 @@ function SmtpProfilesSection() {
                         onClick={() => runTest(profile)}
                         disabled={testMutation.isPending}
                       >
-                        <CheckCircle2 className="size-4" /> Test connection
+                        <CheckCircle2 className="size-4" /> {m["smtp.testConnection"]()}
                       </Button>
                     )}
                     <Button
@@ -470,17 +511,16 @@ function SmtpProfilesSection() {
                         setForm({ kind: "edit", profile });
                       }}
                     >
-                      <Pencil className="size-4" /> Edit
+                      <Pencil className="size-4" /> {m["templates.edit"]()}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => setConfirmProfile(profile)}>
-                      <Trash2 className="size-4" /> Delete
+                      <Trash2 className="size-4" /> {m["common.delete"]()}
                     </Button>
                   </div>
                 </div>
                 {rowTest.kind === "ok" && rowTest.profileId === profile.id && (
                   <p className="mt-2 flex items-center gap-1 text-xs text-emerald-600">
-                    <CheckCircle2 className="size-3.5" /> Connected - the server accepted these
-                    credentials.
+                    <CheckCircle2 className="size-3.5" /> {m["smtp.connected"]()}
                   </p>
                 )}
                 {rowTest.kind === "error" && rowTest.profileId === profile.id && (
@@ -599,15 +639,13 @@ function ProfileFormDialog({
         <header className="flex items-start justify-between gap-3 border-b px-6 py-4">
           <div>
             <h2 id="smtp-form-title" className="text-lg font-semibold">
-              {isCreate ? "Add SMTP profile" : `Edit "${form.profile.name}"`}
+              {isCreate ? m["smtp.addProfileTitle"]() : m["smtp.editProfileTitle"]({ name: form.profile.name })}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isCreate
-                ? "Save your SMTP server details to reuse in every campaign."
-                : "The stored password is never shown; leave the field blank to keep it."}
+              {isCreate ? m["smtp.createHint"]() : m["smtp.editHint"]()}
             </p>
           </div>
-          <Button variant="ghost" size="icon" onClick={onCancel} aria-label="Cancel">
+          <Button variant="ghost" size="icon" onClick={onCancel} aria-label={m["common.cancel"]()}>
             <X className="size-4" />
           </Button>
         </header>
@@ -615,7 +653,7 @@ function ProfileFormDialog({
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              Profile name
+              {m["smtp.profileName"]()}
             </span>
             <input
               type="text"
@@ -627,7 +665,9 @@ function ProfileFormDialog({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">SMTP host</span>
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              {m["smtp.smtpHost"]()}
+            </span>
             <input
               type="text"
               value={host}
@@ -638,7 +678,9 @@ function ProfileFormDialog({
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">Port</span>
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              {m["smtp.port"]()}
+            </span>
             <input
               type="number"
               min={1}
@@ -648,12 +690,14 @@ function ProfileFormDialog({
               className="h-9 w-32 rounded-md border bg-background px-3 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
             />
             <span className="ml-2 text-xs text-muted-foreground">
-              {port === 465 ? "Implicit TLS" : "STARTTLS"}
+              {port === 465 ? m["smtp.implicitTls"]() : m["smtp.starttls"]()}
             </span>
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs font-medium text-muted-foreground">Username</span>
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              {m["smtp.username"]()}
+            </span>
             <input
               type="text"
               value={username}
@@ -665,20 +709,18 @@ function ProfileFormDialog({
 
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted-foreground">
-              App password
+              {m["smtp.appPassword"]()}
             </span>
             <input
               type="password"
               value={passwordInput}
               onChange={(event) => setPasswordInput(event.target.value)}
-              placeholder={
-                isCreate ? "e.g. abcd efgh ijkl mnop" : "Leave blank to keep the current one"
-              }
+              placeholder={isCreate ? "e.g. abcd efgh ijkl mnop" : m["smtp.leaveBlankToKeep"]()}
               autoComplete="new-password"
               className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
             />
             <span className="mt-1 block text-xs text-muted-foreground">
-              Gmail: generate a 16-character app password with 2-step verification enabled.
+              {m["smtp.gmailAppPasswordHint"]()}
             </span>
           </label>
 
@@ -694,7 +736,7 @@ function ProfileFormDialog({
 
         <footer className="flex items-center justify-end gap-2 border-t px-6 py-4">
           <Button variant="outline" onClick={onCancel} disabled={saving}>
-            Cancel
+            {m["common.cancel"]()}
           </Button>
           <Button
             disabled={error !== null || saving}
@@ -717,12 +759,12 @@ function ProfileFormDialog({
           >
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Saving…
+                <Loader2 className="size-4 animate-spin" /> {m["common.saving"]()}
               </>
             ) : isCreate ? (
-              "Save profile"
+              m["smtp.saveProfile"]()
             ) : (
-              "Save changes"
+              m["smtp.saveChanges"]()
             )}
           </Button>
         </footer>
@@ -757,22 +799,20 @@ function ConfirmDeleteProfileDialog({
         onMouseDown={(event) => event.stopPropagation()}
       >
         <h2 id="confirm-delete-profile-title" className="text-lg font-semibold">
-          Delete "{name}"?
+          {m["smtp.deleteProfileTitle"]({ name })}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          The profile and its stored password are removed from the app.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">{m["smtp.deleteProfileDescription"]()}</p>
         <div className="mt-5 flex justify-end gap-2">
           <Button variant="outline" onClick={onCancel} disabled={pending}>
-            Cancel
+            {m["common.cancel"]()}
           </Button>
           <Button variant="destructive" onClick={onConfirm} disabled={pending} autoFocus>
             {pending ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Deleting…
+                <Loader2 className="size-4 animate-spin" /> {m["common.deleting"]()}
               </>
             ) : (
-              "Delete"
+              m["common.delete"]()
             )}
           </Button>
         </div>

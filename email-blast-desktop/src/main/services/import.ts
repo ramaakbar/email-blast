@@ -10,6 +10,7 @@ import type {
   ImportPreview,
   ImportRecipient,
 } from "../../shared/ipc";
+import { m } from "@paraglide/messages";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 
 /**
@@ -223,18 +224,18 @@ function buildPreview(buffer: Uint8Array): ImportPreview {
   const warnings: string[] = [];
   if (droppedHeaders.length > 0) {
     warnings.push(
-      `Column headers ${[...new Set(droppedHeaders)].map((h) => `"${h}"`).join(", ")} appear more than once after trimming - only the first occurrence is imported.`,
+      m["importService.duplicateHeaders"]({ headers: [...new Set(droppedHeaders)].map((h) => `"${h}"`).join(", ") }),
     );
   }
   const roles = new Set(Object.values(mapping));
   if (!roles.has("name")) {
-    warnings.push("No recognizable name column was found. Select it in the mapping below.");
+    warnings.push(m["importService.noNameColumn"]());
   }
   if (!roles.has("email")) {
-    warnings.push("No recognizable email column was found. Select it in the mapping below.");
+    warnings.push(m["importService.noEmailColumn"]());
   }
   if (rows.length !== mapped.length) {
-    warnings.push(`${rows.length - mapped.length} row(s) skipped because the name is empty.`);
+    warnings.push(m["importService.rowsSkippedEmptyName"]({ count: rows.length - mapped.length }));
   }
   return {
     columns,
@@ -252,7 +253,7 @@ export function makeImportService(repo: SqliteRepoShape): ImportServiceShape {
       Effect.gen(function* () {
         if (!/\.(xlsx|xls)$/i.test(excelPath)) {
           return yield* Effect.fail(
-            new UnreadableExcel({ message: "Not an Excel file (.xlsx or .xls expected)" }),
+            new UnreadableExcel({ message: m["importService.notExcel"]() }),
           );
         }
         // The file read is async so a large sheet never blocks the event
