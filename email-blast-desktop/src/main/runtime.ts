@@ -2,11 +2,12 @@ import { Layer } from "effect";
 import Database from "better-sqlite3";
 import { AppInfo } from "./services/app-info";
 import type { DefaultPaths } from "./services/default-paths";
-import { GenerateJobService } from "./services/generate-jobs";
+import { GenerateEnvService, GenerateJobService } from "./services/generate-jobs";
 import { ImportService } from "./services/import";
+import { LibreOfficeService } from "./services/libreoffice";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
-import { SendJobService } from "./services/send-jobs";
+import { SendEnvService, SendJobService } from "./services/send-jobs";
 import { Settings } from "./services/settings";
 import { SmtpService } from "./services/smtp";
 import type { SqliteRepo } from "./db/repository";
@@ -19,7 +20,10 @@ export type AppServices =
   | RecipientsService
   | TemplatesService
   | GenerateJobService
+  | GenerateEnvService
+  | LibreOfficeService
   | SendJobService
+  | SendEnvService
   | SmtpService
   | ProgressHub
   | AppInfo;

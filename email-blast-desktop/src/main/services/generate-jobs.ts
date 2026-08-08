@@ -1,5 +1,4 @@
 import { Context, Data, Effect, Layer, Option, Result } from "effect";
-import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { readFile as readFileAsync } from "fs/promises";
 import { tmpdir } from "os";
@@ -12,9 +11,9 @@ import { m } from "@paraglide/messages";
 import type { GenerateJob, Recipient, Template } from "../../shared/ipc";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
 import type { DefaultPaths } from "./default-paths";
-import { findLibreOffice } from "./libreoffice";
+import { LibreOfficeService, LibreOfficeFailed } from "./libreoffice";
 import { ProgressHub, type ProgressHubShape } from "./progress-hub";
-import { Settings, type SettingsShape } from "./settings";
+import { Settings } from "./settings";
 import {
   SqliteRepo,
   type GenerateJobRecipientRow,
@@ -55,10 +54,8 @@ export class TemplateNotFound extends Data.TaggedError("TemplateNotFound")<{
   readonly message: string;
 }> {}
 
-/** LibreOffice is not installed, or its batch conversion invocation failed. */
-export class LibreOfficeFailed extends Data.TaggedError("LibreOfficeFailed")<{
-  readonly message: string;
-}> {}
+/** LibreOffice is not installed, or its batch conversion invocation failed. Owned by the libreoffice service. */
+export { LibreOfficeFailed } from "./libreoffice";
 
 /** A job request the pipeline cannot honor (no recipients, no template). */
 export class InvalidGenerateRequest extends Data.TaggedError("InvalidGenerateRequest")<{
@@ -73,6 +70,11 @@ export type GenerateError =
 
 // ---- Environment: what the pipeline needs from outside itself ----
 
+/**
+ * The generate env - the test seam. Tests build this object directly and
+ * hand it to `makeGenerateJobService`; the Live layer builds it from the
+ * LibreOfficeService (detection + conversion) and Settings (output dir).
+ */
 export interface GenerateEnv {
   /** A usable `soffice` binary path, or null when LibreOffice is missing. */
   readonly findLibreOffice: () => string | null;
@@ -89,33 +91,31 @@ export interface GenerateEnv {
   readonly outputDir: () => Effect.Effect<string>;
 }
 
-/** The real environment: LibreOffice detection, one execFile batch conversion, the settings output dir. */
-export function realGenerateEnv(settings: SettingsShape): GenerateEnv {
-  return {
-    findLibreOffice: () => findLibreOffice(),
-    convertDocxToPdf: (soffice, docxFiles, outDir) =>
-      Effect.tryPromise<void, LibreOfficeFailed>({
-        try: (signal) =>
-          new Promise<void>((resolve, reject) => {
-            execFile(
-              soffice,
-              ["--headless", "--convert-to", "pdf", "--outdir", outDir, ...docxFiles],
-              { timeout: 10 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, signal },
-              (error) => {
-                if (error === null) resolve();
-                else reject(error);
-              },
-            );
-          }),
-        catch: (error) =>
-          new LibreOfficeFailed({
-            message: `LibreOffice conversion failed${
-              error instanceof Error && error.message !== "" ? `: ${error.message}` : ""
-            }.`,
-          }),
-      }),
-    outputDir: () => settings.getOutputDir(),
-  };
+/**
+ * The generate env as a Context service. Provided by the root layer;
+ * constructing it provides LibreOfficeService alongside (Settings comes
+ * from the consumer's own merge).
+ */
+export class GenerateEnvService extends Context.Service<GenerateEnvService, GenerateEnv>()(
+  "GenerateEnvService",
+) {
+  static readonly Live: Layer.Layer<GenerateEnvService | LibreOfficeService, never, Settings> =
+    Layer.provideMerge(
+      Layer.effect(
+        GenerateEnvService,
+        Effect.gen(function* () {
+          const libreOffice = yield* LibreOfficeService;
+          const settings = yield* Settings;
+          return {
+            findLibreOffice: () => libreOffice.findLibreOffice(),
+            convertDocxToPdf: (soffice, docxFiles, outDir) =>
+              libreOffice.convertDocxToPdf(soffice, docxFiles, outDir),
+            outputDir: () => settings.getOutputDir(),
+          };
+        }),
+      ),
+      LibreOfficeService.Live,
+    );
 }
 
 // ---- The domain service ----
@@ -157,8 +157,13 @@ function sqliteUtcNow(): string {
   return new Date().toISOString().slice(0, 19).replace("T", " ");
 }
 
-/** The final output path for a wanted name, suffixed on collision so no generated PDF overwrites another. */
-function uniquePath(target: string): string {
+/**
+ * The final output path for a wanted name, suffixed on collision so no
+ * generated PDF overwrites another. Null when no free name exists in the
+ * attempt budget - the caller fails that recipient (a throw here would
+ * defect the whole job instead of failing the one file).
+ */
+function uniquePath(target: string): string | null {
   if (!existsSync(target)) return target;
   const dir = dirname(target);
   const ext = extname(target);
@@ -167,7 +172,7 @@ function uniquePath(target: string): string {
     const candidate = join(dir, `${stem}-${i}${ext}`);
     if (!existsSync(candidate)) return candidate;
   }
-  throw new Error(m["generateJob.noFreeFileName"]({ name: target }));
+  return null;
 }
 
 /**
@@ -348,19 +353,22 @@ export function makeGenerateJobService(
             outcomes.push({ row, outcome: { kind: "missing", slot: resolved.slot } });
             continue;
           }
-          let filledBytes: Buffer;
-          try {
-            filledBytes = fillDocx(templateBytes, resolved.values);
-          } catch (error) {
+          const filled = yield* Effect.try<Buffer, unknown>({
+            try: () => fillDocx(templateBytes, resolved.values),
+            catch: (error) => error,
+          }).pipe(Effect.result);
+          if (Result.isFailure(filled)) {
             outcomes.push({
               row,
               outcome: {
                 kind: "fill-error",
-                message: error instanceof Error ? error.message : String(error),
+                message:
+                  filled.failure instanceof Error ? filled.failure.message : String(filled.failure),
               },
             });
             continue;
           }
+          const filledBytes = filled.success;
           // Index-based intermediate names: unique by construction, so the
           // batch conversion never collides; the final name comes from the
           // output pattern after conversion.
@@ -421,10 +429,35 @@ export function makeGenerateJobService(
               );
               continue;
             }
-            const finalPath = uniquePath(
-              join(outputDir, fillOutputName(template.outputPattern, outcome.values)),
-            );
-            renameSync(converted, finalPath);
+            const wanted = join(outputDir, fillOutputName(template.outputPattern, outcome.values));
+            const finalPath = uniquePath(wanted);
+            if (finalPath === null) {
+              yield* failRecipient(
+                state,
+                jobId,
+                row.recipientId,
+                m["generateJob.noFreeFileName"]({ name: wanted }),
+              );
+              continue;
+            }
+            // The rename can fail (permissions, full disk, antivirus
+            // locking the file) - that recipient fails, the batch continues.
+            const moveOutcome = yield* Effect.try({
+              try: () => renameSync(converted, finalPath),
+              catch: (error) => error,
+            }).pipe(Effect.result);
+            if (Result.isFailure(moveOutcome)) {
+              const error = moveOutcome.failure;
+              yield* failRecipient(
+                state,
+                jobId,
+                row.recipientId,
+                `Could not move the generated PDF into the output folder: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+              continue;
+            }
             yield* finishRecipient(state, jobId, row.recipientId, "generated", {
               outputPath: finalPath,
             });
@@ -469,27 +502,48 @@ export function makeGenerateJobService(
           );
           continue;
         }
-        const outcome = yield* Effect.tryPromise(() =>
-          renderImagePdf(templateBytes, kind, template.slots, resolved.values).then((bytes) => {
-            const finalPath = uniquePath(
-              join(outputDir, fillOutputName(template.outputPattern, resolved.values)),
-            );
-            writeFileSync(finalPath, bytes);
-            return finalPath;
-          }),
-        ).pipe(Effect.result);
-        if (Result.isFailure(outcome)) {
-          const error = outcome.failure as unknown;
+        const rendered = yield* Effect.tryPromise<Uint8Array, unknown>({
+          try: () => renderImagePdf(templateBytes, kind, template.slots, resolved.values),
+          catch: (error) => error,
+        }).pipe(Effect.result);
+        if (Result.isFailure(rendered)) {
+          const error = rendered.failure;
           yield* finishRecipient(state, jobId, row.recipientId, "failed", {
             errorMessage: `Could not render the certificate: ${
               error instanceof Error ? error.message : String(error)
             }`,
           });
-        } else {
-          yield* finishRecipient(state, jobId, row.recipientId, "generated", {
-            outputPath: outcome.success,
-          });
+          continue;
         }
+        const wanted = join(outputDir, fillOutputName(template.outputPattern, resolved.values));
+        const finalPath = uniquePath(wanted);
+        if (finalPath === null) {
+          yield* failRecipient(
+            state,
+            jobId,
+            row.recipientId,
+            m["generateJob.noFreeFileName"]({ name: wanted }),
+          );
+          continue;
+        }
+        // The disk write can fail (permissions, full disk) - that is this
+        // recipient's failure, not a defect that strands the whole job.
+        const writeOutcome = yield* Effect.try({
+          try: () => writeFileSync(finalPath, rendered.success),
+          catch: (error) => error,
+        }).pipe(Effect.result);
+        if (Result.isFailure(writeOutcome)) {
+          const error = writeOutcome.failure;
+          yield* finishRecipient(state, jobId, row.recipientId, "failed", {
+            errorMessage: `Could not render the certificate: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          });
+          continue;
+        }
+        yield* finishRecipient(state, jobId, row.recipientId, "generated", {
+          outputPath: finalPath,
+        });
       }
     });
 
@@ -608,8 +662,9 @@ export function makeGenerateJobService(
 }
 
 /**
- * The generate domain service. Constructing this layer provides ProgressHub,
- * Settings, and SqliteRepo alongside, so a program can depend on either.
+ * The generate domain service. Constructing this layer provides
+ * GenerateEnv, LibreOffice, ProgressHub, Settings, and SqliteRepo
+ * alongside, so a program can depend on either.
  */
 export class GenerateJobService extends Context.Service<
   GenerateJobService,
@@ -618,17 +673,29 @@ export class GenerateJobService extends Context.Service<
   static readonly Live = (
     db: Database.Database,
     defaults: DefaultPaths,
-  ): Layer.Layer<GenerateJobService | ProgressHub | Settings | SqliteRepo> =>
+  ): Layer.Layer<
+    | GenerateJobService
+    | GenerateEnvService
+    | LibreOfficeService
+    | ProgressHub
+    | Settings
+    | SqliteRepo,
+    never,
+    never
+  > =>
     Layer.provideMerge(
       Layer.provideMerge(
-        Layer.effect(
-          GenerateJobService,
-          Effect.gen(function* () {
-            const repo = yield* SqliteRepo;
-            const settings = yield* Settings;
-            const hub = yield* ProgressHub;
-            return makeGenerateJobService(repo, hub, realGenerateEnv(settings));
-          }),
+        Layer.provideMerge(
+          Layer.effect(
+            GenerateJobService,
+            Effect.gen(function* () {
+              const repo = yield* SqliteRepo;
+              const env = yield* GenerateEnvService;
+              const hub = yield* ProgressHub;
+              return makeGenerateJobService(repo, hub, env);
+            }),
+          ),
+          GenerateEnvService.Live,
         ),
         ProgressHub.Live,
       ),

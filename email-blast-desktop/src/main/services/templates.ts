@@ -136,17 +136,18 @@ export function makeTemplatesService(repo: SqliteRepoShape): TemplatesServiceSha
             new UnreadableDocx({ message: m["templatesService.docxOnly"]() }),
           );
         }
-        try {
-          return scanDocxSlots(docxPath);
-        } catch (error) {
-          // The parse errors of PizZip/docxtemplater carry no file name, so
-          // prefix the path to make the failure actionable for the user.
-          return yield* Effect.fail(
+        // The parse errors of PizZip/docxtemplater carry no file name, so
+        // prefix the path to make the failure actionable for the user.
+        return yield* Effect.try({
+          try: () => scanDocxSlots(docxPath),
+          catch: (error) =>
             new UnreadableDocx({
-              message: m["templatesService.couldNotRead"]({ path: docxPath, detail: error instanceof Error ? error.message : String(error) }),
+              message: m["templatesService.couldNotRead"]({
+                path: docxPath,
+                detail: error instanceof Error ? error.message : String(error),
+              }),
             }),
-          );
-        }
+        });
       }),
   };
 }

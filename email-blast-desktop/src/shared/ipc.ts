@@ -37,6 +37,14 @@ export const GetAppInfoResponse = Schema.Struct({
 export type GetAppInfoResponse = Schema.Schema.Type<typeof GetAppInfoResponse>;
 
 /**
+ * The response of every `system` channel that returns a path: the chosen
+ * path of the native pickers, or the found `soffice` binary - null when
+ * the dialog was cancelled or LibreOffice is missing.
+ */
+export const PickPathResponse = Schema.Union([Schema.Null, Schema.String]);
+export type PickPathResponse = Schema.Schema.Type<typeof PickPathResponse>;
+
+/**
  * Renderer-to-main payloads, decoded at the main boundary (malformed calls
  * become typed ParseErrors). Single-argument calls carry the bare value;
  * multi-argument calls carry a tuple, mirroring `ipcRenderer.invoke(...args)`.

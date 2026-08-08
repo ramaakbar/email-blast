@@ -20,6 +20,7 @@
     "fmt:check": "oxfmt --check .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prepare": "sh ../scripts/prepare-effect.sh",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push"
   },

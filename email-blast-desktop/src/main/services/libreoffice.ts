@@ -1,11 +1,20 @@
+import { Context, Data, Effect, Layer } from "effect";
+import { execFile } from "node:child_process";
 import { existsSync } from "fs";
 import { join } from "path";
 
 /**
- * LibreOffice detection for the first-launch check (spec decision 10).
- * DOCX-to-PDF conversion needs the `soffice` binary; the welcome screen
- * only lets the user continue when it is found.
+ * LibreOffice detection for the first-launch check (spec decision 10) and
+ * the DOCX-to-PDF conversion of the generate pipeline (ticket 13).
+ * The `soffice` binary must exist; the welcome screen only lets the user
+ * continue when it is found, and the generate job fails typed when the
+ * conversion invocation itself fails.
  */
+
+/** A DOCX-to-PDF conversion that failed (soffice missing, invocation crashed). */
+export class LibreOfficeFailed extends Data.TaggedError("LibreOfficeFailed")<{
+  readonly message: string;
+}> {}
 
 /** Install locations to probe, per platform. */
 export function candidatePaths(platform: NodeJS.Platform): string[] {
@@ -40,4 +49,58 @@ export function findLibreOffice(platform: NodeJS.Platform = process.platform): s
     if (existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+export interface LibreOfficeShape {
+  /** A usable `soffice` binary path, or null when LibreOffice is missing. */
+  readonly findLibreOffice: () => string | null;
+  /**
+   * Converts every given docx into `<outDir>/<basename>.pdf` in ONE
+   * invocation. Fails job-level when the invocation itself fails.
+   */
+  readonly convertDocxToPdf: (
+    soffice: string,
+    docxFiles: readonly string[],
+    outDir: string,
+  ) => Effect.Effect<void, LibreOfficeFailed>;
+}
+
+export function makeLibreOfficeService(): LibreOfficeShape {
+  return {
+    findLibreOffice: () => findLibreOffice(),
+    convertDocxToPdf: (soffice, docxFiles, outDir) =>
+      Effect.tryPromise<void, LibreOfficeFailed>({
+        try: (signal) =>
+          new Promise<void>((resolve, reject) => {
+            execFile(
+              soffice,
+              ["--headless", "--convert-to", "pdf", "--outdir", outDir, ...docxFiles],
+              { timeout: 10 * 60 * 1000, maxBuffer: 16 * 1024 * 1024, signal },
+              (error) => {
+                if (error === null) resolve();
+                else reject(error);
+              },
+            );
+          }),
+        catch: (error) =>
+          new LibreOfficeFailed({
+            message: `LibreOffice conversion failed${
+              error instanceof Error && error.message !== "" ? `: ${error.message}` : ""
+            }.`,
+          }),
+      }),
+  };
+}
+
+/**
+ * The LibreOffice capability service. Provided once by the root layer;
+ * the first-launch check and the generate pipeline's env both read it.
+ */
+export class LibreOfficeService extends Context.Service<LibreOfficeService, LibreOfficeShape>()(
+  "LibreOfficeService",
+) {
+  static readonly Live: Layer.Layer<LibreOfficeService> = Layer.sync(
+    LibreOfficeService,
+    makeLibreOfficeService,
+  );
 }

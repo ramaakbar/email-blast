@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import assert from "node:assert";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import {
   API_VERSION,
   GenerateJob,
@@ -19,6 +19,7 @@ import {
   IPC,
   LogsListPayload,
   PaginatedRecipients,
+  PickPathResponse,
   PingResponse,
   Recipient,
   RecipientDeletePayload,
@@ -51,7 +52,7 @@ import { AppInfo } from "./services/app-info";
 import { defaultPathsForHome } from "./services/default-paths";
 import { GenerateJobService } from "./services/generate-jobs";
 import { ImportService } from "./services/import";
-import { findLibreOffice } from "./services/libreoffice";
+import { LibreOfficeService } from "./services/libreoffice";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
 import { SendJobService } from "./services/send-jobs";
@@ -150,24 +151,32 @@ function registerApiVersionAssertion(): void {
 /**
  * The full IPC surface. Renderer-to-main payloads are decoded at the
  * boundary (malformed calls become typed ParseErrors); every handler that
- * needs a service runs an Effect program provided with the root layer.
+ * needs a service runs an Effect program against the app context built
+ * once at boot - the same service instances every other program shares.
  */
-function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
+function registerIpcHandlers(context: Context.Context<AppServices>): void {
   const run = <A, E>(program: Effect.Effect<A, E, AppServices>): Promise<A> =>
-    Effect.runPromise(program.pipe(Effect.provide(layer)));
+    Effect.runPromise(program.pipe(Effect.provideContext(context)));
 
   registerWindowHandler(IPC["system:ping"], () => {
     return Schema.encodeSync(PingResponse)({ pong: true, apiVersion: API_VERSION });
   });
 
   registerWindowHandler(IPC["system:check-libreoffice"], () => {
-    return findLibreOffice();
+    return run(
+      Effect.gen(function* () {
+        const service = yield* LibreOfficeService;
+        return Schema.encodeSync(PickPathResponse)(service.findLibreOffice());
+      }),
+    );
   });
 
   registerWindowHandler(IPC["system:pick-folder"], () => {
     return dialog
       .showOpenDialog({ properties: ["openDirectory"] })
-      .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+      .then((result) =>
+        Schema.encodeSync(PickPathResponse)(result.canceled ? null : (result.filePaths[0] ?? null)),
+      );
   });
 
   registerWindowHandler(IPC["system:pick-excel-file"], () => {
@@ -176,7 +185,9 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
         properties: ["openFile"],
         filters: [{ name: m["dialogs.excelFilter"](), extensions: ["xlsx", "xls"] }],
       })
-      .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+      .then((result) =>
+        Schema.encodeSync(PickPathResponse)(result.canceled ? null : (result.filePaths[0] ?? null)),
+      );
   });
 
   registerWindowHandler(IPC["system:pick-template-file"], () => {
@@ -190,7 +201,9 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
         properties: ["openFile"],
         filters: [{ name: m["dialogs.templateFilter"](), extensions }],
       })
-      .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+      .then((result) =>
+        Schema.encodeSync(PickPathResponse)(result.canceled ? null : (result.filePaths[0] ?? null)),
+      );
   });
 
   registerWindowHandler(IPC["system:get-app-info"], () => {
@@ -573,12 +586,13 @@ function registerIpcHandlers(layer: Layer.Layer<AppServices>): void {
 
 /**
  * Forwards every job event to every open window, routed to the channel
- * its kind belongs to. Subscribed once at boot; the hub is the only
- * source of job events and windows come and go, so a fresh window picks
- * up the stream from its next event onward (events are deltas - the
- * snapshot API stays the source of truth).
+ * its kind belongs to. Subscribed once at boot against the shared app
+ * context, so the hub this subscribes to is the same instance every job
+ * run emits into; the hub is the only source of job events and windows
+ * come and go, so a fresh window picks up the stream from its next event
+ * onward (events are deltas - the snapshot API stays the source of truth).
  */
-function forwardProgressToWindows(layer: Layer.Layer<AppServices>): void {
+function forwardProgressToWindows(context: Context.Context<AppServices>): void {
   void Effect.runPromise(
     Effect.gen(function* () {
       const hub = yield* ProgressHub;
@@ -593,7 +607,7 @@ function forwardProgressToWindows(layer: Layer.Layer<AppServices>): void {
           win.webContents.send(channel, event);
         }
       });
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provideContext(context)),
   );
 }
 
@@ -616,7 +630,26 @@ app.whenReady().then(async () => {
   const db = openDatabase(join(app.getPath("userData"), "email-blast.db"));
   // The OS locale seeds the UI language setting on first run (ADR-0004).
   const layer = rootLayer(db, defaultPathsForHome(homedir()), app.getLocale());
-  app.on("will-quit", () => db.close());
+  app.on("will-quit", () => {
+    db.close();
+    // The service graph holds no scoped resources, but the scope is closed
+    // anyway - the counterpart of the Scope.make at boot.
+    void Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
+  // The service graph is BUILT ONCE here and every program - the boot
+  // sequence, the IPC handlers, the progress forwarder - runs against the
+  // same context. Effect 4.0 beta rebuilds a layer on every provide call,
+  // so services that carry process state (the progress hub's listeners,
+  // the send service's pause/cancel control, the quit latch) would get a
+  // fresh instance per IPC call and silently stop coordinating.
+  const { context, scope } = await Effect.runPromise(
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const context = yield* Layer.buildWithScope(layer, scope);
+      return { context, scope };
+    }),
+  );
 
   // Awaited before window creation, so the first paint always sees the
   // finished first-run state (directories exist, defaults seeded) and the
@@ -629,13 +662,13 @@ app.whenReady().then(async () => {
       setLocale(yield* settings.getLanguage(), { reload: false });
       const info = yield* AppInfo;
       console.log(`[boot] Effect layer ready: ${info.name} v${info.version}`);
-    }).pipe(Effect.provide(layer)),
+    }).pipe(Effect.provideContext(context)),
   );
 
-  registerIpcHandlers(layer);
+  registerIpcHandlers(context);
   // Job progress events flow hub -> every window; subscribed before the
   // first window exists so no event is ever missed after windows appear.
-  forwardProgressToWindows(layer);
+  forwardProgressToWindows(context);
   // Dev-only: assert the preload's API_VERSION matches ours (stale-bundle guard).
   // Registered before window creation so it catches the first webContents too.
   if (is.dev) registerApiVersionAssertion();

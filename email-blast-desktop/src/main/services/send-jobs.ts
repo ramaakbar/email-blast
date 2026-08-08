@@ -18,7 +18,12 @@ import {
 } from "../../shared/settings";
 import { interpolateMessageHtml, interpolateMessagePlain, messageValues } from "../../shared/send";
 import type { DefaultPaths } from "./default-paths";
-import { GenerateJobService, type GenerateJobServiceShape } from "./generate-jobs";
+import {
+  GenerateEnvService,
+  GenerateJobService,
+  type GenerateJobServiceShape,
+} from "./generate-jobs";
+import { LibreOfficeService } from "./libreoffice";
 import { ProgressHub, type ProgressHubShape } from "./progress-hub";
 import {
   AttachmentNotFound,
@@ -89,9 +94,18 @@ export interface SendEnv {
   readonly quitLatch: Latch.Latch;
 }
 
-/** The real environment: a latch that stays closed until quit handling opens it. */
-export function realSendEnv(): SendEnv {
-  return { quitLatch: Latch.makeUnsafe(false) };
+/**
+ * The send env as a Context service - the test seam stays the `SendEnv`
+ * object passed to `makeSendJobService`, and the Live layer supplies the
+ * real latch. The service graph is built ONCE at boot (index.ts) and
+ * every program runs against that same context, so the latch instance
+ * here is the one the run loop checks - a future quit handler that opens
+ * it (ticket 17) must run against the same context to reach this latch.
+ */
+export class SendEnvService extends Context.Service<SendEnvService, SendEnv>()("SendEnvService") {
+  static readonly Live: Layer.Layer<SendEnvService> = Layer.sync(SendEnvService, () => ({
+    quitLatch: Latch.makeUnsafe(false),
+  }));
 }
 
 // ---- The in-memory control surface of one run ----
@@ -741,9 +755,9 @@ export function makeSendJobService(
 }
 
 /**
- * The send domain service. Constructing this layer provides GenerateJob,
- * Smtp, ProgressHub, Settings, and SqliteRepo alongside, so a program can
- * depend on either.
+ * The send domain service. Constructing this layer provides SendEnv,
+ * GenerateJob, GenerateEnv, LibreOffice, Smtp, ProgressHub, Settings, and
+ * SqliteRepo alongside, so a program can depend on either.
  */
 export class SendJobService extends Context.Service<SendJobService, SendJobServiceShape>()(
   "SendJobService",
@@ -752,19 +766,31 @@ export class SendJobService extends Context.Service<SendJobService, SendJobServi
     db: Database.Database,
     defaults: DefaultPaths,
   ): Layer.Layer<
-    SendJobService | GenerateJobService | SmtpService | ProgressHub | Settings | SqliteRepo
+    | SendJobService
+    | SendEnvService
+    | GenerateJobService
+    | GenerateEnvService
+    | LibreOfficeService
+    | SmtpService
+    | ProgressHub
+    | Settings
+    | SqliteRepo
   > =>
     Layer.provideMerge(
       Layer.provideMerge(
-        Layer.effect(
-          SendJobService,
-          Effect.gen(function* () {
-            const repo = yield* SqliteRepo;
-            const hub = yield* ProgressHub;
-            const generate = yield* GenerateJobService;
-            const smtp = yield* SmtpService;
-            return makeSendJobService(repo, hub, generate, smtp, realSendEnv());
-          }),
+        Layer.provideMerge(
+          Layer.effect(
+            SendJobService,
+            Effect.gen(function* () {
+              const repo = yield* SqliteRepo;
+              const hub = yield* ProgressHub;
+              const generate = yield* GenerateJobService;
+              const smtp = yield* SmtpService;
+              const env = yield* SendEnvService;
+              return makeSendJobService(repo, hub, generate, smtp, env);
+            }),
+          ),
+          SendEnvService.Live,
         ),
         GenerateJobService.Live(db, defaults),
       ),

@@ -35,7 +35,13 @@ export function makeProgressHub(): ProgressHubShape {
 /**
  * The progress hub service. The root layer provides it alongside the job
  * services; the boot code subscribes once and forwards to windows.
+ * `Layer.sync` defers construction to layer build time, and the layer is
+ * built ONCE at boot (index.ts builds the graph and every program runs
+ * against that context), so the hub the jobs emit into is the same
+ * instance the forwarder subscribed to. Building it per `Effect.provide`
+ * call would silently drop every progress event - Effect 4.0 beta
+ * rebuilds a layer for each provide.
  */
 export class ProgressHub extends Context.Service<ProgressHub, ProgressHubShape>()("ProgressHub") {
-  static readonly Live: Layer.Layer<ProgressHub> = Layer.succeed(ProgressHub, makeProgressHub());
+  static readonly Live: Layer.Layer<ProgressHub> = Layer.sync(ProgressHub, makeProgressHub);
 }
