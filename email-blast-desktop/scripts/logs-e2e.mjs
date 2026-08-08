@@ -174,6 +174,16 @@ try {
 
   const sidebar = (name) => page.locator(`aside a:has-text("${name}")`);
 
+  // Ticket 17: the seeded paused job raises the one-time launch banner.
+  // It has its own E2E (quit-resume-e2e.mjs); dismiss it here so the
+  // Resume selectors below stay unambiguous.
+  await page.waitForSelector("text=Send paused", { timeout: 15000 });
+  await page
+    .locator("main > div:first-child")
+    .filter({ hasText: "Send paused" })
+    .getByRole("button", { name: "Dismiss" })
+    .click();
+
   // --- The list ---
   await sidebar("Logs").click();
   await page.waitForSelector("text=Undangan Rapat - Batch 2", { timeout: 15000 });

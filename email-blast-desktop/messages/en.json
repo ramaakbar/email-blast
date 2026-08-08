@@ -454,7 +454,11 @@
     "recipientNoEmail": "This recipient has no email address.",
     "noAttachmentForRecipient": "No confirmed generated attachment for this recipient.",
     "retriesExhausted": "Retries exhausted: {message}",
-    "couldNotResumeJob": "Could not resume this job."
+    "couldNotResumeJob": "Could not resume this job.",
+    "quitInProgress": "Send in progress - {sent} of {total} sent. The job will pause and you can resume it later from Logs.",
+    "quitAndPause": "Quit & Pause",
+    "keepSending": "Keep Sending",
+    "launchBanner": "Send paused: {subject} - {sent} of {total} sent."
   },
   "generateJob": {
     "templateMissing": "The template no longer exists.",

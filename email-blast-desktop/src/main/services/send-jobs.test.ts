@@ -904,6 +904,189 @@ describe("SendJobService cursor persistence and restart-resume (Seam A)", () => 
   });
 });
 
+describe("SendJobService boot recovery and quit guard (ticket 17)", () => {
+  it("recovery turns a job stuck `sending` into `paused`; a resumed run continues from the cursor without double-sending", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(svc.service.start(startPayload(svc)));
+
+    // The quit path: the loop stops between recipients and the job stays
+    // `sending` with the cursor persisted (the existing latch test proves
+    // the at-most-one window).
+    await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 1);
+        svc.quitLatch.openUnsafe();
+        yield* pumpUntilExit(fiber);
+      }),
+    );
+    expect((await jobStatus(svc, job.id)).status).toBe("sending");
+
+    // Boot: recovery converts the stuck job to `paused`, cursor untouched.
+    expect(await Effect.runPromise(svc.service.recoverInterrupted())).toBe(1);
+    const recovered = await jobStatus(svc, job.id);
+    expect(recovered.status).toBe("paused");
+    expect(recovered.cursorIndex).toBe(1);
+    expect(recovered.recipients.map((r) => r.status)).toEqual(["sent", "pending", "pending"]);
+
+    // The one-active rule sees the recovered job as active: a different
+    // job cannot run while it is paused-but-unresumed.
+    const other = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    await withClock(
+      Effect.gen(function* () {
+        const outcome = yield* svc.service.run(other.id).pipe(Effect.result);
+        expect(Result.isFailure(outcome)).toBe(true);
+        if (Result.isFailure(outcome)) {
+          expect(outcome.failure).toBeInstanceOf(InvalidSendRequest);
+        }
+      }),
+    );
+
+    // "Relaunch": a fresh service over the same database resumes the
+    // recovered job and delivers exactly the remaining recipients.
+    const hub2 = makeProgressHub();
+    const events2: Array<Record<string, unknown>> = [];
+    hub2.subscribe((event) => events2.push(event as Record<string, unknown>));
+    const generate2 = makeGenerateJobService(svc.repo, hub2, stubGenerateEnv());
+    const smtp2 = makeSmtpService(svc.repo);
+    const service2 = makeSendJobService(svc.repo, hub2, generate2, smtp2, {
+      quitLatch: Latch.makeUnsafe(false),
+    });
+    await withClock(
+      Effect.gen(function* () {
+        const resumed = yield* service2.resume(job.id);
+        expect(resumed.status).toBe("pending");
+        const fiber = yield* service2.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 3);
+        const done = yield* pumpUntilExit(fiber);
+        expect(done.status).toBe("completed");
+      }),
+    );
+    // Each recipient was delivered exactly once across the whole run.
+    expect(svc.captured).toHaveLength(3);
+    expect((await jobStatus(svc, job.id)).recipients.every((r) => r.status === "sent")).toBe(true);
+  });
+
+  it("a resumed job that fails the pre-flight returns to `paused`, never to `pending`-with-cursor", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(svc.service.start(startPayload(svc)));
+
+    // Run 1 against the live server: one send, then pause - the job now
+    // holds a persisted cursor.
+    await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 1);
+        yield* svc.service.pause(job.id);
+        yield* pumpUntilExit(fiber);
+      }),
+    );
+    expect((await jobStatus(svc, job.id)).cursorIndex).toBe(1);
+
+    // Point the job's SMTP at a dead port, then resume: the pre-flight
+    // fails, and the job must land back on `paused` (the banner and the
+    // Logs Resume button only act on `paused`) - a `pending` job with a
+    // cursor has no path forward in the UI.
+    const deadPort = await closedPort();
+    svc.db
+      .prepare("UPDATE send_jobs SET smtp_override = ? WHERE id = ?")
+      .run(
+        JSON.stringify({ host: "127.0.0.1", port: deadPort, username: "me", password: "secret" }),
+        job.id,
+      );
+    await withClock(
+      Effect.gen(function* () {
+        const resumed = yield* svc.service.resume(job.id);
+        expect(resumed.status).toBe("pending");
+        const outcome = yield* svc.service.run(job.id).pipe(Effect.result);
+        expect(Result.isFailure(outcome)).toBe(true);
+        if (Result.isFailure(outcome)) {
+          expect(outcome.failure).toBeInstanceOf(SmtpConnectFailed);
+        }
+      }),
+    );
+    const reverted = await jobStatus(svc, job.id);
+    expect(reverted.status).toBe("paused");
+    expect(reverted.cursorIndex).toBe(1);
+    // The job is resumable again - the exact loop the banner promises.
+    const resumedAgain = await Effect.runPromise(svc.service.resume(job.id));
+    expect(resumedAgain.status).toBe("pending");
+  });
+
+  it("a fresh job that fails the pre-flight stays `pending` for its Try again", async () => {
+    const svc = await makeSvc();
+    const deadPort = await closedPort();
+    const job = await Effect.runPromise(
+      svc.service.start(
+        startPayload(svc, {
+          smtpOverride: { host: "127.0.0.1", port: deadPort, username: "me", password: "secret" },
+        }),
+      ),
+    );
+    const outcome = await Effect.runPromise(svc.service.run(job.id).pipe(Effect.result));
+    expect(Result.isFailure(outcome)).toBe(true);
+    expect((await jobStatus(svc, job.id)).status).toBe("pending");
+  });
+
+  it("recovery touches nothing when no job is stuck", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    expect(await Effect.runPromise(svc.service.recoverInterrupted())).toBe(0);
+    expect((await jobStatus(svc, job.id)).status).toBe("pending");
+  });
+
+  it("the launch banner points at the single paused job, and at nothing for zero or two paused jobs", async () => {
+    const svc = await makeSvc();
+    const bannerId = () =>
+      Effect.runSync(
+        svc.service.launchBannerJob().pipe(Effect.map(Option.map((job) => job.id))),
+      );
+
+    // No paused jobs yet.
+    expect(bannerId()).toEqual(Option.none());
+
+    // Exactly one paused job - the banner.
+    const jobA = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    Effect.runSync(svc.repo.setSendJobStatus(jobA.id, "paused", null));
+    expect(bannerId()).toEqual(Option.some(jobA.id));
+
+    // A second paused job kills the banner (the Logs screen is the place).
+    const jobB = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    Effect.runSync(svc.repo.setSendJobStatus(jobB.id, "paused", null));
+    expect(bannerId()).toEqual(Option.none());
+
+    // Back to exactly one - the banner returns for the remaining one.
+    Effect.runSync(svc.repo.setSendJobStatus(jobA.id, "completed", null));
+    expect(bannerId()).toEqual(Option.some(jobB.id));
+  });
+
+  it("the quit guard's active summary prefers a sending job, else the most recent paused one", async () => {
+    const svc = await makeSvc();
+    const activeId = () =>
+      Effect.runSync(
+        svc.service.activeJobSummary().pipe(Effect.map(Option.map((job) => job.id))),
+      );
+    const counts = () =>
+      Effect.runSync(svc.service.activeJobSummary().pipe(Effect.map(Option.map((job) => [job.sentCount, job.total] as const))));
+
+    expect(activeId()).toEqual(Option.none());
+
+    const jobA = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    Effect.runSync(svc.repo.setSendJobStatus(jobA.id, "paused", null));
+    expect(activeId()).toEqual(Option.some(jobA.id));
+    expect(counts()).toEqual(Option.some([0, 3]));
+
+    // A sending job wins over any paused one.
+    const jobB = await Effect.runPromise(svc.service.start(startPayload(svc)));
+    Effect.runSync(svc.repo.setSendJobStatus(jobB.id, "sending", null));
+    expect(activeId()).toEqual(Option.some(jobB.id));
+
+    // The sending job finishes; the paused one is the active one again.
+    Effect.runSync(svc.repo.setSendJobStatus(jobB.id, "completed", null));
+    expect(activeId()).toEqual(Option.some(jobA.id));
+  });
+});
+
 describe("SendJobService cancel vs retry exhaustion (Seam A)", () => {
   it("cancel during the retry backoff stands - exhaustion never overwrites it", async () => {
     // Flaky sends fail instantly through the stub, so the cancel can land

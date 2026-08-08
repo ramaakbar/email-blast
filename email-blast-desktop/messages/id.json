@@ -454,7 +454,11 @@
     "recipientNoEmail": "Penerima ini tidak punya alamat email.",
     "noAttachmentForRecipient": "Tidak ada lampiran hasil generate yang terkonfirmasi untuk penerima ini.",
     "retriesExhausted": "Percobaan ulang habis: {message}",
-    "couldNotResumeJob": "Tidak dapat melanjutkan pekerjaan ini."
+    "couldNotResumeJob": "Tidak dapat melanjutkan pekerjaan ini.",
+    "quitInProgress": "Pengiriman berlangsung - {sent} dari {total} terkirim. Pekerjaan akan dijeda dan Anda dapat melanjutkannya nanti dari Log.",
+    "quitAndPause": "Keluar & Jeda",
+    "keepSending": "Lanjutkan Mengirim",
+    "launchBanner": "Pengiriman dijeda: {subject} - {sent} dari {total} terkirim."
   },
   "generateJob": {
     "templateMissing": "Template sudah tidak ada.",

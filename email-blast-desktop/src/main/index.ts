@@ -55,7 +55,7 @@ import { ImportService } from "./services/import";
 import { LibreOfficeService } from "./services/libreoffice";
 import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
-import { SendJobService } from "./services/send-jobs";
+import { SendEnvService, SendJobService, type SendEnv } from "./services/send-jobs";
 import { SmtpService } from "./services/smtp";
 import { openDatabase, SqliteRepo } from "./db/repository";
 import { Settings } from "./services/settings";
@@ -75,7 +75,7 @@ const expectedOrigin =
     ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin
     : "file://";
 
-function createWindow(): BrowserWindow {
+function createWindow(context: Context.Context<AppServices>, sendEnv: SendEnv): BrowserWindow {
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -96,6 +96,74 @@ function createWindow(): BrowserWindow {
 
   mainWindow.on("ready-to-show", () => {
     mainWindow.show();
+  });
+
+  // Ticket 17's quit/close guard: closing the window (X, Cmd+W) or
+  // quitting (Cmd+Q, app.quit) while a send is running or paused shows
+  // the same dialog on both platforms - [Quit & Pause] opens the quit
+  // latch so the run loop stops at its next checkpoint (the job stays
+  // `sending` with the cursor persisted; boot recovery turns it `paused`
+  // on the next launch) and quits; [Keep Sending] cancels the close.
+  // Quitting pauses, never cancels: the job is always resumable from
+  // Logs, losing at most the in-flight recipient.
+  //
+  // The active-job check runs SYNCHRONOUSLY (the repo queries are plain
+  // better-sqlite3, so Effect.runSync works) because the decision must
+  // land in the same tick as the event: a close that is not prevented
+  // here proceeds untouched, including the app.quit() a window-close
+  // normally triggers - preventing it unconditionally would abort that
+  // quit and strand the app alive with no window (the E2E harness's
+  // close hangs on exactly that).
+  let closeAllowed = false;
+  let quitDialogOpen = false;
+  mainWindow.on("close", (event) => {
+    if (closeAllowed) return;
+    if (quitDialogOpen) {
+      // A second close while the dialog is open (Cmd+Q stays active over
+      // the sheet, OS session end) must not bypass the guard: prevent it
+      // and let the dialog's own decision stand.
+      event.preventDefault();
+      return;
+    }
+    let active;
+    try {
+      active = Effect.runSync(
+        Effect.gen(function* () {
+          const service = yield* SendJobService;
+          return Option.getOrNull(yield* service.activeJobSummary());
+        }).pipe(Effect.provideContext(context)),
+      );
+    } catch {
+      // The query itself failed (unreadable DB and the like): fail open -
+      // the per-recipient cursor persists regardless, so a close cannot
+      // lose more than the boot recovery already accounts for.
+      active = null;
+    }
+    if (active === null) return;
+    event.preventDefault();
+    quitDialogOpen = true;
+    void (async () => {
+      try {
+        const { response } = await dialog.showMessageBox(mainWindow, {
+          type: "warning",
+          message: m["sendJob.quitInProgress"]({
+            sent: active.sentCount,
+            total: active.total,
+          }),
+          buttons: [m["sendJob.quitAndPause"](), m["sendJob.keepSending"]()],
+          defaultId: 1,
+          cancelId: 1,
+          noLink: true,
+        });
+        if (response === 0) {
+          closeAllowed = true;
+          sendEnv.quitLatch.openUnsafe();
+          app.quit();
+        }
+      } finally {
+        quitDialogOpen = false;
+      }
+    })();
   });
 
   // No remote content: window.open and navigation away from the app are
@@ -571,6 +639,15 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
     );
   });
 
+  registerWindowHandler(IPC["send:get-launch-banner"], () => {
+    return run(
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Option.getOrNull(yield* service.launchBannerJob());
+      }),
+    );
+  });
+
   registerWindowHandler(IPC["logs:list"], (payload) => {
     const { statusFilter, dateFrom, dateTo } = decodePayload(LogsListPayload, payload);
     return run(
@@ -645,9 +722,13 @@ app.whenReady().then(async () => {
   // fresh instance per IPC call and silently stop coordinating.
   const { context, scope } = await Effect.runPromise(
     Effect.gen(function* () {
-      const scope = yield* Scope.make();
-      const context = yield* Layer.buildWithScope(layer, scope);
-      return { context, scope };
+      // The locals are named differently from the destructured pair to
+      // keep oxlint's no-shadow quiet (the destructured names are in
+      // scope for the whole block, so the generator's own locals would
+      // shadow them).
+      const builtScope = yield* Scope.make();
+      const builtContext = yield* Layer.buildWithScope(layer, builtScope);
+      return { context: builtContext, scope: builtScope };
     }),
   );
 
@@ -665,6 +746,23 @@ app.whenReady().then(async () => {
     }).pipe(Effect.provideContext(context)),
   );
 
+  // Ticket 17 boot recovery: a job stuck `sending` (hard crash, power
+  // loss, or a quit that landed between recipients) becomes `paused` -
+  // the persisted cursor is authoritative. Runs before any window exists,
+  // so the first paint already sees the recovered state (the launch
+  // banner queries it via IPC at mount). The same program hands out the
+  // quit latch the close guard opens when the user picks Quit & Pause.
+  const sendEnv = await Effect.runPromise(
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      const recovered = yield* service.recoverInterrupted();
+      if (recovered > 0) {
+        console.log(`[boot] recovered ${recovered} interrupted send job(s) to paused`);
+      }
+      return yield* SendEnvService;
+    }).pipe(Effect.provideContext(context)),
+  );
+
   registerIpcHandlers(context);
   // Job progress events flow hub -> every window; subscribed before the
   // first window exists so no event is ever missed after windows appear.
@@ -672,12 +770,12 @@ app.whenReady().then(async () => {
   // Dev-only: assert the preload's API_VERSION matches ours (stale-bundle guard).
   // Registered before window creation so it catches the first webContents too.
   if (is.dev) registerApiVersionAssertion();
-  createWindow();
+  createWindow(context, sendEnv);
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the
     // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(context, sendEnv);
   });
 });
 

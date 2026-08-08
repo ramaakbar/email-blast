@@ -99,8 +99,9 @@ export interface SendEnv {
  * object passed to `makeSendJobService`, and the Live layer supplies the
  * real latch. The service graph is built ONCE at boot (index.ts) and
  * every program runs against that same context, so the latch instance
- * here is the one the run loop checks - a future quit handler that opens
- * it (ticket 17) must run against the same context to reach this latch.
+ * here is the one the run loop checks - the quit guard (index.ts) opens
+ * it at [Quit & Pause] and runs against the same context, so it reaches
+ * this very latch.
  */
 export class SendEnvService extends Context.Service<SendEnvService, SendEnv>()("SendEnvService") {
   static readonly Live: Layer.Layer<SendEnvService> = Layer.sync(SendEnvService, () => ({
@@ -176,6 +177,25 @@ export interface SendJobServiceShape {
     readonly dateFrom: string | null;
     readonly dateTo: string | null;
   }) => Effect.Effect<readonly SendJobSummary[]>;
+  /**
+   * Boot recovery (ticket 17): every job stuck `sending` - a hard crash,
+   * power loss, or a quit that landed between recipients - becomes
+   * `paused`, the persisted cursor stays authoritative. Runs once at
+   * launch, before any window exists. Returns how many jobs recovered.
+   */
+  readonly recoverInterrupted: () => Effect.Effect<number>;
+  /**
+   * The active job for the quit/close guard: a `sending` job if one
+   * exists, else the most recent `paused` one. None means the app can
+   * close freely - no dialog.
+   */
+  readonly activeJobSummary: () => Effect.Effect<Option.Option<SendJobSummary>>;
+  /**
+   * The one-time launch banner subject (ticket 17): exactly one `paused`
+   * job exists after boot recovery - that job. None for zero or two-plus
+   * paused jobs, where the Logs screen is the place to act.
+   */
+  readonly launchBannerJob: () => Effect.Effect<Option.Option<SendJobSummary>>;
 }
 
 /** The SQLite UTC stamp format, matching `datetime('now')`. */
@@ -651,7 +671,14 @@ export function makeSendJobService(
         // atomic one-active guard (two concurrent `run` calls both pass
         // an in-memory check, but only the first lands this write), and
         // pause during the pre-flight becomes legal. A pre-flight failure
-        // reverts the job to its prior state.
+        // reverts the job; a failed run must never strand a resumed job
+        // as `pending` with a persisted cursor - the UI (Logs row and
+        // launch banner) can only resume `paused` jobs, so that state has
+        // no path forward. A fresh wizard job (cursor 0, prior `pending`)
+        // legitimately stays `pending` for its "Try again"; a job run
+        // directly from `paused` goes back to `paused`.
+        const revertTo: SendJobStatus =
+          priorStatus === "paused" || loaded.job.cursorIndex > 0 ? "paused" : "pending";
         yield* repo.setSendJobStatus(jobId, "sending", null);
         const control: RunControl = {
           jobId,
@@ -663,12 +690,12 @@ export function makeSendJobService(
         try {
           const credentialsOutcome = yield* resolveCredentials(loaded).pipe(Effect.result);
           if (Result.isFailure(credentialsOutcome)) {
-            yield* repo.setSendJobStatus(jobId, priorStatus, null);
+            yield* repo.setSendJobStatus(jobId, revertTo, null);
             return yield* Effect.fail(credentialsOutcome.failure);
           }
           const outcome = yield* preflight(loaded, credentialsOutcome.success).pipe(Effect.result);
           if (Result.isFailure(outcome)) {
-            yield* repo.setSendJobStatus(jobId, priorStatus, null);
+            yield* repo.setSendJobStatus(jobId, revertTo, null);
             return yield* Effect.fail(outcome.failure);
           }
           yield* sendLoop(loaded, credentialsOutcome.success, control);
@@ -751,6 +778,30 @@ export function makeSendJobService(
 
     list: (filter) =>
       repo.listSendJobs(filter).pipe(Effect.map((rows) => rows.map(toSendJobSummary))),
+
+    recoverInterrupted: () => repo.recoverInterruptedSends(),
+
+    activeJobSummary: () =>
+      repo
+        .listSendJobs({ statusFilter: null, dateFrom: null, dateTo: null })
+        .pipe(
+          Effect.map((rows) => {
+            const sending = rows.find((row) => row.status === "sending");
+            if (sending !== undefined) return Option.some(toSendJobSummary(sending));
+            const paused = rows.find((row) => row.status === "paused");
+            return paused === undefined ? Option.none() : Option.some(toSendJobSummary(paused));
+          }),
+        ),
+
+    launchBannerJob: () =>
+      repo
+        .listSendJobs({ statusFilter: null, dateFrom: null, dateTo: null })
+        .pipe(
+          Effect.map((rows) => {
+            const paused = rows.filter((row) => row.status === "paused");
+            return paused.length === 1 ? Option.some(toSendJobSummary(paused[0])) : Option.none();
+          }),
+        ),
   };
 }
 

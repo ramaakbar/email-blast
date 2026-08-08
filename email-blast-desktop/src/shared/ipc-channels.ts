@@ -53,6 +53,7 @@ export const IPC = {
   "send:cancel": "send:cancel",
   "send:get-status": "send:get-status",
   "send:retry-failed": "send:retry-failed",
+  "send:get-launch-banner": "send:get-launch-banner",
   "send-progress": "send-progress",
   "job-paused": "job-paused",
   "logs:list": "logs:list",

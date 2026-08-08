@@ -69,6 +69,7 @@ const api: Api = {
     cancelSend: (jobId) => ipcRenderer.invoke(IPC["send:cancel"], jobId),
     getSendStatus: (jobId) => ipcRenderer.invoke(IPC["send:get-status"], jobId),
     retryFailedSend: (jobId) => ipcRenderer.invoke(IPC["send:retry-failed"], jobId),
+    getLaunchBanner: () => ipcRenderer.invoke(IPC["send:get-launch-banner"]),
     onSendProgress: (cb) => {
       const listener = (_event: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload);
       ipcRenderer.on(IPC["send-progress"], listener);

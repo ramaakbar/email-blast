@@ -259,6 +259,14 @@ export interface SqliteRepoShape {
    * itself is excluded so a paused job can always be resumed.
    */
   readonly anySendJobActiveExcept: (jobId: string) => Effect.Effect<boolean>;
+  /**
+   * Boot recovery (ticket 17): every job stuck `sending` - a hard crash,
+   * power loss, or a quit that landed between recipients - becomes
+   * `paused`; the row data and the persisted cursor are untouched, so a
+   * later resume continues from where the loop stopped. Returns how many
+   * jobs were recovered.
+   */
+  readonly recoverInterruptedSends: () => Effect.Effect<number>;
 }
 
 /**
@@ -1084,6 +1092,10 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
           .where(and(ne(sj.id, jobId), inArray(sj.status, ["sending", "paused"])))
           .get();
         return (row?.n ?? 0) > 0;
+      }),
+    recoverInterruptedSends: () =>
+      Effect.sync(() => {
+        return dbx.update(sj).set({ status: "paused" }).where(eq(sj.status, "sending")).run().changes;
       }),
   };
 }

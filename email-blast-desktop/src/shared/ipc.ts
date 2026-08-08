@@ -751,5 +751,12 @@ export interface Api {
      * Returns an unsubscribe function.
      */
     onJobPaused(cb: (event: JobPausedEvent) => void): () => void;
+    /**
+     * The one-time launch banner subject (ticket 17): the single `paused`
+     * job after boot recovery - or null when zero or two-plus paused jobs
+     * exist. The renderer asks once at startup and shows a banner with a
+     * Resume action for this job.
+     */
+    getLaunchBanner(): Promise<SendJobSummary | null>;
   };
 }
