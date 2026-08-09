@@ -3,7 +3,12 @@ import { Effect, Layer, Option } from "effect";
 import Database from "better-sqlite3";
 import { join } from "path";
 import type { SendJobStatus } from "../../shared/ipc";
-import { migrateCredentialsAtRest, openDatabase, SqliteRepo, type SqliteRepoShape } from "./repository";
+import {
+  migrateCredentialsAtRest,
+  openDatabase,
+  SqliteRepo,
+  type SqliteRepoShape,
+} from "./repository";
 import { tempDir } from "../services/test-helpers";
 import {
   CIPHERTEXT_PREFIX,
@@ -365,6 +370,7 @@ describe("send job log queries (ticket 16)", () => {
         type: "docx",
         slots: ["name"],
         outputPattern: "LOA_{name}.pdf",
+        slotLayout: {},
       }),
     );
     const generateJobId = await use(layer, (r) => r.insertGenerateJob(template.id));
@@ -619,11 +625,14 @@ describe("send job log queries (ticket 16)", () => {
 function fakeCrypto(marker: string): CredentialCrypto {
   return {
     available: () => true,
-    store: (plaintext) => CIPHERTEXT_PREFIX + Buffer.from(`${marker}<${plaintext}>`).toString("base64"),
+    store: (plaintext) =>
+      CIPHERTEXT_PREFIX + Buffer.from(`${marker}<${plaintext}>`).toString("base64"),
     read: (stored) => {
       if (!stored.startsWith(CIPHERTEXT_PREFIX)) return stored;
       const text = Buffer.from(stored.slice(CIPHERTEXT_PREFIX.length), "base64").toString();
-      return text.startsWith(`${marker}<`) && text.endsWith(">") ? text.slice(marker.length + 1, -1) : "";
+      return text.startsWith(`${marker}<`) && text.endsWith(">")
+        ? text.slice(marker.length + 1, -1)
+        : "";
     },
   };
 }
@@ -647,9 +656,9 @@ describe("credential encryption at rest (ticket 02)", () => {
     );
 
     // At rest: the column holds ciphertext, never the plaintext.
-    const row = db
-      .prepare("SELECT password FROM smtp_profiles WHERE id = ?")
-      .get(created.id) as { password: string };
+    const row = db.prepare("SELECT password FROM smtp_profiles WHERE id = ?").get(created.id) as {
+      password: string;
+    };
     expect(row.password).not.toBe("hunter2");
     expect(isCiphertext(row.password)).toBe(true);
 
@@ -670,6 +679,7 @@ describe("credential encryption at rest (ticket 02)", () => {
         type: "docx",
         slots: ["name"],
         outputPattern: "LOA_{name}.pdf",
+        slotLayout: {},
       }),
     );
     const generateJobId = await use(layer, (r) => r.insertGenerateJob(template.id));
@@ -695,9 +705,9 @@ describe("credential encryption at rest (ticket 02)", () => {
 
     // At rest: the whole override blob is ciphertext; the password and
     // even the host are not readable from the database file.
-    const row = db
-      .prepare("SELECT smtp_override FROM send_jobs WHERE id = ?")
-      .get(jobId) as { smtp_override: string };
+    const row = db.prepare("SELECT smtp_override FROM send_jobs WHERE id = ?").get(jobId) as {
+      smtp_override: string;
+    };
     expect(row.smtp_override).not.toContain("secret");
     expect(row.smtp_override).not.toContain("127.0.0.1");
     expect(isCiphertext(row.smtp_override)).toBe(true);
@@ -742,9 +752,9 @@ describe("credential encryption at rest (ticket 02)", () => {
     expect(Option.isSome(updated) ? updated.value.password : null).toBe("hunter2");
 
     // The stored ciphertext is untouched by the null-password update.
-    const row = db
-      .prepare("SELECT password FROM smtp_profiles WHERE id = ?")
-      .get(created.id) as { password: string };
+    const row = db.prepare("SELECT password FROM smtp_profiles WHERE id = ?").get(created.id) as {
+      password: string;
+    };
     expect(row.password).not.toBe("hunter2");
     expect(isCiphertext(row.password)).toBe(true);
     db.close();
@@ -796,14 +806,23 @@ describe("migrateCredentialsAtRest (ticket 02)", () => {
        VALUES (?, 'Gmail', 'smtp.gmail.com', 587, 'me@gmail.com', ?)`,
     );
     insert.run("plain", "hunter2");
-    insert.run("already", `${CIPHERTEXT_PREFIX}${Buffer.from("mk<already-secret>").toString("base64")}`);
-    insert.run("other-key", `${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`);
+    insert.run(
+      "already",
+      `${CIPHERTEXT_PREFIX}${Buffer.from("mk<already-secret>").toString("base64")}`,
+    );
+    insert.run(
+      "other-key",
+      `${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`,
+    );
     const jobInsert = db.prepare(
       `INSERT INTO send_jobs (id, status, smtp_override, subject, body_html, sender_name, sender_address, total_count)
        VALUES (?, 'pending', ?, 'S', '<p>B</p>', 'N', 'n@x.y', 0)`,
     );
     jobInsert.run("job-plain", JSON.stringify({ host: "127.0.0.1", password: "secret" }));
-    jobInsert.run("job-enc", `${CIPHERTEXT_PREFIX}${Buffer.from('mk<{"host":"x"}>').toString("base64")}`);
+    jobInsert.run(
+      "job-enc",
+      `${CIPHERTEXT_PREFIX}${Buffer.from('mk<{"host":"x"}>').toString("base64")}`,
+    );
 
     const log = vi.fn();
     migrateCredentialsAtRest(db, crypto, log);
@@ -813,9 +832,15 @@ describe("migrateCredentialsAtRest (ticket 02)", () => {
     // left as-is (idempotence across relaunches).
     expect(profiles[0]).toBe(crypto.store("hunter2"));
     expect(isCiphertext(profiles[1])).toBe(true);
-    expect(profiles[2]).toBe(`${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`);
-    expect(overrides[0]).toBe(crypto.store(JSON.stringify({ host: "127.0.0.1", password: "secret" })));
-    expect(overrides[1]).toBe(`${CIPHERTEXT_PREFIX}${Buffer.from('mk<{"host":"x"}>').toString("base64")}`);
+    expect(profiles[2]).toBe(
+      `${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`,
+    );
+    expect(overrides[0]).toBe(
+      crypto.store(JSON.stringify({ host: "127.0.0.1", password: "secret" })),
+    );
+    expect(overrides[1]).toBe(
+      `${CIPHERTEXT_PREFIX}${Buffer.from('mk<{"host":"x"}>').toString("base64")}`,
+    );
     expect(log).toHaveBeenCalledWith(
       expect.stringContaining("migrated 1 profile password(s) and 1 inline override(s)"),
     );
@@ -834,7 +859,11 @@ describe("migrateCredentialsAtRest (ticket 02)", () => {
        VALUES ('p1', 'Gmail', 'smtp.gmail.com', 587, 'me@gmail.com', 'hunter2')`,
     ).run();
     const log = vi.fn();
-    migrateCredentialsAtRest(db, makeCredentialCrypto(null, () => {}), log);
+    migrateCredentialsAtRest(
+      db,
+      makeCredentialCrypto(null, () => {}),
+      log,
+    );
     expect(storedValues(db).profiles).toEqual(["hunter2"]);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("safeStorage unavailable"));
     db.close();

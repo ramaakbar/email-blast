@@ -38,6 +38,7 @@ const api: Api = {
     update: (payload) => ipcRenderer.invoke(IPC["templates:update"], payload),
     delete: (id) => ipcRenderer.invoke(IPC["templates:delete"], id),
     scanSlots: (docxPath) => ipcRenderer.invoke(IPC["templates:scan-slots"], docxPath),
+    getImage: (path) => ipcRenderer.invoke(IPC["templates:get-image"], path),
   },
   messageTemplates: {
     list: () => ipcRenderer.invoke(IPC["message-templates:list"]),

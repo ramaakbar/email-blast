@@ -9,6 +9,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
@@ -17,11 +18,17 @@ import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { MessageEditor } from "@/components/message-editor";
 import { PatternPreview } from "@/components/pattern-preview";
+import { SlotLayoutEditor } from "@/components/slot-layout-editor";
 import { TemplateBadge } from "@/components/template-badge";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { formatTimestamp } from "@/lib/format";
-import type { MessageTemplate, Template, TemplateType } from "../../../shared/ipc";
+import type {
+  MessageTemplate,
+  Template,
+  TemplateSlotLayout,
+  TemplateType,
+} from "../../../shared/ipc";
 import { templateTypeForFile, validateTemplate } from "../../../shared/template-validation";
 import { validateMessageTemplate } from "../../../shared/send";
 
@@ -114,10 +121,15 @@ function TemplatesPage() {
   });
 
   // Escape closes whichever overlay is open: the form, then the confirm
-  // dialog, then the detail panel.
+  // dialog, then the detail panel. The slot-layout editor owns its own
+  // Escape handling and is marked with data-slot-editor, so a press there
+  // closes only the editor, never the form underneath.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      if (event.target instanceof Element && event.target.closest("[data-slot-editor]") !== null) {
+        return;
+      }
       if (form !== null) setForm(null);
       else if (confirmOpen) setConfirmOpen(false);
       else if (selectedId !== null) setSelectedId(null);
@@ -219,7 +231,9 @@ function TemplatesPage() {
               <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
                 <FileText className="size-10 text-muted-foreground" />
                 <p className="text-sm font-medium">{m["templates.noTemplatesYet"]()}</p>
-                <p className="max-w-sm text-xs text-muted-foreground">{m["templates.noTemplatesHint"]()}</p>
+                <p className="max-w-sm text-xs text-muted-foreground">
+                  {m["templates.noTemplatesHint"]()}
+                </p>
                 <Button size="sm" className="mt-2" onClick={() => void handleAddTemplate()}>
                   <Plus className="size-4" /> {m["templates.addTemplate"]()}
                 </Button>
@@ -277,13 +291,22 @@ function TemplatesPage() {
               saving={createMutation.isPending || updateMutation.isPending}
               onCancel={() => setForm(null)}
               onSave={(payload) => {
-                if (form.kind === "create") createMutation.mutate(payload);
+                if (form.kind === "create")
+                  createMutation.mutate({
+                    name: payload.name,
+                    filePath: payload.filePath,
+                    type: payload.type,
+                    slots: payload.slots,
+                    outputPattern: payload.outputPattern,
+                    slotLayout: payload.slotLayout,
+                  });
                 else
                   updateMutation.mutate({
                     id: form.template.id,
                     name: payload.name,
                     slots: payload.slots,
                     outputPattern: payload.outputPattern,
+                    slotLayout: payload.slotLayout,
                   });
               }}
             />
@@ -328,7 +351,12 @@ function DetailPanel({
             {template.filePath}
           </p>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label={m["common.closeDetails"]()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label={m["common.closeDetails"]()}
+        >
           <X className="size-4" />
         </Button>
       </header>
@@ -412,6 +440,7 @@ function TemplateFormDialog({
     type: TemplateType;
     slots: string[];
     outputPattern: string;
+    slotLayout: TemplateSlotLayout;
   }) => void;
 }) {
   const [name, setName] = useState(
@@ -422,6 +451,12 @@ function TemplateFormDialog({
   );
   const slots = slotRows.map((row) => row.value);
   const [pattern, setPattern] = useState(form.kind === "create" ? "" : form.template.outputPattern);
+  // The per-slot text positioning of image templates (ticket 04). Live in
+  // the form dialog; saved with the update payload.
+  const [slotLayout, setSlotLayout] = useState<TemplateSlotLayout>(() =>
+    form.kind === "edit" ? form.template.slotLayout : {},
+  );
+  const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
   // DOCX scans are async; stale results are dropped with a load token.
   const [scanState, setScanState] = useState<
     | { kind: "idle" }
@@ -487,7 +522,9 @@ function TemplateFormDialog({
         <header className="flex items-start justify-between gap-3 border-b px-6 py-4">
           <div>
             <h2 id="template-form-title" className="text-lg font-semibold">
-              {form.kind === "create" ? m["templates.addTitle"]() : m["templates.editTitle"]({ name: form.template.name })}
+              {form.kind === "create"
+                ? m["templates.addTitle"]()
+                : m["templates.editTitle"]({ name: form.template.name })}
             </h2>
             <p className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
               <span className="max-w-64 truncate font-mono">{fileLabel}</span>
@@ -574,7 +611,9 @@ function TemplateFormDialog({
               <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700">
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                 <span className="flex-1">{scanState.message}</span>
-                <span className="shrink-0 text-amber-700/70">{m["templates.slotsCanBeTyped"]()}</span>
+                <span className="shrink-0 text-amber-700/70">
+                  {m["templates.slotsCanBeTyped"]()}
+                </span>
               </div>
             )}
             <div className="space-y-1.5">
@@ -617,6 +656,18 @@ function TemplateFormDialog({
             >
               <Plus className="size-4" /> {m["templates.addSlot"]()}
             </Button>
+
+            {!isDocx && slots.length > 0 && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-3 w-full"
+                onClick={() => setLayoutEditorOpen(true)}
+              >
+                <SlidersHorizontal className="size-4" /> {m["templates.positionTextOnImage"]()}
+              </Button>
+            )}
           </section>
 
           <label className="block">
@@ -655,6 +706,7 @@ function TemplateFormDialog({
                 type: form.kind === "create" ? form.type : form.template.type,
                 slots,
                 outputPattern: pattern,
+                slotLayout,
               })
             }
           >
@@ -670,6 +722,16 @@ function TemplateFormDialog({
           </Button>
         </footer>
       </div>
+
+      {layoutEditorOpen && (
+        <SlotLayoutEditor
+          imagePath={form.kind === "create" ? form.filePath : form.template.filePath}
+          slots={slots}
+          layout={slotLayout}
+          onChange={setSlotLayout}
+          onClose={() => setLayoutEditorOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -845,7 +907,9 @@ function MessagesTab() {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-10 text-center">
           <Mail className="size-10 text-muted-foreground" />
           <p className="text-sm font-medium">{m["messages.noTemplatesYet"]()}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{m["messages.noTemplatesHint"]()}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            {m["messages.noTemplatesHint"]()}
+          </p>
           <Button size="sm" className="mt-2" onClick={() => setForm({ kind: "create" })}>
             <Plus className="size-4" /> {m["messages.addMessageTemplate"]()}
           </Button>
@@ -871,8 +935,10 @@ function MessagesTab() {
                   {template.subject}
                 </p>
                 <p className="line-clamp-2 text-xs text-muted-foreground">
-                  {template.bodyHtml.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() ||
-                    m["messages.noBodyYet"]()}
+                  {template.bodyHtml
+                    .replace(/<[^>]*>/g, "")
+                    .replace(/\s+/g, " ")
+                    .trim() || m["messages.noBodyYet"]()}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {m["messages.updatedStamp"]({ stamp: formatTimestamp(template.updatedAt) })}
@@ -943,7 +1009,12 @@ function MessageTemplateDetailPanel({
             {m["messages.updatedStamp"]({ stamp: formatTimestamp(template.updatedAt) })}
           </p>
         </div>
-        <Button variant="ghost" size="icon" onClick={onClose} aria-label={m["common.closeDetails"]()}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label={m["common.closeDetails"]()}
+        >
           <X className="size-4" />
         </Button>
       </header>
@@ -1058,7 +1129,9 @@ function MessageTemplateFormDialog({
             emptyHint={m["messages.noRecipientsHint"]({ slot: "{slot}" })}
           />
           {recipients.length > 0 && (
-            <p className="text-xs text-muted-foreground">{m["messages.bodyHint"]({ name: "{name}" })}</p>
+            <p className="text-xs text-muted-foreground">
+              {m["messages.bodyHint"]({ name: "{name}" })}
+            </p>
           )}
         </div>
 
@@ -1069,9 +1142,7 @@ function MessageTemplateFormDialog({
           <Button
             disabled={error !== null || saving}
             title={error ?? undefined}
-            onClick={() =>
-              onSave({ name, subject: message.subject, bodyHtml: message.bodyHtml })
-            }
+            onClick={() => onSave({ name, subject: message.subject, bodyHtml: message.bodyHtml })}
           >
             {saving ? (
               <>

@@ -10,6 +10,14 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { m } from "@paraglide/messages";
 import type { GenerateJob, Recipient, Template } from "../../shared/ipc";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
+import {
+  fitFontSize,
+  LEGACY_TEXT_COLOR,
+  parseHexColor,
+  pdfBaselineY,
+  slotTextX,
+  type SlotLayoutConfig,
+} from "../../shared/slot-layout";
 import { DEFAULT_UI_LOCALE } from "../../shared/settings";
 import type { DefaultPaths } from "./default-paths";
 import { LibreOfficeService, LibreOfficeFailed } from "./libreoffice";
@@ -202,18 +210,27 @@ function fillDocx(templateBytes: Buffer, values: Record<string, string>): Buffer
   return doc.getZip().generate({ type: "nodebuffer" });
 }
 
+/** The pdf-lib ink of a "#RRGGBB" color; a malformed color falls back to the legacy ink. */
+function ink(hex: string) {
+  const c = parseHexColor(hex) ?? { r: 26, g: 36, b: 33 };
+  return rgb(c.r / 255, c.g / 255, c.b / 255);
+}
+
 /**
  * Renders one certificate PDF: the image background embedded full-page,
- * every declared slot drawn centered in a default stacked layout.
- * Per-slot text coordinates (CONTEXT.md places them at generate-job time)
- * are a later enhancement; the default centers every slot and fits long
- * values by shrinking the font.
+ * every declared slot drawn in its configured position (ticket 04). A
+ * slot without a configuration falls back to the centered stacked
+ * default, so templates with no configuration at all keep the legacy
+ * layout and a newly declared slot never vanishes. Configured slots
+ * render single-line at the configured size, color, and alignment,
+ * auto-shrinking to fit the slot width.
  */
 async function renderImagePdf(
   templateBytes: Uint8Array,
   kind: "png" | "jpg",
   slots: readonly string[],
   values: Record<string, string>,
+  slotLayout: SlotLayoutConfig,
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
   const background =
@@ -228,17 +245,40 @@ async function renderImagePdf(
   for (const slot of slots) {
     const value = values[slot];
     if (value === undefined) continue;
-    // Shrink to fit the page width; never below a legible floor.
-    const size = Math.max(18, Math.min(140, width / Math.max(1, value.length * 0.6)));
-    const textWidth = font.widthOfTextAtSize(value, size);
-    page.drawText(value, {
-      x: (width - textWidth) / 2,
-      y,
-      size,
-      font,
-      color: rgb(0.1, 0.14, 0.13),
+    const layout = slotLayout[slot];
+    if (layout === undefined) {
+      // The legacy default: centered, stacked from two-thirds down the
+      // page, fitted to the page width and never below a legible floor.
+      const size = Math.max(18, Math.min(140, width / Math.max(1, value.length * 0.6)));
+      const textWidth = font.widthOfTextAtSize(value, size);
+      page.drawText(value, {
+        x: (width - textWidth) / 2,
+        y,
+        size,
+        font,
+        color: ink(LEGACY_TEXT_COLOR),
+      });
+      y -= step;
+      continue;
+    }
+    // The configured box: the top-left corner lives in image pixels
+    // (CSS convention); the fitted size never grows past the configured
+    // one and never falls below the legibility floor.
+    const maxWidth = layout.maxWidth ?? width - layout.x;
+    const fitted = fitFontSize({
+      size: layout.fontSize,
+      maxWidth,
+      measureWidth: (size) => font.widthOfTextAtSize(value, size),
     });
-    y -= step;
+    const textWidth = font.widthOfTextAtSize(value, fitted);
+    const x = slotTextX({ x: layout.x, maxWidth, textWidth, align: layout.align });
+    page.drawText(value, {
+      x,
+      y: pdfBaselineY({ pageHeight: height, y: layout.y, fontSize: fitted }),
+      size: fitted,
+      font,
+      color: ink(layout.color),
+    });
   }
   return pdf.save();
 }
@@ -386,8 +426,7 @@ export function makeGenerateJobService(
           if (soffice === null) {
             return yield* Effect.fail(
               new LibreOfficeFailed({
-                message:
-                  m["generateJob.libreOfficeMissing"](),
+                message: m["generateJob.libreOfficeMissing"](),
               }),
             );
           }
@@ -423,12 +462,7 @@ export function makeGenerateJobService(
           } else {
             const converted = join(pdfDir, `${basename(outcome.docxPath, ".docx")}.pdf`);
             if (!existsSync(converted)) {
-              yield* failRecipient(
-                state,
-                jobId,
-                row.recipientId,
-                m["generateJob.noPdfProduced"](),
-              );
+              yield* failRecipient(state, jobId, row.recipientId, m["generateJob.noPdfProduced"]());
               continue;
             }
             const wanted = join(outputDir, fillOutputName(template.outputPattern, outcome.values));
@@ -486,12 +520,7 @@ export function makeGenerateJobService(
       for (const row of rows) {
         const recipient = byId.get(row.recipientId);
         if (recipient === undefined) {
-          yield* failRecipient(
-            state,
-            jobId,
-            row.recipientId,
-            m["generateJob.recipientDeleted"](),
-          );
+          yield* failRecipient(state, jobId, row.recipientId, m["generateJob.recipientDeleted"]());
           continue;
         }
         const resolved = resolveValues(template, recipient);
@@ -505,7 +534,14 @@ export function makeGenerateJobService(
           continue;
         }
         const rendered = yield* Effect.tryPromise<Uint8Array, unknown>({
-          try: () => renderImagePdf(templateBytes, kind, template.slots, resolved.values),
+          try: () =>
+            renderImagePdf(
+              templateBytes,
+              kind,
+              template.slots,
+              resolved.values,
+              template.slotLayout,
+            ),
           catch: (error) => error,
         }).pipe(Effect.result);
         if (Result.isFailure(rendered)) {

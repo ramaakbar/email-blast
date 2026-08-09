@@ -34,6 +34,7 @@ export const IPC = {
   "templates:update": "templates:update",
   "templates:delete": "templates:delete",
   "templates:scan-slots": "templates:scan-slots",
+  "templates:get-image": "templates:get-image",
   "message-templates:list": "message-templates:list",
   "message-templates:get": "message-templates:get",
   "message-templates:create": "message-templates:create",

@@ -20,7 +20,8 @@
     "closeDetails": "Close details",
     "couldNotLoad": "Could not load {key}.",
     "couldNotSave": "Could not save {key}.",
-    "retryFailures": "Retry Failures"
+    "retryFailures": "Retry Failures",
+    "close": "Close"
   },
   "nav": {
     "import": "Import",
@@ -309,7 +310,22 @@
     "countRegisteredOne": "{count} template registered",
     "countRegisteredOther": "{count} templates registered",
     "slotCountOne": "{count} slot · {stamp}",
-    "slotCountOther": "{count} slots · {stamp}"
+    "slotCountOther": "{count} slots · {stamp}",
+    "slotLayoutTitle": "Position text on image",
+    "slotLayoutHint": "Drag each text box into place. Text renders on one line and shrinks to fit the box width.",
+    "slotLayoutDone": "Done",
+    "slotLayoutImageFailed": "Could not load the template image.",
+    "positionTextOnImage": "Position text on image…",
+    "slotX": "X",
+    "slotY": "Y",
+    "slotFontSize": "Font size",
+    "slotMaxWidth": "Max width",
+    "slotMaxWidthAuto": "Auto (to the page edge)",
+    "slotColor": "Color",
+    "slotAlign": "Alignment",
+    "slotAlignLeft": "Align left",
+    "slotAlignCenter": "Align center",
+    "slotAlignRight": "Align right"
   },
   "importPage": {
     "title": "Import",
@@ -505,7 +521,8 @@
     "templatePatternUnknownSlot": "The output pattern references \"{slot}\", which is not one of the template's slots.",
     "messageTemplateNameRequired": "Message template name is required.",
     "messageSubjectRequired": "Subject is required.",
-    "messageBodyRequired": "HTML body is required."
+    "messageBodyRequired": "HTML body is required.",
+    "slotLayoutInvalid": "Slot \"{slot}\" has an invalid text position configuration."
   },
   "dialogs": {
     "excelFilter": "Excel",

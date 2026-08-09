@@ -29,6 +29,7 @@ import {
   templates as t,
 } from "./schema";
 import { isCiphertext, type CredentialCrypto } from "../services/credential-crypto";
+import type { SlotLayoutConfig } from "../../shared/slot-layout";
 
 /**
  * The migrations folder applied on open (drizzle/): packaged builds get it
@@ -85,9 +86,10 @@ export function migrateCredentialsAtRest(
   }
   db.transaction(() => {
     let profiles = 0;
-    for (const row of db
-      .prepare("SELECT id, password FROM smtp_profiles")
-      .all() as { id: string; password: string }[]) {
+    for (const row of db.prepare("SELECT id, password FROM smtp_profiles").all() as {
+      id: string;
+      password: string;
+    }[]) {
       if (isCiphertext(row.password)) continue;
       db.prepare("UPDATE smtp_profiles SET password = ? WHERE id = ?").run(
         credCrypto.store(row.password),
@@ -355,6 +357,8 @@ export interface TemplateDraft {
   readonly type: "docx" | "image";
   readonly slots: readonly string[];
   readonly outputPattern: string;
+  /** Per-slot text layout for image templates; empty when unconfigured. */
+  readonly slotLayout: SlotLayoutConfig;
 }
 
 /** The mutable template fields; the file path and type never change. */
@@ -362,6 +366,8 @@ export interface TemplatePatch {
   readonly name: string;
   readonly slots: readonly string[];
   readonly outputPattern: string;
+  /** Always written; an empty record clears the configuration. */
+  readonly slotLayout: SlotLayoutConfig;
 }
 
 /**
@@ -575,6 +581,7 @@ interface TemplateRow {
   type: "docx" | "image";
   slots: string;
   output_pattern: string;
+  slot_layout: string | null;
   created_at: string;
 }
 
@@ -615,6 +622,7 @@ function toTemplate(row: TemplateRow): Template {
     type: row.type,
     slots: JSON.parse(row.slots) as string[],
     outputPattern: row.output_pattern,
+    slotLayout: row.slot_layout === null ? {} : (JSON.parse(row.slot_layout) as SlotLayoutConfig),
     createdAt: row.created_at,
   };
 }
@@ -676,6 +684,7 @@ const templateColumns = {
   type: t.type,
   slots: t.slots,
   output_pattern: t.outputPattern,
+  slot_layout: t.slotLayout,
   created_at: t.createdAt,
 } as const;
 
@@ -845,6 +854,7 @@ export function makeSqliteRepo(
             type: draft.type,
             slots: JSON.stringify(draft.slots),
             outputPattern: draft.outputPattern,
+            slotLayout: JSON.stringify(draft.slotLayout),
           })
           .run();
         // The insert above just landed, so the row must exist.
@@ -859,6 +869,7 @@ export function makeSqliteRepo(
             name: patch.name,
             slots: JSON.stringify(patch.slots),
             outputPattern: patch.outputPattern,
+            slotLayout: JSON.stringify(patch.slotLayout),
           })
           .where(eq(t.id, id))
           .run();
@@ -1231,9 +1242,7 @@ export function makeSqliteRepo(
             // stored blob is never an empty string) and the job's send
             // fails at preflight with a clear error.
             smtpOverrideJson:
-              row.smtpOverrideJson === null
-                ? null
-                : (credCrypto.read(row.smtpOverrideJson) || null),
+              row.smtpOverrideJson === null ? null : credCrypto.read(row.smtpOverrideJson) || null,
             templateId: row.templateId,
             templateName: row.templateName,
             subject: row.subject,
@@ -1339,7 +1348,8 @@ export function makeSqliteRepo(
       }),
     recoverInterruptedSends: () =>
       Effect.sync(() => {
-        return dbx.update(sj).set({ status: "paused" }).where(eq(sj.status, "sending")).run().changes;
+        return dbx.update(sj).set({ status: "paused" }).where(eq(sj.status, "sending")).run()
+          .changes;
       }),
   };
 }

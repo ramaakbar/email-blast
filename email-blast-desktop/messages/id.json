@@ -20,7 +20,8 @@
     "closeDetails": "Tutup detail",
     "couldNotLoad": "Gagal memuat {key}.",
     "couldNotSave": "Gagal menyimpan {key}.",
-    "retryFailures": "Ulangi yang Gagal"
+    "retryFailures": "Ulangi yang Gagal",
+    "close": "Tutup"
   },
   "nav": {
     "import": "Impor",
@@ -309,7 +310,22 @@
     "countRegisteredOne": "{count} template terdaftar",
     "countRegisteredOther": "{count} template terdaftar",
     "slotCountOne": "{count} slot · {stamp}",
-    "slotCountOther": "{count} slot · {stamp}"
+    "slotCountOther": "{count} slot · {stamp}",
+    "slotLayoutTitle": "Posisikan teks pada gambar",
+    "slotLayoutHint": "Seret setiap kotak teks ke tempatnya. Teks dirender satu baris dan mengecil agar muat di lebar kotak.",
+    "slotLayoutDone": "Selesai",
+    "slotLayoutImageFailed": "Gagal memuat gambar template.",
+    "positionTextOnImage": "Posisikan teks pada gambar…",
+    "slotX": "X",
+    "slotY": "Y",
+    "slotFontSize": "Ukuran huruf",
+    "slotMaxWidth": "Lebar maksimum",
+    "slotMaxWidthAuto": "Otomatis (hingga tepi halaman)",
+    "slotColor": "Warna",
+    "slotAlign": "Perataan",
+    "slotAlignLeft": "Rata kiri",
+    "slotAlignCenter": "Rata tengah",
+    "slotAlignRight": "Rata kanan"
   },
   "importPage": {
     "title": "Impor",
@@ -505,7 +521,8 @@
     "templatePatternUnknownSlot": "Pola output mereferensikan \"{slot}\", yang bukan salah satu slot template.",
     "messageTemplateNameRequired": "Nama template pesan wajib diisi.",
     "messageSubjectRequired": "Subjek wajib diisi.",
-    "messageBodyRequired": "Isi HTML wajib diisi."
+    "messageBodyRequired": "Isi HTML wajib diisi.",
+    "slotLayoutInvalid": "Slot \"{slot}\" memiliki konfigurasi posisi teks yang tidak valid."
   },
   "dialogs": {
     "excelFilter": "Excel",

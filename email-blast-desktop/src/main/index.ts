@@ -44,6 +44,7 @@ import {
   Template,
   TemplateCreatePayload,
   TemplateDeleteResponse,
+  TemplateImageResponse,
   TemplateUpdatePayload,
 } from "../shared/ipc";
 import { TEMPLATE_EXTENSIONS } from "../shared/template-validation";
@@ -414,12 +415,15 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
   });
 
   registerWindowHandler(IPC["templates:update"], (payload) => {
-    const { id, name, slots, outputPattern } = decodePayload(TemplateUpdatePayload, payload);
+    const { id, name, slots, outputPattern, slotLayout } = decodePayload(
+      TemplateUpdatePayload,
+      payload,
+    );
     return run(
       Effect.gen(function* () {
         const service = yield* TemplatesService;
         return Schema.encodeSync(Template)(
-          yield* service.update(id, { name, slots, outputPattern }),
+          yield* service.update(id, { name, slots, outputPattern, slotLayout }),
         );
       }),
     );
@@ -441,6 +445,20 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
       Effect.gen(function* () {
         const service = yield* TemplatesService;
         return Schema.encodeSync(ScanSlotsResponse)({ slots: yield* service.scanSlots(docxPath) });
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["templates:get-image"], (payload) => {
+    const imagePath = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* TemplatesService;
+        const image = yield* service.getImageData(imagePath);
+        return Option.match(image, {
+          onNone: () => null,
+          onSome: (value) => Schema.encodeSync(TemplateImageResponse)(value),
+        });
       }),
     );
   });
@@ -483,7 +501,9 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
     return run(
       Effect.gen(function* () {
         const service = yield* MessageTemplatesService;
-        return Schema.encodeSync(MessageTemplate)(yield* service.update(id, { name, subject, bodyHtml }));
+        return Schema.encodeSync(MessageTemplate)(
+          yield* service.update(id, { name, subject, bodyHtml }),
+        );
       }),
     );
   });

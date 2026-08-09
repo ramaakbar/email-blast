@@ -130,7 +130,12 @@ const RECIPIENT_ROWS = [
 
 /** Inserts recipients and returns their ids in insertion order (rowid order). */
 function seedRecipients(db: Database.Database): string[] {
-  Effect.runSync(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients(RECIPIENT_ROWS));
+  Effect.runSync(
+    makeSqliteRepo(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    ).insertRecipients(RECIPIENT_ROWS),
+  );
   return (db.prepare("SELECT id FROM recipients ORDER BY rowid").all() as { id: string }[]).map(
     (row) => row.id,
   );
@@ -171,7 +176,10 @@ async function makeSvc(
   options: { reject?: readonly string[]; failFlaky?: boolean; smtp?: SmtpServiceShape } = {},
 ): Promise<Svc> {
   const db = openDatabase(join(tempDir(), "send.db"));
-  const repo = makeSqliteRepo(db, makeCredentialCrypto(null, () => {}));
+  const repo = makeSqliteRepo(
+    db,
+    makeCredentialCrypto(null, () => {}),
+  );
   const hub = makeProgressHub();
   const generate = makeGenerateJobService(repo, hub, stubGenerateEnv());
   const realSmtp = makeSmtpService(repo);
@@ -207,6 +215,7 @@ async function makeSvc(
       type: "docx",
       slots: ["name", "no"],
       outputPattern: "LOA_{no}_{name}.pdf",
+      slotLayout: {},
     }),
   ).id;
   const generateJobId = Effect.runSync(repo.insertGenerateJob(templateId));
@@ -648,7 +657,10 @@ describe("SendJobService run (Seam A)", () => {
     // feed undefined credentials to the SMTP client.
     svc.db
       .prepare("UPDATE send_jobs SET smtp_override = ? WHERE id = ?")
-      .run(`${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`, job.id);
+      .run(
+        `${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`,
+        job.id,
+      );
     const outcome = await Effect.runPromise(svc.service.run(job.id).pipe(Effect.result));
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) {
@@ -1093,9 +1105,7 @@ describe("SendJobService boot recovery and quit guard (ticket 17)", () => {
   it("the launch banner points at the single paused job, and at nothing for zero or two paused jobs", async () => {
     const svc = await makeSvc();
     const bannerId = () =>
-      Effect.runSync(
-        svc.service.launchBannerJob().pipe(Effect.map(Option.map((job) => job.id))),
-      );
+      Effect.runSync(svc.service.launchBannerJob().pipe(Effect.map(Option.map((job) => job.id))));
 
     // No paused jobs yet.
     expect(bannerId()).toEqual(Option.none());
@@ -1118,11 +1128,13 @@ describe("SendJobService boot recovery and quit guard (ticket 17)", () => {
   it("the quit guard's active summary prefers a sending job, else the most recent paused one", async () => {
     const svc = await makeSvc();
     const activeId = () =>
-      Effect.runSync(
-        svc.service.activeJobSummary().pipe(Effect.map(Option.map((job) => job.id))),
-      );
+      Effect.runSync(svc.service.activeJobSummary().pipe(Effect.map(Option.map((job) => job.id))));
     const counts = () =>
-      Effect.runSync(svc.service.activeJobSummary().pipe(Effect.map(Option.map((job) => [job.sentCount, job.total] as const))));
+      Effect.runSync(
+        svc.service
+          .activeJobSummary()
+          .pipe(Effect.map(Option.map((job) => [job.sentCount, job.total] as const))),
+      );
 
     expect(activeId()).toEqual(Option.none());
 
@@ -1251,7 +1263,10 @@ describe("SendJobService retry failures (Seam A)", () => {
   it("fails a recipient immediately on a deterministic send error without retries", async () => {
     let sendCalls = 0;
     const realSmtp = makeSmtpService(
-      makeSqliteRepo(openDatabase(join(tempDir(), "stub.db")), makeCredentialCrypto(null, () => {})),
+      makeSqliteRepo(
+        openDatabase(join(tempDir(), "stub.db")),
+        makeCredentialCrypto(null, () => {}),
+      ),
     );
     const stubSmtp: SmtpServiceShape = {
       ...realSmtp,

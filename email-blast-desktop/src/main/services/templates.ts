@@ -1,11 +1,16 @@
 import { Context, Data, Effect, Layer, Option } from "effect";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { m } from "@paraglide/messages";
 import type { Template } from "../../shared/ipc";
-import { normalizeSlots, validateTemplate } from "../../shared/template-validation";
+import {
+  normalizeSlots,
+  templateTypeForFile,
+  validateTemplate,
+} from "../../shared/template-validation";
+import { validateSlotLayout } from "../../shared/slot-layout";
 import {
   SqliteRepo,
   type SqliteRepoShape,
@@ -58,6 +63,13 @@ export interface TemplatesServiceShape {
   readonly delete: (id: string) => Effect.Effect<number>;
   /** Reads the `{placeholder}` slots out of a DOCX file. */
   readonly scanSlots: (docxPath: string) => Effect.Effect<string[], UnreadableDocx>;
+  /**
+   * The image bytes of a template file for the position editor's live
+   * preview, or none when the path is not an image or the file is gone.
+   */
+  readonly getImageData: (
+    imagePath: string,
+  ) => Effect.Effect<Option.Option<{ mimeType: string; dataBase64: string }>>;
 }
 
 /**
@@ -109,27 +121,45 @@ export function makeTemplatesService(repo: SqliteRepoShape): TemplatesServiceSha
       Effect.gen(function* () {
         const error = validateTemplate(draft.name, draft.slots, draft.outputPattern);
         if (error !== null) return yield* Effect.fail(new InvalidTemplate({ message: error }));
+        const layoutError = validateSlotLayout(draft.slotLayout);
+        if (layoutError !== null) return yield* Effect.fail(new InvalidTemplate({ message: layoutError }));
         return yield* repo.insertTemplate({
           name: draft.name.trim(),
           filePath: draft.filePath,
           type: draft.type,
           slots: normalizeSlots(draft.slots),
           outputPattern: draft.outputPattern.trim(),
+          slotLayout: draft.slotLayout,
         });
       }),
     update: (id, patch) =>
       Effect.gen(function* () {
         const error = validateTemplate(patch.name, patch.slots, patch.outputPattern);
         if (error !== null) return yield* Effect.fail(new InvalidTemplate({ message: error }));
+        const layoutError = validateSlotLayout(patch.slotLayout);
+        if (layoutError !== null)
+          return yield* Effect.fail(new InvalidTemplate({ message: layoutError }));
         const updated = yield* repo.updateTemplate(id, {
           name: patch.name.trim(),
           slots: normalizeSlots(patch.slots),
           outputPattern: patch.outputPattern.trim(),
+          slotLayout: patch.slotLayout,
         });
         if (Option.isNone(updated)) return yield* Effect.fail(new TemplateUpdateNotFound());
         return updated.value;
       }),
     delete: (id) => repo.deleteTemplate(id),
+    getImageData: (imagePath) =>
+      Effect.sync(() => {
+        if (templateTypeForFile(imagePath) !== "image" || !existsSync(imagePath)) {
+          return Option.none();
+        }
+        const mimeType = imagePath.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+        return Option.some({
+          mimeType,
+          dataBase64: readFileSync(imagePath).toString("base64"),
+        });
+      }),
     scanSlots: (docxPath) =>
       Effect.gen(function* () {
         if (!docxPath.toLowerCase().endsWith(".docx")) {

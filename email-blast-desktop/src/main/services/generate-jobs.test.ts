@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Effect, Option } from "effect";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
-import { inflateSync } from "zlib";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, StandardFonts, type PDFFont } from "pdf-lib";
 import PizZip from "pizzip";
 import type Database from "better-sqlite3";
 import { openDatabase, makeSqliteRepo } from "../db/repository";
@@ -11,7 +10,8 @@ import { makeCredentialCrypto } from "./credential-crypto";
 import { LibreOfficeFailed, makeGenerateJobService, type GenerateEnv } from "./generate-jobs";
 import { makeProgressHub } from "./progress-hub";
 import type { HubEvent } from "../../shared/ipc";
-import { tempDir, writeFixture } from "./test-helpers";
+import type { SlotLayout } from "../../shared/ipc";
+import { pageContentText, pageDrawOps, pngBytes, tempDir, writeFixture } from "./test-helpers";
 
 /**
  * Seam A (spec Testing Decisions): the generate job lifecycle against the
@@ -98,7 +98,10 @@ const RECIPIENT_ROWS = [
 
 function makeSvc() {
   const db = openDatabase(join(tempDir(), "generate.db"));
-  const repo = makeSqliteRepo(db, makeCredentialCrypto(null, () => {}));
+  const repo = makeSqliteRepo(
+    db,
+    makeCredentialCrypto(null, () => {}),
+  );
   const hub = makeProgressHub();
   const stub = stubEnv();
   const service = makeGenerateJobService(repo, hub, stub.env);
@@ -109,7 +112,12 @@ function makeSvc() {
 
 /** Inserts recipients synchronously and returns their ids in insertion order (rowid order). */
 function seedRecipients(db: Database.Database): string[] {
-  Effect.runSync(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients(RECIPIENT_ROWS));
+  Effect.runSync(
+    makeSqliteRepo(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    ).insertRecipients(RECIPIENT_ROWS),
+  );
   return (db.prepare("SELECT id FROM recipients ORDER BY rowid").all() as { id: string }[]).map(
     (row) => row.id,
   );
@@ -124,6 +132,7 @@ function seedDocxTemplate(repo: ReturnType<typeof makeSqliteRepo>): string {
       type: "docx",
       slots: ["name", "no"],
       outputPattern: "LOA_{no}_{name}.pdf",
+      slotLayout: {},
     }),
   );
   return created.id;
@@ -140,48 +149,10 @@ function seedImageTemplate(repo: ReturnType<typeof makeSqliteRepo>): string {
       type: "image",
       slots: ["name"],
       outputPattern: "SERTIFIKAT_{name}.pdf",
+      slotLayout: {},
     }),
   );
   return created.id;
-}
-
-/**
- * The text a pdf-lib page drew, decoded from its content stream. The page
- * node and stream classes are pdf-lib internals (the public page API does
- * not expose content), so this walks the node surface: `Contents()` is a
- * `PDFArray` of refs, resolved through the page context. Streams loaded
- * from file arrive Flate-compressed (PDFRawStream), freshly built ones
- * decode via their own method; inflate with a raw fallback covers both.
- */
-async function pageContentText(pdfBytes: Uint8Array): Promise<string> {
-  const pdf = await PDFDocument.load(pdfBytes);
-  const pageNode = pdf.getPages()[0].node as {
-    Contents(): unknown;
-    context: { lookup(ref: unknown): unknown };
-  };
-  const contents = pageNode.Contents();
-  const array = contents as { asArray?: () => unknown[] };
-  const items: unknown[] = array.asArray ? array.asArray() : [contents];
-  let text = "";
-  for (const item of items) {
-    const stream = item as { decode?: () => Uint8Array; contents?: Uint8Array };
-    const raw =
-      typeof stream?.decode === "function"
-        ? stream.decode()
-        : (pageNode.context.lookup(item) as typeof stream)?.contents;
-    if (raw === undefined) continue;
-    let decoded: Uint8Array;
-    try {
-      decoded = inflateSync(raw);
-    } catch {
-      decoded = raw;
-    }
-    text += Buffer.from(decoded).toString("utf8");
-  }
-  // pdf-lib writes text for built-in fonts as hex strings (<42756469...>).
-  return text.replace(/<([0-9A-Fa-f]+)>/g, (_match, hex: string) =>
-    Buffer.from(hex, "hex").toString("utf8"),
-  );
 }
 
 describe("GenerateJobService start (Seam A)", () => {
@@ -314,7 +285,10 @@ describe("GenerateJobService run - docx (Seam A)", () => {
     // A recipient whose row has no {no} - his letter cannot be filled.
     // Unique email so the row query below cannot pick up the seeded Andi.
     Effect.runSync(
-      makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients([
+      makeSqliteRepo(
+        db,
+        makeCredentialCrypto(null, () => {}),
+      ).insertRecipients([
         {
           name: "Andi Wijaya",
           email: "andi-nomail@example.com",
@@ -354,7 +328,10 @@ describe("GenerateJobService run - docx (Seam A)", () => {
     const [budi] = seedRecipients(db);
     // A second recipient with identical slot values (same {no} and {name}).
     Effect.runSync(
-      makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients([
+      makeSqliteRepo(
+        db,
+        makeCredentialCrypto(null, () => {}),
+      ).insertRecipients([
         {
           name: "Budi Santoso",
           email: "clone@example.com",
@@ -393,6 +370,7 @@ describe("GenerateJobService run - docx (Seam A)", () => {
         type: "docx",
         slots: ["name"],
         outputPattern: "LOA_{name}.pdf",
+        slotLayout: {},
       }),
     ).id;
 
@@ -485,6 +463,119 @@ describe("GenerateJobService run - image (Seam A)", () => {
   });
 });
 
+/** Registers an image template on a 300x200 canvas with the given layout. */
+function seedPositionedTemplate(
+  repo: ReturnType<typeof makeSqliteRepo>,
+  slotLayout: Record<string, SlotLayout>,
+): string {
+  const pngPath = join(tempDir(), "sertifikat-300x200.png");
+  writeFileSync(pngPath, pngBytes(300, 200));
+  const created = Effect.runSync(
+    repo.insertTemplate({
+      name: "Sertifikat",
+      filePath: pngPath,
+      type: "image",
+      slots: ["name", "instansi"],
+      outputPattern: "SERTIFIKAT_{name}.pdf",
+      slotLayout,
+    }),
+  );
+  return created.id;
+}
+
+describe("GenerateJobService run - image slot positioning (ticket 04, Seam A)", () => {
+
+  it("renders each configured slot at its position, size, color, and alignment", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    const templateId = seedPositionedTemplate(repo, {
+      name: { x: 0, y: 150, fontSize: 40, color: "#FF0000", align: "center", maxWidth: null },
+      instansi: { x: 20, y: 100, fontSize: 24, color: "#00FF00", align: "right", maxWidth: 120 },
+    });
+
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(service.run(job.id));
+    const ops = await pageDrawOps(readFileSync(done.recipients[0].outputPath as string));
+    const font = await loadFont();
+
+    const nameOp = ops.find((op) => op.text === "Budi Santoso");
+    expect(nameOp).toBeDefined();
+    // Centered over the whole page width; the box top stays at y=150, so
+    // the baseline is pageHeight - (y + 0.8 * fittedSize).
+    const nameWidth = font.widthOfTextAtSize("Budi Santoso", nameOp!.size);
+    expect(nameOp!.size).toBeLessThanOrEqual(40);
+    expect(nameWidth).toBeLessThanOrEqual(300);
+    expect(nameOp!.x).toBeCloseTo((300 - nameWidth) / 2, 1);
+    expect(nameOp!.y).toBeCloseTo(200 - 150 - 0.8 * nameOp!.size, 1);
+    expect(nameOp!.block).toContain("1 0 0 rg");
+
+    const instansiOp = ops.find((op) => op.text === "SMK Negeri 1");
+    expect(instansiOp).toBeDefined();
+    // Right-aligned inside the 120px box at x=20; auto-shrunk to fit.
+    const instansiWidth = font.widthOfTextAtSize("SMK Negeri 1", instansiOp!.size);
+    expect(instansiOp!.size).toBeLessThanOrEqual(24);
+    expect(instansiWidth).toBeLessThanOrEqual(120);
+    expect(instansiOp!.x).toBeCloseTo(20 + 120 - instansiWidth, 1);
+    expect(instansiOp!.y).toBeCloseTo(200 - 100 - 0.8 * instansiOp!.size, 1);
+    expect(instansiOp!.block).toContain("0 1 0 rg");
+  });
+
+  it("auto-shrinks a long value to fit the configured slot width", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    const templateId = seedPositionedTemplate(repo, {
+      name: { x: 10, y: 120, fontSize: 40, color: "#000000", align: "left", maxWidth: 60 },
+    });
+
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(service.run(job.id));
+    const ops = await pageDrawOps(readFileSync(done.recipients[0].outputPath as string));
+    const font = await loadFont();
+
+    const nameOp = ops.find((op) => op.text === "Budi Santoso");
+    expect(nameOp).toBeDefined();
+    expect(nameOp!.size).toBeGreaterThanOrEqual(8);
+    expect(nameOp!.size).toBeLessThan(40);
+    expect(font.widthOfTextAtSize("Budi Santoso", nameOp!.size)).toBeLessThanOrEqual(60);
+    expect(nameOp!.x).toBeCloseTo(10, 1);
+  });
+
+  it("keeps the legacy centered layout for a slot without configuration", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    // Only "name" is configured; "instansi" must fall back to the legacy
+    // centered draw at two-thirds down the page, fitted to the page width.
+    const templateId = seedPositionedTemplate(repo, {
+      name: { x: 0, y: 150, fontSize: 40, color: "#000000", align: "left", maxWidth: null },
+    });
+
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(service.run(job.id));
+    const ops = await pageDrawOps(readFileSync(done.recipients[0].outputPath as string));
+    const font = await loadFont();
+
+    const legacyOp = ops.find((op) => op.text === "SMK Negeri 1");
+    expect(legacyOp).toBeDefined();
+    expect(legacyOp!.y).toBeCloseTo(200 * 0.68, 1);
+    const legacySize = Math.max(18, Math.min(140, 300 / Math.max(1, "SMK Negeri 1".length * 0.6)));
+    expect(legacyOp!.size).toBeCloseTo(legacySize, 1);
+    const legacyWidth = font.widthOfTextAtSize("SMK Negeri 1", legacyOp!.size);
+    expect(legacyOp!.x).toBeCloseTo((300 - legacyWidth) / 2, 1);
+    // The configured slot itself keeps its position.
+    const nameOp = ops.find((op) => op.text === "Budi Santoso");
+    expect(nameOp!.y).toBeCloseTo(200 - 150 - 0.8 * nameOp!.size, 1);
+  });
+});
+
+/** The embedded bold font the renderer uses, for measuring drawn text. */
+let cachedFont: PDFFont | null = null;
+async function loadFont(): Promise<PDFFont> {
+  if (cachedFont !== null) return cachedFont;
+  const pdf = await PDFDocument.create();
+  cachedFont = await pdf.embedFont(StandardFonts.HelveticaBold);
+  return cachedFont;
+}
+
 describe("GenerateJobService gate, status, and re-run (Seam A)", () => {
   it("confirmedGoodAttachments returns only generated recipients with paths", async () => {
     const { db, repo, service } = makeSvc();
@@ -512,7 +603,12 @@ describe("GenerateJobService gate, status, and re-run (Seam A)", () => {
 
     // Simulate a partial failure by deleting Andi's row before the run.
     const andiId = ids[2];
-    await Effect.runPromise(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).deleteRecipients([andiId]));
+    await Effect.runPromise(
+      makeSqliteRepo(
+        db,
+        makeCredentialCrypto(null, () => {}),
+      ).deleteRecipients([andiId]),
+    );
     const done = await Effect.runPromise(service.run(job.id));
     expect(done.recipients.find((r) => r.recipientId === andiId)?.status).toBe("failed");
 
@@ -562,7 +658,12 @@ describe("GenerateJobService gate, status, and re-run (Seam A)", () => {
     const job = await Effect.runPromise(service.start(templateId, ids));
 
     const andiId = ids[2];
-    await Effect.runPromise(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).deleteRecipients([andiId]));
+    await Effect.runPromise(
+      makeSqliteRepo(
+        db,
+        makeCredentialCrypto(null, () => {}),
+      ).deleteRecipients([andiId]),
+    );
     await Effect.runPromise(service.run(job.id));
 
     const status = await Effect.runPromise(service.getStatus(job.id));

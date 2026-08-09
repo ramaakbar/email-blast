@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import * as XLSX from "@e965/xlsx";
 import PizZip from "pizzip";
+import { pngBytes } from "../src/main/services/test-helpers";
 
 /**
  * Seam B fixtures (spec Testing Decisions): the spreadsheet a user imports
@@ -77,5 +78,12 @@ export function fixtureDocx(slots: readonly string[]): Buffer {
 export function writeFixtureTemplate(dir: string, slots: readonly string[] = ["name", "instansi"]): string {
   const path = `${dir}/LOA.docx`;
   writeFileSync(path, fixtureDocx(slots));
+  return path;
+}
+
+/** Writes a 300x200 certificate image into the given templates dir. */
+export function writeFixtureImageTemplate(dir: string): string {
+  const path = `${dir}/Sertifikat.png`;
+  writeFileSync(path, pngBytes(300, 200));
   return path;
 }

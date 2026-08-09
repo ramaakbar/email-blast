@@ -28,7 +28,10 @@ function use<A, E>(
 }
 
 function templateLayer(): Layer.Layer<TemplatesService | SqliteRepo> {
-  return TemplatesService.Live(openDatabase(join(tempDir(), "templates.db")), makeCredentialCrypto(null, () => {}));
+  return TemplatesService.Live(
+    openDatabase(join(tempDir(), "templates.db")),
+    makeCredentialCrypto(null, () => {}),
+  );
 }
 
 const P_LOA = `<w:p><w:r><w:t>Dear {name}, no {no}</w:t></w:r></w:p>`;
@@ -103,6 +106,7 @@ describe("TemplatesService create (Seam A)", () => {
         type: "docx",
         slots: ["name", "no"],
         outputPattern: "LOA_{no}_{name}.pdf",
+        slotLayout: {},
       }),
     );
     expect(created).toMatchObject({
@@ -134,6 +138,7 @@ describe("TemplatesService create (Seam A)", () => {
         type: "docx",
         slots: [" name ", "no", "name", "", "  "],
         outputPattern: "  LOA_{name}.pdf  ",
+        slotLayout: {},
       }),
     );
     expect(created.name).toBe("Surat LOA");
@@ -151,6 +156,7 @@ describe("TemplatesService create (Seam A)", () => {
           type: "docx",
           slots: ["name"],
           outputPattern: "LOA_{naem}.pdf",
+          slotLayout: {},
         }),
       ),
     ).rejects.toMatchObject({
@@ -169,6 +175,7 @@ describe("TemplatesService create (Seam A)", () => {
           type: "docx",
           slots: ["name"],
           outputPattern: "letter.pdf",
+          slotLayout: {},
         }),
       ),
     ).rejects.toMatchObject({ _tag: "InvalidTemplate" });
@@ -184,6 +191,7 @@ describe("TemplatesService create (Seam A)", () => {
           type: "docx",
           slots: ["", "  "],
           outputPattern: "LOA_{name}.pdf",
+          slotLayout: {},
         }),
       ),
     ).rejects.toMatchObject({ _tag: "InvalidTemplate" });
@@ -196,6 +204,7 @@ describe("TemplatesService create (Seam A)", () => {
           type: "docx",
           slots: ["name"],
           outputPattern: "LOA_{name}.pdf",
+          slotLayout: {},
         }),
       ),
     ).rejects.toMatchObject({ _tag: "InvalidTemplate" });
@@ -210,12 +219,45 @@ describe("TemplatesService create (Seam A)", () => {
         type: "image",
         slots: ["nama", "instansi"],
         outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {},
       }),
     );
     expect(created.type).toBe("image");
     expect(created.slots).toEqual(["nama", "instansi"]);
     const listed = await use(layer, (s) => s.list());
     expect(listed.map((t) => t.name)).toEqual(["Sertifikat"]);
+  });
+
+  it("persists a slot layout given at create time and rejects an invalid one", async () => {
+    const layer = templateLayer();
+    const layout = {
+      nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null },
+    } as const;
+    const created = await use(layer, (s) =>
+      s.create({
+        name: "Sertifikat",
+        filePath: "/tmp/sertifikat.png",
+        type: "image",
+        slots: ["nama"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: layout,
+      }),
+    );
+    expect(created.slotLayout).toEqual(layout);
+    await expect(
+      use(layer, (s) =>
+        s.create({
+          name: "Buat",
+          filePath: "/tmp/sertifikat.png",
+          type: "image",
+          slots: ["nama"],
+          outputPattern: "SERTIFIKAT_{nama}.pdf",
+          slotLayout: {
+            nama: { x: 0, y: 150, fontSize: 40, color: "red", align: "center", maxWidth: null },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "InvalidTemplate" });
   });
 });
 
@@ -229,6 +271,7 @@ describe("TemplatesService update (Seam A)", () => {
         type: "image",
         slots: ["nama"],
         outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {},
       }),
     );
 
@@ -237,6 +280,7 @@ describe("TemplatesService update (Seam A)", () => {
         name: "New name",
         slots: ["nama", "tahun"],
         outputPattern: "SERTIFIKAT_{tahun}_{nama}.pdf",
+        slotLayout: {},
       }),
     );
     expect(updated).toMatchObject({
@@ -256,12 +300,104 @@ describe("TemplatesService update (Seam A)", () => {
     await expect(
       use(layer, (s) =>
         s.update("no-such-id", {
-          name: "Ghost",
+          name: "X",
           slots: ["name"],
           outputPattern: "LOA_{name}.pdf",
+          slotLayout: {},
         }),
       ),
     ).rejects.toMatchObject({ _tag: "TemplateUpdateNotFound" });
+  });
+
+  it("round-trips the slot layout through update and get (ticket 04)", async () => {
+    const layer = templateLayer();
+    const created = await use(layer, (s) =>
+      s.create({
+        name: "Sertifikat",
+        filePath: "/tmp/sertifikat.png",
+        type: "image",
+        slots: ["nama", "instansi"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {},
+      }),
+    );
+    expect(created.slotLayout).toEqual({});
+
+    const layout = {
+      nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null },
+      instansi: { x: 20, y: 100, fontSize: 24, color: "#00AA00", align: "right", maxWidth: 120 },
+    } as const;
+    const updated = await use(layer, (s) =>
+      s.update(created.id, {
+        name: "Sertifikat",
+        slots: ["nama", "instansi"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: layout,
+      }),
+    );
+    expect(updated.slotLayout).toEqual(layout);
+
+    const fetched = await use(layer, (s) => s.get(created.id));
+    expect(Option.getOrNull(fetched)?.slotLayout).toEqual(layout);
+  });
+
+  it("clears the slot layout when updating with an empty record", async () => {
+    const layer = templateLayer();
+    const created = await use(layer, (s) =>
+      s.create({
+        name: "Sertifikat",
+        filePath: "/tmp/sertifikat.png",
+        type: "image",
+        slots: ["nama"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {},
+      }),
+    );
+    await use(layer, (s) =>
+      s.update(created.id, {
+        name: "Sertifikat",
+        slots: ["nama"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {
+          nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null },
+        },
+      }),
+    );
+    const cleared = await use(layer, (s) =>
+      s.update(created.id, {
+        name: "Sertifikat",
+        slots: ["nama"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {},
+      }),
+    );
+    expect(cleared.slotLayout).toEqual({});
+  });
+
+  it("rejects a slot layout with a malformed color", async () => {
+    const layer = templateLayer();
+    const created = await use(layer, (s) =>
+      s.create({
+        name: "Sertifikat",
+        filePath: "/tmp/sertifikat.png",
+        type: "image",
+        slots: ["nama"],
+        outputPattern: "SERTIFIKAT_{nama}.pdf",
+        slotLayout: {},
+      }),
+    );
+    await expect(
+      use(layer, (s) =>
+        s.update(created.id, {
+          name: "Sertifikat",
+          slots: ["nama"],
+          outputPattern: "SERTIFIKAT_{nama}.pdf",
+          slotLayout: {
+            nama: { x: 0, y: 150, fontSize: 40, color: "red", align: "center", maxWidth: null },
+          },
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "InvalidTemplate" });
   });
 
   it("still validates on update", async () => {
@@ -273,6 +409,7 @@ describe("TemplatesService update (Seam A)", () => {
         type: "docx",
         slots: ["name"],
         outputPattern: "LOA_{name}.pdf",
+        slotLayout: {},
       }),
     );
     await expect(
@@ -281,6 +418,7 @@ describe("TemplatesService update (Seam A)", () => {
           name: "Valid",
           slots: ["name"],
           outputPattern: "LOA_{unknown}.pdf",
+          slotLayout: {},
         }),
       ),
     ).rejects.toMatchObject({ _tag: "InvalidTemplate" });
@@ -297,6 +435,7 @@ describe("TemplatesService delete (Seam A)", () => {
         type: "docx",
         slots: ["name"],
         outputPattern: "LOA_{name}.pdf",
+        slotLayout: {},
       }),
     );
 
@@ -315,6 +454,7 @@ describe("TemplatesService delete (Seam A)", () => {
           type: "docx",
           slots: ["name"],
           outputPattern: "LOA_{name}.pdf",
+          slotLayout: {},
         }),
         s.create({
           name: "Second",
@@ -322,6 +462,7 @@ describe("TemplatesService delete (Seam A)", () => {
           type: "image",
           slots: ["nama"],
           outputPattern: "SERTIFIKAT_{nama}.pdf",
+          slotLayout: {},
         }),
       ]),
     );

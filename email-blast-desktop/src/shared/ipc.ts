@@ -194,9 +194,36 @@ export const TemplateType = Schema.Literals(["docx", "image"]);
 export type TemplateType = Schema.Schema.Type<typeof TemplateType>;
 
 /**
+ * One slot's text configuration on an image template (ticket 04): the
+ * top-left corner of the text box in image pixels, the font size, color,
+ * and alignment, and the box width the text fits into (null = the
+ * remaining page width). Single-line rendering with auto-shrink; a
+ * template without any slot configuration falls back to the centered
+ * stacked layout.
+ */
+export const SlotLayout = Schema.Struct({
+  x: Schema.Number,
+  y: Schema.Number,
+  fontSize: Schema.Number,
+  color: Schema.String,
+  align: Schema.Literals(["left", "center", "right"]),
+  maxWidth: Schema.Union([Schema.Null, Schema.Number]),
+});
+export type SlotLayout = Schema.Schema.Type<typeof SlotLayout>;
+
+/**
+ * A template's whole slot configuration: slot name -> its layout.
+ * An empty record means "no configuration" - the legacy centered layout.
+ */
+export const TemplateSlotLayout = Schema.Record(Schema.String, SlotLayout);
+export type TemplateSlotLayout = Schema.Schema.Type<typeof TemplateSlotLayout>;
+
+/**
  * A registered template as stored: the file path (immutable after
- * creation), the user-declared slots, and the output pattern the
- * generated files are named after. `createdAt` is the SQLite UTC stamp.
+ * creation), the user-declared slots, the output pattern the
+ * generated files are named after, and the per-slot text layout for
+ * image templates (empty for DOCX or when unconfigured).
+ * `createdAt` is the SQLite UTC stamp.
  */
 export const Template = Schema.Struct({
   id: Schema.String,
@@ -205,6 +232,7 @@ export const Template = Schema.Struct({
   type: TemplateType,
   slots: Schema.Array(Schema.String),
   outputPattern: Schema.String,
+  slotLayout: TemplateSlotLayout,
   createdAt: Schema.String,
 });
 export type Template = Schema.Schema.Type<typeof Template>;
@@ -213,6 +241,8 @@ export type Template = Schema.Schema.Type<typeof Template>;
  * `templates.create` payload. `slots` are normalized by the main process
  * (trimmed, deduped); the pattern must reference at least one declared
  * slot and nothing else - otherwise the create fails before persisting.
+ * `slotLayout` is the per-slot text positioning of image templates,
+ * usually empty at registration and configured in the template editor.
  */
 export const TemplateCreatePayload = Schema.Struct({
   name: Schema.String,
@@ -220,12 +250,14 @@ export const TemplateCreatePayload = Schema.Struct({
   type: TemplateType,
   slots: Schema.Array(Schema.String),
   outputPattern: Schema.String,
+  slotLayout: TemplateSlotLayout,
 });
 export type TemplateCreatePayload = Schema.Schema.Type<typeof TemplateCreatePayload>;
 
 /**
  * `templates.update` payload: the mutable fields only - the file path and
- * type are set once at creation and cannot change. Fails with
+ * type are set once at creation and cannot change. `slotLayout` is always
+ * written (an empty record clears the configuration). Fails with
  * TemplateNotFound when no such id exists.
  */
 export const TemplateUpdatePayload = Schema.Struct({
@@ -233,6 +265,7 @@ export const TemplateUpdatePayload = Schema.Struct({
   name: Schema.String,
   slots: Schema.Array(Schema.String),
   outputPattern: Schema.String,
+  slotLayout: TemplateSlotLayout,
 });
 export type TemplateUpdatePayload = Schema.Schema.Type<typeof TemplateUpdatePayload>;
 
@@ -247,6 +280,17 @@ export const ScanSlotsResponse = Schema.Struct({
   slots: Schema.Array(Schema.String),
 });
 export type ScanSlotsResponse = Schema.Schema.Type<typeof ScanSlotsResponse>;
+
+/**
+ * `templates.getImage` response: the template image bytes for the
+ * position editor's live preview, as a data-URL-ready payload. Null when
+ * the path is not an image or the file is gone.
+ */
+export const TemplateImageResponse = Schema.Struct({
+  mimeType: Schema.String,
+  dataBase64: Schema.String,
+});
+export type TemplateImageResponse = Schema.Schema.Type<typeof TemplateImageResponse>;
 
 // ---- Message Templates domain (ticket 03) ----
 
@@ -280,9 +324,7 @@ export const MessageTemplateCreatePayload = Schema.Struct({
   subject: Schema.String,
   bodyHtml: Schema.String,
 });
-export type MessageTemplateCreatePayload = Schema.Schema.Type<
-  typeof MessageTemplateCreatePayload
->;
+export type MessageTemplateCreatePayload = Schema.Schema.Type<typeof MessageTemplateCreatePayload>;
 
 /**
  * `messageTemplates.update` payload: every mutable field. Fails with
@@ -294,9 +336,7 @@ export const MessageTemplateUpdatePayload = Schema.Struct({
   subject: Schema.String,
   bodyHtml: Schema.String,
 });
-export type MessageTemplateUpdatePayload = Schema.Schema.Type<
-  typeof MessageTemplateUpdatePayload
->;
+export type MessageTemplateUpdatePayload = Schema.Schema.Type<typeof MessageTemplateUpdatePayload>;
 
 /** `messageTemplates.delete` response: how many rows were actually deleted. */
 export const MessageTemplateDeleteResponse = Schema.Struct({
@@ -709,10 +749,15 @@ export interface Api {
     get(id: string): Promise<Template | null>;
     /** Registers a new template; validates slots and the output pattern. */
     create(payload: TemplateCreatePayload): Promise<Template>;
-    /** Edits the name, slots, and output pattern of a template. */
+    /** Edits the name, slots, output pattern, and slot text layout of a template. */
     update(payload: TemplateUpdatePayload): Promise<Template>;
     /** Deletes a template; returns how many rows were removed. */
     delete(id: string): Promise<TemplateDeleteResponse>;
+    /**
+     * The template image bytes for the position editor's live preview
+     * (data-URL-ready); null when the path is not an image or is gone.
+     */
+    getImage(path: string): Promise<TemplateImageResponse | null>;
     /**
      * Reads the `{placeholder}` slots out of a DOCX file (document,
      * headers, and footers), in document order. Fails for non-DOCX files.

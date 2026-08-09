@@ -50,6 +50,7 @@ export const templates = sqliteTable(
     type: text("type", { enum: ["docx", "image"] }).notNull(),
     slots: text("slots").notNull().default("[]"),
     outputPattern: text("output_pattern").notNull(),
+    slotLayout: text("slot_layout"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
