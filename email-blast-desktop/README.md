@@ -32,6 +32,18 @@ $ pnpm lint       # oxlint
 $ pnpm fmt        # oxfmt
 ```
 
+### End-to-end suite (Seam B)
+
+The packaged app driven by Playwright's Electron launcher against a local
+SMTP capture server: import -> generate -> send -> logs, both quit-dialog
+branches and the resume across restarts, first launch without LibreOffice,
+and the one-active-job block.
+Needs the packaged app (or `APP_PATH` pointing at a packaged binary):
+
+```bash
+$ pnpm package && pnpm test:e2e
+```
+
 ### Packaged smoke E2E
 
 ```bash

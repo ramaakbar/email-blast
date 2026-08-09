@@ -36,8 +36,18 @@ export function candidatePaths(platform: NodeJS.Platform): string[] {
  * Returns the path of a usable `soffice` binary, or null when LibreOffice
  * is not installed. Probes the well-known install locations first, then
  * PATH (covers Homebrew on Intel macs and distro packages on Linux).
+ *
+ * `EMAIL_BLAST_SOFFICE` (set, even to an empty string) overrides the probe:
+ * a non-empty existing path is forced, anything else means absent. The E2E
+ * suite uses it to drive the first-launch flow with a controllable
+ * detection result - a stub path the test creates to flip Check Again from
+ * missing to found - and CI can point it at a non-standard install.
  */
 export function findLibreOffice(platform: NodeJS.Platform = process.platform): string | null {
+  if ("EMAIL_BLAST_SOFFICE" in process.env) {
+    const forced = process.env["EMAIL_BLAST_SOFFICE"] ?? "";
+    return forced !== "" && existsSync(forced) ? forced : null;
+  }
   for (const candidate of candidatePaths(platform)) {
     if (existsSync(candidate)) return candidate;
   }
