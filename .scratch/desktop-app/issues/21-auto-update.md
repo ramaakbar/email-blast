@@ -4,7 +4,7 @@
 
 **Blocked by:** 20 - Electron Forge migration
 
-**Status:** ready-for-agent
+**Status:** wontfix (user decision 2026-08-09 - auto-update is out of the current scope; the release story stays manual. Revivable by flipping the status back; the full ticket text remains above.)
 
 - [ ] GitHub repository created; release feed accepts artifacts
 - [ ] electron-updater wired: launch check, ready notification in the renderer, install and restart
