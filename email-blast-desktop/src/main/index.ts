@@ -521,15 +521,22 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
   });
 
   registerWindowHandler(IPC["smtp:update"], (payload) => {
-    const { id, name, host, port, username, password } = decodePayload(
-      SmtpProfileUpdatePayload,
-      payload,
-    );
+    const { id, name, host, port, username, password, senderName, senderAddress, replyTo } =
+      decodePayload(SmtpProfileUpdatePayload, payload);
     return run(
       Effect.gen(function* () {
         const service = yield* SmtpService;
         return Schema.encodeSync(SmtpProfile)(
-          yield* service.update(id, { name, host, port, username, password }),
+          yield* service.update(id, {
+            name,
+            host,
+            port,
+            username,
+            password,
+            senderName,
+            senderAddress,
+            replyTo,
+          }),
         );
       }),
     );

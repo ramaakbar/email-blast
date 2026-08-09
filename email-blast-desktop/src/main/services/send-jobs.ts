@@ -16,6 +16,7 @@ import {
   RATE_LIMIT_MIN_MS,
   SETTING_KEYS,
 } from "../../shared/settings";
+import { normalizeIdentity } from "../../shared/sender-identity";
 import { interpolateMessageHtml, interpolateMessagePlain, messageValues } from "../../shared/send";
 import type { DefaultPaths } from "./default-paths";
 import {
@@ -238,6 +239,7 @@ export function toSendJob(loaded: SendJobWithRecipients): SendJob {
     bodyHtml: job.bodyHtml,
     senderName: job.senderName,
     senderAddress: job.senderAddress,
+    replyTo: job.replyTo,
     delayMs: job.delayMs,
     cursorIndex: job.cursorIndex,
     total: job.totalCount,
@@ -443,6 +445,7 @@ export function makeSendJobService(
             html,
             fromName: loaded.job.senderName,
             fromAddress: loaded.job.senderAddress,
+            replyTo: loaded.job.replyTo,
             attachments: [{ filename: basename(attachmentPath), path: attachmentPath }],
           })
           .pipe(Effect.result);
@@ -612,6 +615,8 @@ export function makeSendJobService(
           bodyHtml: payload.bodyHtml,
           senderName: payload.senderName.trim(),
           senderAddress: payload.senderAddress.trim(),
+          // A blank reply-to is the same as none: the mail omits the header.
+          replyTo: normalizeIdentity(payload.replyTo),
           delayMs: Math.min(
             RATE_LIMIT_MAX_MS,
             Math.max(RATE_LIMIT_MIN_MS, Math.round(payload.delayMs)),

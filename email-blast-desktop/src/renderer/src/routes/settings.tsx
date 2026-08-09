@@ -29,6 +29,7 @@ import {
   type SettingKey,
   type UiLocale,
 } from "../../../shared/settings";
+import { normalizeIdentity } from "../../../shared/sender-identity";
 import { validateSmtpProfile } from "../../../shared/smtp-validation";
 import type { SmtpProfile } from "../../../shared/ipc";
 
@@ -487,6 +488,13 @@ function SmtpProfilesSection() {
                         m["smtp.passwordNotSet"]()
                       )}
                     </p>
+                    {profile.senderAddress !== null && (
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {[profile.senderName ?? "", `<${profile.senderAddress}>`, profile.replyTo]
+                          .filter((part) => part !== "")
+                          .join(" · ")}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     {rowTest.kind === "testing" && rowTest.profileId === profile.id ? (
@@ -587,6 +595,8 @@ function ProfileFormDialog({
   /**
    * The fields with the password already resolved per mode: create always
    * submits a string, edit submits null for "keep the stored password".
+   * The identity fields submit null for blank, mirroring how they are
+   * stored ("not set" - the send step then keeps the typed identity).
    * The `kind` discriminant lets the section narrow without guessing.
    */
   onSave: (
@@ -598,6 +608,9 @@ function ProfileFormDialog({
           port: number;
           username: string;
           password: string;
+          senderName: string | null;
+          senderAddress: string | null;
+          replyTo: string | null;
         }
       | {
           kind: "edit";
@@ -607,6 +620,9 @@ function ProfileFormDialog({
           port: number;
           username: string;
           password: string | null;
+          senderName: string | null;
+          senderAddress: string | null;
+          replyTo: string | null;
         },
   ) => void;
 }) {
@@ -617,6 +633,15 @@ function ProfileFormDialog({
   // The stored password never reaches the renderer: the edit dialog starts
   // blank and a blank field means "keep the stored password".
   const [passwordInput, setPasswordInput] = useState("");
+  // The profile's default Sender Identity (ticket 01): visible to the
+  // dialog, so edit starts from the stored values and blank means "unset".
+  const [senderName, setSenderName] = useState(
+    form.kind === "create" ? "" : (form.profile.senderName ?? ""),
+  );
+  const [senderAddress, setSenderAddress] = useState(
+    form.kind === "create" ? "" : (form.profile.senderAddress ?? ""),
+  );
+  const [replyTo, setReplyTo] = useState(form.kind === "create" ? "" : (form.profile.replyTo ?? ""));
   const isCreate = form.kind === "create";
   const password = isCreate ? passwordInput : passwordInput === "" ? null : passwordInput;
 
@@ -724,6 +749,48 @@ function ProfileFormDialog({
             </span>
           </label>
 
+          <div className="border-t pt-4">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                {m["smtp.defaultSenderName"]()}
+              </span>
+              <input
+                type="text"
+                value={senderName}
+                onChange={(event) => setSenderName(event.target.value)}
+                placeholder="e.g. Yayasan X"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              />
+            </label>
+
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                {m["smtp.defaultSenderAddress"]()}
+              </span>
+              <input
+                type="email"
+                value={senderAddress}
+                onChange={(event) => setSenderAddress(event.target.value)}
+                placeholder="e.g. iym@example.org"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              />
+            </label>
+
+            <label className="mt-3 block">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                {m["smtp.replyTo"]()}
+              </span>
+              <input
+                type="email"
+                value={replyTo}
+                onChange={(event) => setReplyTo(event.target.value)}
+                placeholder="e.g. sekretariat@example.org"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              />
+            </label>
+            <p className="mt-2 text-xs text-muted-foreground">{m["smtp.identityHint"]()}</p>
+          </div>
+
           {error !== null && <span className="block text-xs text-destructive">{error}</span>}
         </div>
 
@@ -744,7 +811,17 @@ function ProfileFormDialog({
             onClick={() =>
               onSave(
                 form.kind === "create"
-                  ? { kind: "create", name, host, port, username, password: passwordInput }
+                  ? {
+                      kind: "create",
+                      name,
+                      host,
+                      port,
+                      username,
+                      password: passwordInput,
+                      senderName: normalizeIdentity(senderName),
+                      senderAddress: normalizeIdentity(senderAddress),
+                      replyTo: normalizeIdentity(replyTo),
+                    }
                   : {
                       kind: "edit",
                       id: form.profile.id,
@@ -753,6 +830,9 @@ function ProfileFormDialog({
                       port,
                       username,
                       password: passwordInput === "" ? null : passwordInput,
+                      senderName: normalizeIdentity(senderName),
+                      senderAddress: normalizeIdentity(senderAddress),
+                      replyTo: normalizeIdentity(replyTo),
                     },
               )
             }

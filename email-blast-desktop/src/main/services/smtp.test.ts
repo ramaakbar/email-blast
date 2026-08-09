@@ -149,6 +149,9 @@ const GMAIL = {
   port: 587,
   username: "akbar@example.com",
   password: "abcd efgh ijkl mnop",
+  senderName: "Yayasan X",
+  senderAddress: "iym@example.org",
+  replyTo: "reply@example.org",
 };
 
 describe("SmtpService create (Seam A)", () => {
@@ -184,6 +187,9 @@ describe("SmtpService create (Seam A)", () => {
         port: 587,
         username: "  akbar@example.com  ",
         password: "abcd efgh ijkl mnop",
+        senderName: null,
+        senderAddress: null,
+        replyTo: null,
       }),
     );
     expect(created.name).toBe("Gmail utama");
@@ -232,6 +238,9 @@ describe("SmtpService update (Seam A)", () => {
         port: 465,
         username: "kantor@example.com",
         password: null, // keep the stored credential
+        senderName: null,
+        senderAddress: null,
+        replyTo: null,
       }),
     );
     expect(updated).toMatchObject({
@@ -271,6 +280,9 @@ describe("SmtpService update (Seam A)", () => {
           port: 587,
           username: "ghost@example.com",
           password: null,
+          senderName: null,
+          senderAddress: null,
+          replyTo: null,
         }),
       ),
     ).rejects.toMatchObject({ _tag: "SmtpProfileNotFound" });
@@ -351,6 +363,7 @@ describe("SmtpService send (Seam A)", () => {
     html: "<p>Dear Budi</p>",
     fromName: "Yayasan X",
     fromAddress: "iym@example.org",
+    replyTo: null,
     attachments: [] as readonly { filename: string; path: string }[],
   };
 

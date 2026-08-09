@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { plural } from "@/lib/plural";
 import { slotCoverage } from "../../../shared/generate";
+import { normalizeIdentity, senderIdentityWarning } from "../../../shared/sender-identity";
 import {
   availableSlots,
   interpolateMessageHtml,
@@ -106,6 +107,8 @@ interface SmtpFormState {
   profileName: string;
   senderName: string;
   senderAddress: string;
+  /** The per-job Reply-To (ticket 01); blank sends no Reply-To header. */
+  replyTo: string;
   delayMs: number;
 }
 
@@ -120,6 +123,7 @@ const INITIAL_SMTP: SmtpFormState = {
   profileName: "",
   senderName: "",
   senderAddress: "",
+  replyTo: "",
   delayMs: DEFAULT_RATE_LIMIT_DELAY_MS,
 };
 
@@ -1132,6 +1136,12 @@ function SmtpStep({
         port: Number(config.port),
         username: config.username,
         password: config.password,
+        // The typed identity becomes the profile's default (ticket 01) -
+        // blank stays unset, so a saved one-off connection keeps working
+        // exactly as before.
+        senderName: normalizeIdentity(config.senderName),
+        senderAddress: normalizeIdentity(config.senderAddress),
+        replyTo: normalizeIdentity(config.replyTo),
       });
       onChange({
         ...config,
@@ -1147,6 +1157,21 @@ function SmtpStep({
 
   const inputClass =
     "h-9 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+
+  // The soft, advisory-only From warning (ticket 01): comparing the
+  // per-job From against the connection's account domain (known providers)
+  // or the profile's default identity. It never gates the send - the
+  // footer and stepper stay driven by `smtpValid` alone.
+  const effectiveConnection =
+    config.mode === "profile" && profile !== null
+      ? { host: profile.host, username: profile.username }
+      : { host: config.host, username: config.username };
+  const identityWarning = senderIdentityWarning({
+    host: effectiveConnection.host,
+    username: effectiveConnection.username,
+    senderAddress: config.senderAddress,
+    profileSenderAddress: config.mode === "profile" ? (profile?.senderAddress ?? null) : null,
+  });
 
   return (
     <div className="flex max-w-2xl flex-col gap-4">
@@ -1185,9 +1210,20 @@ function SmtpStep({
                 value={config.profileId ?? ""}
                 onChange={(event) => {
                   setTestState({ kind: "idle" });
+                  const nextId = event.target.value === "" ? null : event.target.value;
+                  const next = profiles.find((p) => p.id === nextId) ?? null;
+                  // The identity always reflects the chosen profile
+                  // (ticket 01): prefill its defaults, and clear the fields
+                  // when the profile carries none - a stale identity from a
+                  // previous profile must never ride along silently. Every
+                  // prefilled field stays editable per job without ever
+                  // mutating the profile.
                   onChange({
                     ...config,
-                    profileId: event.target.value === "" ? null : event.target.value,
+                    profileId: nextId,
+                    senderName: next?.senderName ?? "",
+                    senderAddress: next?.senderAddress ?? "",
+                    replyTo: next?.replyTo ?? "",
                   });
                 }}
                 className={inputClass}
@@ -1360,7 +1396,38 @@ function SmtpStep({
               className={inputClass}
             />
           </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted-foreground">
+              {m["compose.replyTo"]()}
+            </span>
+            <input
+              type="email"
+              value={config.replyTo}
+              onChange={(event) => onChange({ ...config, replyTo: event.target.value })}
+              placeholder={m["compose.replyToPlaceholder"]()}
+              className={inputClass}
+            />
+          </label>
         </div>
+        {identityWarning !== null && (
+          <p
+            className="mt-3 flex items-start gap-2 rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-xs text-amber-900"
+            role="status"
+          >
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              {identityWarning.kind === "provider-domain-mismatch"
+                ? m["compose.senderDomainMismatch"]({
+                    provider: identityWarning.provider,
+                    domain: identityWarning.accountDomain,
+                    from: config.senderAddress,
+                  })
+                : m["compose.senderDiffersFromProfile"]({
+                    address: identityWarning.profileAddress,
+                  })}
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="rounded-lg border bg-card p-4">
@@ -1824,6 +1891,7 @@ function SendStep({
         bodyHtml: message.bodyHtml,
         senderName: smtp.senderName,
         senderAddress: smtp.senderAddress,
+        replyTo: normalizeIdentity(smtp.replyTo),
         delayMs: smtp.delayMs,
       };
       onStateChange({ kind: "starting" });

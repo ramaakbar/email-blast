@@ -121,6 +121,9 @@ export const sendJobs = sqliteTable(
     bodyHtml: text("body_html").notNull(),
     senderName: text("sender_name").notNull(),
     senderAddress: text("sender_address").notNull(),
+    // The per-job Reply-To (ticket 01): prefilled from the profile's
+    // default identity, still editable per job, never changing the profile.
+    replyTo: text("reply_to"),
     delayMs: integer("delay_ms").notNull().default(1000),
     cursorIndex: integer("cursor_index").notNull().default(0),
     totalCount: integer("total_count").notNull().default(0),
@@ -170,6 +173,12 @@ export const smtpProfiles = sqliteTable("smtp_profiles", {
   port: integer("port").notNull().default(587),
   username: text("username").notNull(),
   password: text("password").notNull(),
+  // The profile's default Sender Identity (ticket 01): nullable, so an
+  // existing profile without one keeps sending with a manually typed
+  // identity - the send step only prefills what the profile carries.
+  defaultSenderName: text("default_sender_name"),
+  defaultSenderAddress: text("default_sender_address"),
+  defaultReplyTo: text("default_reply_to"),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

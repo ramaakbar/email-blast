@@ -111,6 +111,10 @@
     "appPassword": "App password",
     "leaveBlankToKeep": "Leave blank to keep the current one",
     "gmailAppPasswordHint": "Gmail: generate a 16-character app password with 2-step verification enabled.",
+    "defaultSenderName": "Default sender name",
+    "defaultSenderAddress": "Default sender address",
+    "replyTo": "Reply-to (optional)",
+    "identityHint": "The send step prefills these from the profile; each job can still override them.",
     "saveProfile": "Save profile",
     "saveChanges": "Save changes",
     "deleteProfileTitle": "Delete \"{name}\"?",
@@ -190,6 +194,9 @@
     "senderIdentity": "Sender identity",
     "senderName": "Sender name",
     "senderAddress": "Sender address",
+    "replyTo": "Reply-to",
+    "senderDomainMismatch": "The {provider} server only accepts From addresses in the {domain} domain - {from} will likely be rejected.",
+    "senderDiffersFromProfile": "This From address differs from the profile's default ({address}). The server may reject it.",
     "sendingRate": "Sending rate",
     "sendingRateMs": "{ms} ms / email",
     "sendingRateHint": "Applies live - a running job picks up changes without restarting.",
@@ -254,7 +261,8 @@
     "livePreviewHintOther": "Rendered for the first {count} selected recipients - the message updates as you type.",
     "sendCountOne": "Send {count} email",
     "sendCountOther": "Send {count} emails",
-    "appPasswordPlaceholder": "16-character app password"
+    "appPasswordPlaceholder": "16-character app password",
+    "replyToPlaceholder": "e.g. sekretariat@example.org"
   },
   "templates": {
     "title": "Templates",

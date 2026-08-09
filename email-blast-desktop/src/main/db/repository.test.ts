@@ -364,6 +364,7 @@ describe("send job log queries (ticket 16)", () => {
         bodyHtml: "<p>body</p>",
         senderName: "Yayasan X",
         senderAddress: "iym@example.org",
+        replyTo: null,
         delayMs: 1000,
         totalCount: options.recipientOutcomes.length,
       }),

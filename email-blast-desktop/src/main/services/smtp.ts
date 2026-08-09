@@ -2,6 +2,7 @@ import { Context, Data, Effect, Layer, Option } from "effect";
 import nodemailer from "nodemailer";
 import Database from "better-sqlite3";
 import type { SmtpProfile } from "../../shared/ipc";
+import { normalizeIdentity } from "../../shared/sender-identity";
 import { validateSmtpProfile } from "../../shared/smtp-validation";
 import {
   SqliteRepo,
@@ -75,6 +76,8 @@ export interface SmtpMailMessage {
   readonly html: string;
   readonly fromName: string;
   readonly fromAddress: string;
+  /** The per-job Reply-To (ticket 01); null means no Reply-To header. */
+  readonly replyTo: string | null;
   readonly attachments: readonly { filename: string; path: string }[];
 }
 
@@ -193,6 +196,11 @@ export function sendSmtp(credentials: SmtpCredentials, message: SmtpMailMessage)
       to: message.to,
       subject: message.subject,
       html: message.html,
+      // A null/blank reply-to omits the header entirely - nodemailer
+      // rejects an empty string, and "no Reply-To" is the legacy behavior.
+      ...(message.replyTo !== null && message.replyTo.trim() !== ""
+        ? { replyTo: message.replyTo.trim() }
+        : {}),
       attachments: message.attachments as {
         filename: string;
         path: string;
@@ -211,6 +219,9 @@ function toPublicProfile(profile: SmtpStoredProfile): SmtpProfile {
     port: profile.port,
     username: profile.username,
     hasPassword: profile.password !== "",
+    senderName: profile.senderName,
+    senderAddress: profile.senderAddress,
+    replyTo: profile.replyTo,
     createdAt: profile.createdAt,
   };
 }
@@ -235,6 +246,9 @@ export function makeSmtpService(repo: SqliteRepoShape): SmtpServiceShape {
           port: draft.port,
           username: draft.username.trim(),
           password: draft.password,
+          senderName: normalizeIdentity(draft.senderName),
+          senderAddress: normalizeIdentity(draft.senderAddress),
+          replyTo: normalizeIdentity(draft.replyTo),
         });
         return toPublicProfile(stored);
       }),
@@ -254,6 +268,9 @@ export function makeSmtpService(repo: SqliteRepoShape): SmtpServiceShape {
           port: patch.port,
           username: patch.username.trim(),
           password: patch.password,
+          senderName: normalizeIdentity(patch.senderName),
+          senderAddress: normalizeIdentity(patch.senderAddress),
+          replyTo: normalizeIdentity(patch.replyTo),
         });
         if (Option.isNone(updated)) return yield* Effect.fail(new SmtpProfileNotFound());
         return toPublicProfile(updated.value);

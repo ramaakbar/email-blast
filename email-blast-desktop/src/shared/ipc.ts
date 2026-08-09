@@ -336,7 +336,9 @@ export type GeneratePdfResponse = Schema.Schema.Type<typeof GeneratePdfResponse>
  * A saved SMTP profile as returned to the renderer. The password never
  * crosses the bridge - `hasPassword` tells the UI to show a mask, and the
  * main process resolves the stored credential for `testProfile` and for
- * the send pipeline (future ticket) on its own side.
+ * the send pipeline (future ticket) on its own side. The nullable
+ * Sender Identity fields (ticket 01) prefill the send step; a profile
+ * without them sends with a manually typed identity.
  */
 export const SmtpProfile = Schema.Struct({
   id: Schema.String,
@@ -345,6 +347,9 @@ export const SmtpProfile = Schema.Struct({
   port: Schema.Number,
   username: Schema.String,
   hasPassword: Schema.Boolean,
+  senderName: Schema.Union([Schema.Null, Schema.String]),
+  senderAddress: Schema.Union([Schema.Null, Schema.String]),
+  replyTo: Schema.Union([Schema.Null, Schema.String]),
   createdAt: Schema.String,
 });
 export type SmtpProfile = Schema.Schema.Type<typeof SmtpProfile>;
@@ -356,6 +361,9 @@ export const SmtpProfileCreatePayload = Schema.Struct({
   port: Schema.Number,
   username: Schema.String,
   password: Schema.String,
+  senderName: Schema.Union([Schema.Null, Schema.String]),
+  senderAddress: Schema.Union([Schema.Null, Schema.String]),
+  replyTo: Schema.Union([Schema.Null, Schema.String]),
 });
 export type SmtpProfileCreatePayload = Schema.Schema.Type<typeof SmtpProfileCreatePayload>;
 
@@ -371,6 +379,9 @@ export const SmtpProfileUpdatePayload = Schema.Struct({
   port: Schema.Number,
   username: Schema.String,
   password: Schema.Union([Schema.Null, Schema.String]),
+  senderName: Schema.Union([Schema.Null, Schema.String]),
+  senderAddress: Schema.Union([Schema.Null, Schema.String]),
+  replyTo: Schema.Union([Schema.Null, Schema.String]),
 });
 export type SmtpProfileUpdatePayload = Schema.Schema.Type<typeof SmtpProfileUpdatePayload>;
 
@@ -445,6 +456,8 @@ export const SendStartPayload = Schema.Struct({
   bodyHtml: Schema.String,
   senderName: Schema.String,
   senderAddress: Schema.String,
+  /** The per-job Reply-To, prefilled from the profile's default identity. */
+  replyTo: Schema.Union([Schema.Null, Schema.String]),
   delayMs: Schema.Number,
 });
 export type SendStartPayload = Schema.Schema.Type<typeof SendStartPayload>;
@@ -498,6 +511,8 @@ export const SendJob = Schema.Struct({
   bodyHtml: Schema.String,
   senderName: Schema.String,
   senderAddress: Schema.String,
+  /** The per-job Reply-To (null when the job carried none). */
+  replyTo: Schema.Union([Schema.Null, Schema.String]),
   /** The pacing delay in ms; the gate itself reads the live setting. */
   delayMs: Schema.Number,
   /** The index of the next recipient the loop will process. */

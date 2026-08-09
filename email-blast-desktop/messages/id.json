@@ -111,6 +111,10 @@
     "appPassword": "Kata sandi aplikasi",
     "leaveBlankToKeep": "Biarkan kosong untuk memakai kata sandi yang tersimpan",
     "gmailAppPasswordHint": "Gmail: buat app password 16 karakter dengan verifikasi dua langkah aktif.",
+    "defaultSenderName": "Nama pengirim bawaan",
+    "defaultSenderAddress": "Alamat pengirim bawaan",
+    "replyTo": "Balas-ke (opsional)",
+    "identityHint": "Langkah kirim mengisi kolom ini dari profil; setiap pengiriman tetap bisa mengubahnya.",
     "saveProfile": "Simpan profil",
     "saveChanges": "Simpan perubahan",
     "deleteProfileTitle": "Hapus \"{name}\"?",
@@ -190,6 +194,9 @@
     "senderIdentity": "Identitas pengirim",
     "senderName": "Nama pengirim",
     "senderAddress": "Alamat pengirim",
+    "replyTo": "Balas-ke",
+    "senderDomainMismatch": "Server {provider} hanya menerima alamat pengirim dari domain {domain} - {from} kemungkinan ditolak.",
+    "senderDiffersFromProfile": "Alamat pengirim ini berbeda dari bawaan profil ({address}). Server mungkin menolaknya.",
     "sendingRate": "Kecepatan pengiriman",
     "sendingRateMs": "{ms} ms / email",
     "sendingRateHint": "Berlaku langsung - pekerjaan yang berjalan menyesuaikan tanpa perlu di-restart.",
@@ -254,7 +261,8 @@
     "livePreviewHintOther": "Dirender untuk {count} penerima terpilih pertama - pesan diperbarui saat Anda mengetik.",
     "sendCountOne": "Kirim {count} email",
     "sendCountOther": "Kirim {count} email",
-    "appPasswordPlaceholder": "App password 16 karakter"
+    "appPasswordPlaceholder": "App password 16 karakter",
+    "replyToPlaceholder": "mis. sekretariat@example.org"
   },
   "templates": {
     "title": "Template",

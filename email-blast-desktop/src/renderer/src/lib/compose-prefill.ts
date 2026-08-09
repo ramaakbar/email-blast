@@ -24,6 +24,7 @@ export interface ComposePrefill {
     username: string;
     senderName: string;
     senderAddress: string;
+    replyTo: string;
   };
   readonly delayMs: number;
 }
@@ -43,6 +44,7 @@ export function buildRetryPrefill(job: SendJob, failedRecipientIds: string[]): C
       username: override?.username ?? "",
       senderName: job.senderName,
       senderAddress: job.senderAddress,
+      replyTo: job.replyTo ?? "",
     },
     delayMs: job.delayMs,
   };

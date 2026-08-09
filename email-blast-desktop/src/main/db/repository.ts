@@ -314,6 +314,8 @@ export interface GenerateJobRecipientRow {
  * An SMTP profile row as stored, password included. The smtp service maps
  * this to the shared `SmtpProfile` shape (password dropped, `hasPassword`
  * set) at its boundary, so the credential never leaves the main process.
+ * The nullable Sender Identity fields (ticket 01) are the profile's
+ * defaults; null means "not set", never an empty string.
  */
 export interface SmtpStoredProfile {
   readonly id: string;
@@ -322,6 +324,9 @@ export interface SmtpStoredProfile {
   readonly port: number;
   readonly username: string;
   readonly password: string;
+  readonly senderName: string | null;
+  readonly senderAddress: string | null;
+  readonly replyTo: string | null;
   readonly createdAt: string;
 }
 
@@ -332,6 +337,9 @@ export interface SmtpProfileDraft {
   readonly port: number;
   readonly username: string;
   readonly password: string;
+  readonly senderName: string | null;
+  readonly senderAddress: string | null;
+  readonly replyTo: string | null;
 }
 
 /**
@@ -344,6 +352,9 @@ export interface SmtpProfilePatch {
   readonly port: number;
   readonly username: string;
   readonly password: string | null;
+  readonly senderName: string | null;
+  readonly senderAddress: string | null;
+  readonly replyTo: string | null;
 }
 
 /**
@@ -360,6 +371,8 @@ export interface SendJobDraft {
   readonly bodyHtml: string;
   readonly senderName: string;
   readonly senderAddress: string;
+  /** The per-job Reply-To (ticket 01); null when the job carries none. */
+  readonly replyTo: string | null;
   readonly delayMs: number;
   readonly totalCount: number;
 }
@@ -379,6 +392,7 @@ export interface SendJobWithRecipients {
     readonly bodyHtml: string;
     readonly senderName: string;
     readonly senderAddress: string;
+    readonly replyTo: string | null;
     readonly delayMs: number;
     readonly cursorIndex: number;
     readonly totalCount: number;
@@ -476,6 +490,9 @@ interface SmtpProfileRow {
   port: number;
   username: string;
   password: string;
+  default_sender_name: string | null;
+  default_sender_address: string | null;
+  default_reply_to: string | null;
   created_at: string;
 }
 
@@ -487,6 +504,9 @@ function toSmtpStoredProfile(row: SmtpProfileRow): SmtpStoredProfile {
     port: row.port,
     username: row.username,
     password: row.password,
+    senderName: row.default_sender_name,
+    senderAddress: row.default_sender_address,
+    replyTo: row.default_reply_to,
     createdAt: row.created_at,
   };
 }
@@ -550,6 +570,9 @@ const smtpProfileColumns = {
   port: sp.port,
   username: sp.username,
   password: sp.password,
+  default_sender_name: sp.defaultSenderName,
+  default_sender_address: sp.defaultSenderAddress,
+  default_reply_to: sp.defaultReplyTo,
   created_at: sp.createdAt,
 } as const;
 
@@ -849,6 +872,9 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             port: draft.port,
             username: draft.username,
             password: draft.password,
+            defaultSenderName: draft.senderName,
+            defaultSenderAddress: draft.senderAddress,
+            defaultReplyTo: draft.replyTo,
           })
           .run();
         // The insert above just landed, so the row must exist.
@@ -873,6 +899,9 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             port: patch.port,
             username: patch.username,
             password: patch.password ?? undefined,
+            defaultSenderName: patch.senderName,
+            defaultSenderAddress: patch.senderAddress,
+            defaultReplyTo: patch.replyTo,
           })
           .where(eq(sp.id, id))
           .run();
@@ -900,6 +929,7 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             bodyHtml: draft.bodyHtml,
             senderName: draft.senderName,
             senderAddress: draft.senderAddress,
+            replyTo: draft.replyTo,
             delayMs: draft.delayMs,
             totalCount: draft.totalCount,
           })
@@ -950,6 +980,7 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             bodyHtml: sj.bodyHtml,
             senderName: sj.senderName,
             senderAddress: sj.senderAddress,
+            replyTo: sj.replyTo,
             delayMs: sj.delayMs,
             cursorIndex: sj.cursorIndex,
             totalCount: sj.totalCount,
@@ -997,6 +1028,7 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             bodyHtml: row.bodyHtml,
             senderName: row.senderName,
             senderAddress: row.senderAddress,
+            replyTo: row.replyTo,
             delayMs: row.delayMs,
             cursorIndex: row.cursorIndex,
             totalCount: row.totalCount,

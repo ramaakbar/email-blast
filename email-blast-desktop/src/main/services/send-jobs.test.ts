@@ -248,6 +248,7 @@ function startPayload(svc: Svc, overrides: Partial<SendStartPayload> = {}): Send
     bodyHtml: "<p>Dear {name}, your number is {no}.</p>",
     senderName: "Yayasan X",
     senderAddress: "iym@example.org",
+    replyTo: null,
     delayMs: 1000,
     ...overrides,
   };
@@ -385,6 +386,34 @@ describe("SendJobService run (Seam A)", () => {
         error: null,
       },
     ]);
+  });
+
+  it("delivers the per-job Reply-To and the overridden identity on the wire (ticket 01)", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(
+      svc.service.start(
+        startPayload(svc, {
+          senderName: "Panitia Kampus",
+          senderAddress: "panitia@example.org",
+          replyTo: "sekretariat@example.org",
+        }),
+      ),
+    );
+    expect(job.replyTo).toBe("sekretariat@example.org");
+
+    await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 1);
+        yield* Fiber.interrupt(fiber);
+      }),
+    );
+    // The captured MIME carries the overridden From and the Reply-To
+    // header - the profile default is irrelevant once the job overrides.
+    // (Nodemailer quotes the display name only when it must, so a simple
+    // name lands bare.)
+    expect(svc.captured[0]).toContain("From: Panitia Kampus <panitia@example.org>");
+    expect(svc.captured[0]).toContain("Reply-To: sekretariat@example.org");
   });
 
   it("applies a live pacing-gate interval change without restarting the job", async () => {
@@ -1305,6 +1334,9 @@ describe("SendJobService start validation (Seam A)", () => {
         port: svc.port,
         username: "me",
         password: "secret",
+        senderName: null,
+        senderAddress: null,
+        replyTo: null,
       }),
     );
     const job = await Effect.runPromise(
@@ -1403,6 +1435,7 @@ describe("SendJobService logs (ticket 16)", () => {
         bodyHtml: done.bodyHtml,
         senderName: done.senderName,
         senderAddress: done.senderAddress,
+        replyTo: done.replyTo,
         delayMs: done.delayMs,
       }),
     );
