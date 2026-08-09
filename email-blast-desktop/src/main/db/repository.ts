@@ -10,6 +10,7 @@ import type {
   GenerateJobStatus,
   GenerateRecipientStatus,
   ImportBatch,
+  MessageTemplate,
   Recipient,
   RecipientListPayload,
   SendJobStatus,
@@ -19,6 +20,7 @@ import type {
 import {
   generateJobRecipients as gjr,
   generateJobs as gj,
+  messageTemplates as mt,
   recipients as r,
   sendJobRecipients as sjr,
   sendJobs as sj,
@@ -181,6 +183,26 @@ export interface SqliteRepoShape {
   ) => Effect.Effect<Option.Option<Template>>;
   /** Deletes a template and returns how many rows were removed. */
   readonly deleteTemplate: (id: string) => Effect.Effect<number>;
+  /**
+   * Every Message Template, most recently edited first. Copy-on-pick
+   * (ADR 0005): Send Jobs never reference these rows, so nothing here
+   * joins into the send domain.
+   */
+  readonly listMessageTemplates: () => Effect.Effect<MessageTemplate[]>;
+  /** A single Message Template by id, or none when no such row exists. */
+  readonly getMessageTemplate: (id: string) => Effect.Effect<Option.Option<MessageTemplate>>;
+  /** Inserts a Message Template; the id is assigned here. */
+  readonly insertMessageTemplate: (draft: MessageTemplateDraft) => Effect.Effect<MessageTemplate>;
+  /**
+   * Updates the mutable Message Template fields (name, subject, body).
+   * Returns the updated row, or none when no such id exists.
+   */
+  readonly updateMessageTemplate: (
+    id: string,
+    patch: MessageTemplatePatch,
+  ) => Effect.Effect<Option.Option<MessageTemplate>>;
+  /** Deletes a Message Template and returns how many rows were removed. */
+  readonly deleteMessageTemplate: (id: string) => Effect.Effect<number>;
   /** Inserts a generate job row and returns its assigned id. */
   readonly insertGenerateJob: (templateId: string) => Effect.Effect<string>;
   /** Inserts one pending recipient row per id, in the given order. */
@@ -340,6 +362,25 @@ export interface TemplatePatch {
   readonly name: string;
   readonly slots: readonly string[];
   readonly outputPattern: string;
+}
+
+/**
+ * A Message Template ready to be persisted (ticket 03): the form fields,
+ * without the id or the created/updated stamps. `bodyHtml` is the raw
+ * HTML with `{slot}` placeholders - interpolation happens per recipient
+ * at send time, never at save time.
+ */
+export interface MessageTemplateDraft {
+  readonly name: string;
+  readonly subject: string;
+  readonly bodyHtml: string;
+}
+
+/** The mutable Message Template fields; every field is always updated. */
+export interface MessageTemplatePatch {
+  readonly name: string;
+  readonly subject: string;
+  readonly bodyHtml: string;
 }
 
 /** A generate job row as stored, with the template name for display. */
@@ -578,6 +619,27 @@ function toTemplate(row: TemplateRow): Template {
   };
 }
 
+/** A message_templates row as stored. */
+interface MessageTemplateRow {
+  id: string;
+  name: string;
+  subject: string;
+  body_html: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function toMessageTemplate(row: MessageTemplateRow): MessageTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    subject: row.subject,
+    bodyHtml: row.body_html,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function toRecipient(row: RecipientRow): Recipient {
   return {
     id: row.id,
@@ -615,6 +677,16 @@ const templateColumns = {
   slots: t.slots,
   output_pattern: t.outputPattern,
   created_at: t.createdAt,
+} as const;
+
+/** The message_templates row columns, shared by every message-templates query (same alias rule). */
+const messageTemplateColumns = {
+  id: mt.id,
+  name: mt.name,
+  subject: mt.subject,
+  body_html: mt.bodyHtml,
+  created_at: mt.createdAt,
+  updated_at: mt.updatedAt,
 } as const;
 
 /** The smtp_profiles row columns, shared by every smtp-profiles query (same alias rule). */
@@ -799,6 +871,66 @@ export function makeSqliteRepo(
     deleteTemplate: (id) =>
       Effect.sync(() => {
         return dbx.delete(t).where(eq(t.id, id)).run().changes;
+      }),
+    listMessageTemplates: () =>
+      Effect.sync(() => {
+        // Most recently edited first; same-second rows tiebreak by name,
+        // then id - the list reads predictably while names stay stable.
+        const rows = dbx
+          .select(messageTemplateColumns)
+          .from(mt)
+          .orderBy(desc(mt.updatedAt), sql`name COLLATE NOCASE ASC`, asc(mt.id))
+          .all() as unknown as MessageTemplateRow[];
+        return rows.map(toMessageTemplate);
+      }),
+    getMessageTemplate: (id) =>
+      Effect.sync(() => {
+        const row = dbx.select(messageTemplateColumns).from(mt).where(eq(mt.id, id)).get() as
+          | MessageTemplateRow
+          | undefined;
+        return row === undefined ? Option.none() : Option.some(toMessageTemplate(row));
+      }),
+    insertMessageTemplate: (draft) =>
+      Effect.sync(() => {
+        const id = crypto.randomUUID();
+        dbx
+          .insert(mt)
+          .values({
+            id,
+            name: draft.name,
+            subject: draft.subject,
+            bodyHtml: draft.bodyHtml,
+          })
+          .run();
+        // The insert above just landed, so the row must exist.
+        const row = dbx
+          .select(messageTemplateColumns)
+          .from(mt)
+          .where(eq(mt.id, id))
+          .get() as MessageTemplateRow;
+        return toMessageTemplate(row);
+      }),
+    updateMessageTemplate: (id, patch) =>
+      Effect.sync(() => {
+        const result = dbx
+          .update(mt)
+          .set({
+            name: patch.name,
+            subject: patch.subject,
+            bodyHtml: patch.bodyHtml,
+            updatedAt: sql`(datetime('now'))`,
+          })
+          .where(eq(mt.id, id))
+          .run();
+        if (result.changes === 0) return Option.none();
+        const row = dbx.select(messageTemplateColumns).from(mt).where(eq(mt.id, id)).get() as
+          | MessageTemplateRow
+          | undefined;
+        return row === undefined ? Option.none() : Option.some(toMessageTemplate(row));
+      }),
+    deleteMessageTemplate: (id) =>
+      Effect.sync(() => {
+        return dbx.delete(mt).where(eq(mt.id, id)).run().changes;
       }),
     insertGenerateJob: (templateId) =>
       Effect.sync(() => {

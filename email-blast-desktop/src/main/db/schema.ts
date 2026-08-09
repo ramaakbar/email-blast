@@ -188,3 +188,25 @@ export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
   value: text("value").notNull(),
 });
+
+/**
+ * A Message Template (ticket 03, ADR 0005): a reusable subject and HTML
+ * body with `{slot}` placeholders. Copy-on-pick semantics live in the
+ * services - a Send Job picks the template's contents into its own
+ * subject/body columns and never references this table, so editing a
+ * template can never change a job that already picked it. `updatedAt`
+ * advances on every edit; the list orders by it so the most recently
+ * worked-on template comes first.
+ */
+export const messageTemplates = sqliteTable("message_templates", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  subject: text("subject").notNull(),
+  bodyHtml: text("body_html").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});

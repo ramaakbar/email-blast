@@ -11,6 +11,7 @@
  * reaches a recipient with a silent literal `{slot}` left in it.
  */
 
+import { m } from "@paraglide/messages";
 import type { SlotSource } from "./generate";
 
 /** The HTML-significant characters a value must escape before interpolation. */
@@ -157,4 +158,25 @@ export function interpolateMessagePlain(text: string, values: Record<string, str
 /** Interpolates the HTML body: every slot value HTML-escaped. */
 export function interpolateMessageHtml(text: string, values: Record<string, string>): string {
   return interpolateMessage(text, values, true);
+}
+
+/**
+ * Validates a Message Template payload (ticket 03). Returns the
+ * user-facing error message, or null when the payload is acceptable.
+ * Only the name, subject, and body are checked - `{slot}` references are
+ * recipient-dependent by design, so they are validated per recipient at
+ * send time (messageCoverage), not at template save time. The main
+ * process re-validates every create/update at the boundary; the renderer
+ * uses the same function for instant feedback, so the error messages a
+ * user sees can never drift from what the main process rejects.
+ */
+export function validateMessageTemplate(
+  name: string,
+  subject: string,
+  bodyHtml: string,
+): string | null {
+  if (name.trim() === "") return m["validation.messageTemplateNameRequired"]();
+  if (subject.trim() === "") return m["validation.messageSubjectRequired"]();
+  if (bodyHtml.trim() === "") return m["validation.messageBodyRequired"]();
+  return null;
 }

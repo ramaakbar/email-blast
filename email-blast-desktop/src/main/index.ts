@@ -18,6 +18,10 @@ import {
   ImportReadPayload,
   IPC,
   LogsListPayload,
+  MessageTemplate,
+  MessageTemplateCreatePayload,
+  MessageTemplateDeleteResponse,
+  MessageTemplateUpdatePayload,
   PaginatedRecipients,
   PickPathResponse,
   PingResponse,
@@ -60,6 +64,7 @@ import { SmtpService } from "./services/smtp";
 import { migrateCredentialsAtRest, openDatabase, SqliteRepo } from "./db/repository";
 import { makeCredentialCrypto } from "./services/credential-crypto";
 import { Settings } from "./services/settings";
+import { MessageTemplatesService } from "./services/message-templates";
 import { TemplatesService } from "./services/templates";
 
 // Forge's Vite plugin defines these at build time (bare identifiers, from
@@ -436,6 +441,61 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
       Effect.gen(function* () {
         const service = yield* TemplatesService;
         return Schema.encodeSync(ScanSlotsResponse)({ slots: yield* service.scanSlots(docxPath) });
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["message-templates:list"], () => {
+    return run(
+      Effect.gen(function* () {
+        const service = yield* MessageTemplatesService;
+        return Schema.encodeSync(Schema.Array(MessageTemplate))(yield* service.list());
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["message-templates:get"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* MessageTemplatesService;
+        return Option.getOrNull(
+          yield* service
+            .get(id)
+            .pipe(Effect.map(Option.map((t) => Schema.encodeSync(MessageTemplate)(t)))),
+        );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["message-templates:create"], (payload) => {
+    const draft = decodePayload(MessageTemplateCreatePayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* MessageTemplatesService;
+        return Schema.encodeSync(MessageTemplate)(yield* service.create(draft));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["message-templates:update"], (payload) => {
+    const { id, name, subject, bodyHtml } = decodePayload(MessageTemplateUpdatePayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* MessageTemplatesService;
+        return Schema.encodeSync(MessageTemplate)(yield* service.update(id, { name, subject, bodyHtml }));
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["message-templates:delete"], (payload) => {
+    const id = decodePayload(Schema.String, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* MessageTemplatesService;
+        return Schema.encodeSync(MessageTemplateDeleteResponse)({
+          deleted: yield* service.delete(id),
+        });
       }),
     );
   });

@@ -28,6 +28,7 @@ const plainCrypto = makeCredentialCrypto(null, () => {});
 const ALL_TABLES = [
   "recipients",
   "templates",
+  "message_templates",
   "generate_jobs",
   "generate_job_recipients",
   "send_jobs",

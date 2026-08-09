@@ -12,6 +12,7 @@ import { SendEnvService, SendJobService } from "./services/send-jobs";
 import { Settings } from "./services/settings";
 import { SmtpService } from "./services/smtp";
 import type { SqliteRepo } from "./db/repository";
+import { MessageTemplatesService } from "./services/message-templates";
 import { TemplatesService } from "./services/templates";
 
 export type AppServices =
@@ -20,6 +21,7 @@ export type AppServices =
   | ImportService
   | RecipientsService
   | TemplatesService
+  | MessageTemplatesService
   | GenerateJobService
   | GenerateEnvService
   | LibreOfficeService
@@ -46,6 +48,7 @@ export const rootLayer = (
     ImportService.Live(db, credCrypto),
     RecipientsService.Live(db, credCrypto),
     TemplatesService.Live(db, credCrypto),
+    MessageTemplatesService.Live(db, credCrypto),
     SendJobService.Live(db, defaults, credCrypto),
     AppInfo.Live,
   );

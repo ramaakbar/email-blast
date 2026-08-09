@@ -248,6 +248,64 @@ export const ScanSlotsResponse = Schema.Struct({
 });
 export type ScanSlotsResponse = Schema.Schema.Type<typeof ScanSlotsResponse>;
 
+// ---- Message Templates domain (ticket 03) ----
+
+/**
+ * A Message Template as stored: the reusable subject and HTML body with
+ * `{slot}` placeholders, plus the creation and last-edit stamps (SQLite
+ * UTC "YYYY-MM-DD HH:MM:SS", formatted for display by the renderer).
+ * Picking one in a Send Job copies its contents into the job's own
+ * subject/body columns - the job never references this table, so a later
+ * edit to the template can never change a job that already picked it
+ * (copy-on-pick, ADR 0005).
+ */
+export const MessageTemplate = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  subject: Schema.String,
+  bodyHtml: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+export type MessageTemplate = Schema.Schema.Type<typeof MessageTemplate>;
+
+/**
+ * `messageTemplates.create` payload: the full template. The main process
+ * validates the name, subject, and body are non-empty before persisting;
+ * `{slot}` references are checked per recipient at send time, exactly as
+ * for a manually typed job message.
+ */
+export const MessageTemplateCreatePayload = Schema.Struct({
+  name: Schema.String,
+  subject: Schema.String,
+  bodyHtml: Schema.String,
+});
+export type MessageTemplateCreatePayload = Schema.Schema.Type<
+  typeof MessageTemplateCreatePayload
+>;
+
+/**
+ * `messageTemplates.update` payload: every mutable field. Fails with
+ * MessageTemplateNotFound when no such id exists.
+ */
+export const MessageTemplateUpdatePayload = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  subject: Schema.String,
+  bodyHtml: Schema.String,
+});
+export type MessageTemplateUpdatePayload = Schema.Schema.Type<
+  typeof MessageTemplateUpdatePayload
+>;
+
+/** `messageTemplates.delete` response: how many rows were actually deleted. */
+export const MessageTemplateDeleteResponse = Schema.Struct({
+  deleted: Schema.Number,
+});
+export type MessageTemplateDeleteResponse = Schema.Schema.Type<
+  typeof MessageTemplateDeleteResponse
+>;
+
 // ---- Generate domain (ticket 13) ----
 
 /** The lifecycle of a generate job (mirrors the generate_jobs table CHECK). */
@@ -660,6 +718,21 @@ export interface Api {
      * headers, and footers), in document order. Fails for non-DOCX files.
      */
     scanSlots(docxPath: string): Promise<ScanSlotsResponse>;
+  };
+  messageTemplates: {
+    /** Every saved Message Template, most recently edited first. */
+    list(): Promise<MessageTemplate[]>;
+    /** A single Message Template by id, or null when no such id exists. */
+    get(id: string): Promise<MessageTemplate | null>;
+    /**
+     * Saves a new Message Template; validates the name, subject, and body
+     * are non-empty. The "Save as template" path from a Send Job message.
+     */
+    create(payload: MessageTemplateCreatePayload): Promise<MessageTemplate>;
+    /** Edits the name, subject, and body of a Message Template. */
+    update(payload: MessageTemplateUpdatePayload): Promise<MessageTemplate>;
+    /** Deletes a Message Template; returns how many rows were removed. */
+    delete(id: string): Promise<MessageTemplateDeleteResponse>;
   };
   generate: {
     /**

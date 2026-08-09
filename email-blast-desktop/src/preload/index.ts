@@ -39,6 +39,13 @@ const api: Api = {
     delete: (id) => ipcRenderer.invoke(IPC["templates:delete"], id),
     scanSlots: (docxPath) => ipcRenderer.invoke(IPC["templates:scan-slots"], docxPath),
   },
+  messageTemplates: {
+    list: () => ipcRenderer.invoke(IPC["message-templates:list"]),
+    get: (id) => ipcRenderer.invoke(IPC["message-templates:get"], id),
+    create: (payload) => ipcRenderer.invoke(IPC["message-templates:create"], payload),
+    update: (payload) => ipcRenderer.invoke(IPC["message-templates:update"], payload),
+    delete: (id) => ipcRenderer.invoke(IPC["message-templates:delete"], id),
+  },
   generate: {
     startGenerate: (payload) => ipcRenderer.invoke(IPC["generate:start"], payload),
     runGenerate: (jobId) => ipcRenderer.invoke(IPC["generate:run"], jobId),
