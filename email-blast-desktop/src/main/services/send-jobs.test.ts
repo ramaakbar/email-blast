@@ -25,6 +25,7 @@ import {
   type SmtpServiceShape,
 } from "./smtp";
 import { makeSqliteRepo, openDatabase } from "../db/repository";
+import { CIPHERTEXT_PREFIX, makeCredentialCrypto } from "./credential-crypto";
 import { tempDir } from "./test-helpers";
 
 /**
@@ -129,7 +130,7 @@ const RECIPIENT_ROWS = [
 
 /** Inserts recipients and returns their ids in insertion order (rowid order). */
 function seedRecipients(db: Database.Database): string[] {
-  Effect.runSync(makeSqliteRepo(db).insertRecipients(RECIPIENT_ROWS));
+  Effect.runSync(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients(RECIPIENT_ROWS));
   return (db.prepare("SELECT id FROM recipients ORDER BY rowid").all() as { id: string }[]).map(
     (row) => row.id,
   );
@@ -170,7 +171,7 @@ async function makeSvc(
   options: { reject?: readonly string[]; failFlaky?: boolean; smtp?: SmtpServiceShape } = {},
 ): Promise<Svc> {
   const db = openDatabase(join(tempDir(), "send.db"));
-  const repo = makeSqliteRepo(db);
+  const repo = makeSqliteRepo(db, makeCredentialCrypto(null, () => {}));
   const hub = makeProgressHub();
   const generate = makeGenerateJobService(repo, hub, stubGenerateEnv());
   const realSmtp = makeSmtpService(repo);
@@ -628,6 +629,31 @@ describe("SendJobService run (Seam A)", () => {
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) {
       expect(outcome.failure).toBeInstanceOf(SmtpConnectFailed);
+    }
+    expect(svc.captured).toHaveLength(0);
+    expect((await jobStatus(svc, job.id)).status).toBe("pending");
+  });
+
+  it("fails the run with a clear message when the stored inline override cannot be decrypted", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(
+      svc.service.start(
+        startPayload(svc, {
+          smtpOverride: { host: "127.0.0.1", port: svc.port, username: "me", password: "secret" },
+        }),
+      ),
+    );
+    // A ciphertext override this keychain cannot open (keychain cleared,
+    // database moved): the run must fail fast with a clear message, not
+    // feed undefined credentials to the SMTP client.
+    svc.db
+      .prepare("UPDATE send_jobs SET smtp_override = ? WHERE id = ?")
+      .run(`${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`, job.id);
+    const outcome = await Effect.runPromise(svc.service.run(job.id).pipe(Effect.result));
+    expect(Result.isFailure(outcome)).toBe(true);
+    if (Result.isFailure(outcome)) {
+      expect(outcome.failure).toBeInstanceOf(InvalidSendRequest);
+      expect(outcome.failure.message).toMatch(/could not be decrypted/i);
     }
     expect(svc.captured).toHaveLength(0);
     expect((await jobStatus(svc, job.id)).status).toBe("pending");
@@ -1224,7 +1250,9 @@ describe("SendJobService retry failures (Seam A)", () => {
 
   it("fails a recipient immediately on a deterministic send error without retries", async () => {
     let sendCalls = 0;
-    const realSmtp = makeSmtpService(makeSqliteRepo(openDatabase(join(tempDir(), "stub.db"))));
+    const realSmtp = makeSmtpService(
+      makeSqliteRepo(openDatabase(join(tempDir(), "stub.db")), makeCredentialCrypto(null, () => {})),
+    );
     const stubSmtp: SmtpServiceShape = {
       ...realSmtp,
       send: (credentials, message) => {

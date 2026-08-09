@@ -4,6 +4,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { openDatabase } from "../db/repository";
 import { seedSettings, Settings, type SettingsShape } from "./settings";
+import { makeCredentialCrypto } from "./credential-crypto";
 import { defaultPathsForHome } from "./default-paths";
 import { tempDir } from "./test-helpers";
 
@@ -68,7 +69,7 @@ describe("Settings (Seam A)", () => {
   it("seeds defaults and reads them back through the Effect Layer", async () => {
     const home = tempHome();
     const db = openDatabase(join(home.home, "test.db"));
-    const layer = Settings.Live(db, home);
+    const layer = Settings.Live(db, home, undefined, makeCredentialCrypto(null, () => {}));
 
     await expect(use(layer, (s) => s.getRateLimitDelayMs())).resolves.toBe(1000);
     await expect(use(layer, (s) => s.getTemplatesDir())).resolves.toBe(home.templatesDir);
@@ -80,7 +81,7 @@ describe("Settings (Seam A)", () => {
   it("round-trips the UI language through the Effect Layer", async () => {
     const home = tempHome();
     const db = openDatabase(join(home.home, "test.db"));
-    const layer = Settings.Live(db, home, "id-ID");
+    const layer = Settings.Live(db, home, "id-ID", makeCredentialCrypto(null, () => {}));
 
     // Seeded from the system locale at first launch.
     await expect(use(layer, (s) => s.getLanguage())).resolves.toBe("id");
@@ -100,7 +101,7 @@ describe("Settings (Seam A)", () => {
   it("round-trips writes through the Effect Layer", async () => {
     const home = tempHome();
     const db = openDatabase(join(home.home, "test.db"));
-    const layer = Settings.Live(db, home);
+    const layer = Settings.Live(db, home, undefined, makeCredentialCrypto(null, () => {}));
 
     await use(layer, (s) => s.setRateLimitDelayMs(2500));
     await expect(use(layer, (s) => s.getRateLimitDelayMs())).resolves.toBe(2500);
@@ -117,7 +118,7 @@ describe("Settings (Seam A)", () => {
   it("clamps the rate limit on read, even when a raw value bypassed the setter", async () => {
     const home = tempHome();
     const db = openDatabase(join(home.home, "test.db"));
-    const layer = Settings.Live(db, home);
+    const layer = Settings.Live(db, home, undefined, makeCredentialCrypto(null, () => {}));
 
     // The generic settings.set IPC writes raw values; the typed read still
     // serves only the spec'd 500-5000ms range.
@@ -141,12 +142,12 @@ describe("Settings (Seam A)", () => {
     const dbPath = join(home.home, "test.db");
 
     const db1 = openDatabase(dbPath);
-    const layer1 = Settings.Live(db1, home);
+    const layer1 = Settings.Live(db1, home, undefined, makeCredentialCrypto(null, () => {}));
     await use(layer1, (s) => s.setRateLimitDelayMs(5000));
     db1.close();
 
     const db2 = openDatabase(dbPath);
-    const layer2 = Settings.Live(db2, home);
+    const layer2 = Settings.Live(db2, home, undefined, makeCredentialCrypto(null, () => {}));
     await expect(use(layer2, (s) => s.getRateLimitDelayMs())).resolves.toBe(5000);
     db2.close();
   });
@@ -154,7 +155,7 @@ describe("Settings (Seam A)", () => {
   it("creates the default templates and output directories on first run", async () => {
     const home = tempHome();
     const db = openDatabase(join(home.home, "test.db"));
-    const layer = Settings.Live(db, home);
+    const layer = Settings.Live(db, home, undefined, makeCredentialCrypto(null, () => {}));
 
     await use(layer, (s) => s.ensureDirectories());
 

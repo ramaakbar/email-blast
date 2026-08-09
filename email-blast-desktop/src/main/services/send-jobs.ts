@@ -42,6 +42,7 @@ import {
   type SqliteRepoShape,
 } from "../db/repository";
 import { Settings } from "./settings";
+import type { CredentialCrypto } from "./credential-crypto";
 import { m } from "@paraglide/messages";
 
 /**
@@ -323,14 +324,27 @@ export function makeSendJobService(
 
   const resolveCredentials = (
     loaded: SendJobWithRecipients,
-  ): Effect.Effect<SmtpCredentials, SmtpProfileNotFound> =>
+  ): Effect.Effect<SmtpCredentials, SmtpProfileNotFound | InvalidSendRequest> =>
     Effect.gen(function* () {
       if (loaded.job.smtpProfileId !== null) {
         return yield* smtp.getCredentials(loaded.job.smtpProfileId);
       }
-      // The job started with an inline override; the credential was stored
-      // with the job row (plaintext at rest, the ticket-14 posture).
-      const parsed = JSON.parse(loaded.job.smtpOverrideJson ?? "{}") as SmtpCredentials;
+      // The job started with an inline override; the credential is stored
+      // with the job row, encrypted at rest (ticket 02). An override that
+      // cannot be decrypted (keychain cleared, database moved) reads as no
+      // override at all - fail fast with a clear message instead of
+      // handing undefined host/port/username to the SMTP client.
+      const parsed = JSON.parse(loaded.job.smtpOverrideJson ?? "{}") as Partial<SmtpCredentials>;
+      if (
+        typeof parsed.host !== "string" ||
+        typeof parsed.port !== "number" ||
+        typeof parsed.username !== "string" ||
+        typeof parsed.password !== "string"
+      ) {
+        return yield* Effect.fail(
+          new InvalidSendRequest({ message: m["sendJob.credentialUnreadable"]() }),
+        );
+      }
       return {
         host: parsed.host,
         port: parsed.port,
@@ -821,6 +835,7 @@ export class SendJobService extends Context.Service<SendJobService, SendJobServi
   static readonly Live = (
     db: Database.Database,
     defaults: DefaultPaths,
+    credCrypto: CredentialCrypto,
   ): Layer.Layer<
     | SendJobService
     | SendEnvService
@@ -848,8 +863,8 @@ export class SendJobService extends Context.Service<SendJobService, SendJobServi
           ),
           SendEnvService.Live,
         ),
-        GenerateJobService.Live(db, defaults),
+        GenerateJobService.Live(db, defaults, credCrypto),
       ),
-      SmtpService.Live(db),
+      SmtpService.Live(db, credCrypto),
     );
 }

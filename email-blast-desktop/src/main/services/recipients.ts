@@ -8,6 +8,7 @@ import type {
   RecipientListPayload,
 } from "../../shared/ipc";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
+import type { CredentialCrypto } from "./credential-crypto";
 
 /**
  * The recipients directory (ticket 11): listing with search/filter/
@@ -52,7 +53,10 @@ export function makeRecipientsService(repo: SqliteRepoShape): RecipientsServiceS
 export class RecipientsService extends Context.Service<RecipientsService, RecipientsServiceShape>()(
   "RecipientsService",
 ) {
-  static readonly Live = (db: Database.Database): Layer.Layer<RecipientsService | SqliteRepo> =>
+  static readonly Live = (
+    db: Database.Database,
+    credCrypto: CredentialCrypto,
+  ): Layer.Layer<RecipientsService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         RecipientsService,
@@ -61,6 +65,6 @@ export class RecipientsService extends Context.Service<RecipientsService, Recipi
           return makeRecipientsService(repo);
         }),
       ),
-      SqliteRepo.Live(db),
+      SqliteRepo.Live(db, credCrypto),
     );
 }

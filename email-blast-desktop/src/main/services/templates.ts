@@ -12,6 +12,7 @@ import {
   type TemplateDraft,
   type TemplatePatch,
 } from "../db/repository";
+import type { CredentialCrypto } from "./credential-crypto";
 
 /**
  * The templates domain (ticket 12): registering DOCX letter and image
@@ -159,7 +160,10 @@ export function makeTemplatesService(repo: SqliteRepoShape): TemplatesServiceSha
 export class TemplatesService extends Context.Service<TemplatesService, TemplatesServiceShape>()(
   "TemplatesService",
 ) {
-  static readonly Live = (db: Database.Database): Layer.Layer<TemplatesService | SqliteRepo> =>
+  static readonly Live = (
+    db: Database.Database,
+    credCrypto: CredentialCrypto,
+  ): Layer.Layer<TemplatesService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         TemplatesService,
@@ -168,6 +172,6 @@ export class TemplatesService extends Context.Service<TemplatesService, Template
           return makeTemplatesService(repo);
         }),
       ),
-      SqliteRepo.Live(db),
+      SqliteRepo.Live(db, credCrypto),
     );
 }

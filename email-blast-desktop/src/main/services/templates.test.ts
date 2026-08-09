@@ -4,6 +4,7 @@ import { writeFileSync } from "fs";
 import { join } from "path";
 import { openDatabase, SqliteRepo } from "../db/repository";
 import { TemplatesService, scanDocxSlots, type TemplatesServiceShape } from "./templates";
+import { makeCredentialCrypto } from "./credential-crypto";
 import { normalizeSlots, patternSlots, validateTemplate } from "../../shared/template-validation";
 import { tempDir, writeFixture } from "./test-helpers";
 
@@ -27,7 +28,7 @@ function use<A, E>(
 }
 
 function templateLayer(): Layer.Layer<TemplatesService | SqliteRepo> {
-  return TemplatesService.Live(openDatabase(join(tempDir(), "templates.db")));
+  return TemplatesService.Live(openDatabase(join(tempDir(), "templates.db")), makeCredentialCrypto(null, () => {}));
 }
 
 const P_LOA = `<w:p><w:r><w:t>Dear {name}, no {no}</w:t></w:r></w:p>`;

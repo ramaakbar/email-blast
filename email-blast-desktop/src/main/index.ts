@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, shell, BrowserWindow, ipcMain, dialog, safeStorage } from "electron";
 import { join } from "path";
 import { homedir } from "os";
 import assert from "node:assert";
@@ -57,7 +57,8 @@ import { ProgressHub } from "./services/progress-hub";
 import { RecipientsService } from "./services/recipients";
 import { SendEnvService, SendJobService, type SendEnv } from "./services/send-jobs";
 import { SmtpService } from "./services/smtp";
-import { openDatabase, SqliteRepo } from "./db/repository";
+import { migrateCredentialsAtRest, openDatabase, SqliteRepo } from "./db/repository";
+import { makeCredentialCrypto } from "./services/credential-crypto";
 import { Settings } from "./services/settings";
 import { TemplatesService } from "./services/templates";
 
@@ -712,8 +713,14 @@ app.whenReady().then(async () => {
   // (schema applied, defaults seeded) and the configured templates/output
   // directories are ensured. The DB handle stays open for the app lifetime.
   const db = openDatabase(join(app.getPath("userData"), "email-blast.db"));
+  // Ticket 02: legacy plaintext SMTP credentials are encrypted in place
+  // before any service reads them; on platforms without a usable keychain
+  // the migration logs clearly and the app stores plaintext (graceful
+  // degradation). The credential crypto rides the same seam into the repo.
+  const credCrypto = makeCredentialCrypto(safeStorage, (message) => console.log(message));
+  migrateCredentialsAtRest(db, credCrypto, (message) => console.log(message));
   // The OS locale seeds the UI language setting on first run (ADR-0004).
-  const layer = rootLayer(db, defaultPathsForHome(homedir()), app.getLocale());
+  const layer = rootLayer(db, defaultPathsForHome(homedir()), app.getLocale(), credCrypto);
   app.on("will-quit", () => {
     db.close();
     // The service graph holds no scoped resources, but the scope is closed

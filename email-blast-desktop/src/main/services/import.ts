@@ -12,6 +12,7 @@ import type {
 } from "../../shared/ipc";
 import { m } from "@paraglide/messages";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
+import type { CredentialCrypto } from "./credential-crypto";
 
 /**
  * The import pipeline (ticket 10): parses a spreadsheet, auto-suggests the
@@ -296,7 +297,10 @@ export function makeImportService(repo: SqliteRepoShape): ImportServiceShape {
 export class ImportService extends Context.Service<ImportService, ImportServiceShape>()(
   "ImportService",
 ) {
-  static readonly Live = (db: Database.Database): Layer.Layer<ImportService | SqliteRepo> =>
+  static readonly Live = (
+    db: Database.Database,
+    credCrypto: CredentialCrypto,
+  ): Layer.Layer<ImportService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         ImportService,
@@ -305,6 +309,6 @@ export class ImportService extends Context.Service<ImportService, ImportServiceS
           return makeImportService(repo);
         }),
       ),
-      SqliteRepo.Live(db),
+      SqliteRepo.Live(db, credCrypto),
     );
 }

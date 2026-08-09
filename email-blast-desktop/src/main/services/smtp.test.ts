@@ -6,6 +6,12 @@ import { writeFileSync } from "fs";
 import { SMTPServer } from "smtp-server";
 import { openDatabase, SqliteRepo } from "../db/repository";
 import { SmtpService, type SmtpServiceShape } from "./smtp";
+import {
+  CIPHERTEXT_PREFIX,
+  isCiphertext,
+  makeCredentialCrypto,
+  type CredentialCrypto,
+} from "./credential-crypto";
 import { tempDir } from "./test-helpers";
 
 /**
@@ -27,7 +33,7 @@ function use<A, E>(
 }
 
 function smtpLayer(): Layer.Layer<SmtpService | SqliteRepo> {
-  return SmtpService.Live(openDatabase(join(tempDir(), "smtp.db")));
+  return SmtpService.Live(openDatabase(join(tempDir(), "smtp.db")), makeCredentialCrypto(null, () => {}));
 }
 
 const servers: SMTPServer[] = [];
@@ -456,5 +462,45 @@ describe("SmtpService getCredentials (Seam A)", () => {
     await expect(use(layer, (s) => s.getCredentials("no-such-id"))).rejects.toMatchObject({
       _tag: "SmtpProfileNotFound",
     });
+  });
+});
+
+/** A reversible fake keychain producing real `enc:v1:` ciphertext. */
+function fakeCrypto(): CredentialCrypto {
+  return {
+    available: () => true,
+    store: (plaintext) => CIPHERTEXT_PREFIX + Buffer.from(`f<${plaintext}>`).toString("base64"),
+    read: (stored) => {
+      if (!stored.startsWith(CIPHERTEXT_PREFIX)) return stored;
+      const text = Buffer.from(stored.slice(CIPHERTEXT_PREFIX.length), "base64").toString();
+      return text.startsWith("f<") && text.endsWith(">") ? text.slice(2, -1) : "";
+    },
+  };
+}
+
+describe("SmtpService credential encryption at rest (ticket 02)", () => {
+  it("stores the profile password encrypted and resolves it back through the service", async () => {
+    const db = openDatabase(join(tempDir(), "smtp.db"));
+    const layer = SmtpService.Live(db, fakeCrypto());
+
+    const created = await use(layer, (s) => s.create(GMAIL));
+    expect(created.hasPassword).toBe(true);
+
+    // At rest: the column holds ciphertext, not the plaintext.
+    const row = db
+      .prepare("SELECT password FROM smtp_profiles WHERE id = ?")
+      .get(created.id) as { password: string };
+    expect(row.password).not.toContain(GMAIL.password);
+    expect(isCiphertext(row.password)).toBe(true);
+
+    // The send pipeline's credential path resolves the plaintext.
+    const credentials = await use(layer, (s) => s.getCredentials(created.id));
+    expect(credentials).toMatchObject({
+      host: GMAIL.host,
+      port: GMAIL.port,
+      username: GMAIL.username,
+      password: GMAIL.password,
+    });
+    db.close();
   });
 });

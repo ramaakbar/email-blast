@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Effect, Layer, Option } from "effect";
 import Database from "better-sqlite3";
 import { join } from "path";
 import type { SendJobStatus } from "../../shared/ipc";
-import { openDatabase, SqliteRepo, type SqliteRepoShape } from "./repository";
+import { migrateCredentialsAtRest, openDatabase, SqliteRepo, type SqliteRepoShape } from "./repository";
 import { tempDir } from "../services/test-helpers";
+import {
+  CIPHERTEXT_PREFIX,
+  isCiphertext,
+  makeCredentialCrypto,
+  type CredentialCrypto,
+} from "../services/credential-crypto";
+
+/**
+ * The degraded-mode crypto (no keychain): plaintext storage, legacy
+ * values pass through. Existing behavior tests assume the unencrypted
+ * posture of earlier tickets; the at-rest tests below inject an
+ * encrypting fake instead.
+ */
+const plainCrypto = makeCredentialCrypto(null, () => {});
 
 /**
  * Seam A (spec Testing Decisions): SqliteRepo against a temp database file.
@@ -51,7 +65,7 @@ describe("SqliteRepo (Seam A)", () => {
 
   it("round-trips get/set through the Effect Layer", async () => {
     const db = openDatabase(join(tempDir(), "test.db"));
-    const layer = SqliteRepo.Live(db);
+    const layer = SqliteRepo.Live(db, plainCrypto);
 
     await expect(use(layer, (r) => r.getSetting("no-such-key"))).resolves.toEqual(Option.none());
 
@@ -87,7 +101,7 @@ describe("SqliteRepo (Seam A)", () => {
 
   it("inserts recipients with their metadata bag and import batch, and lists existing emails", async () => {
     const db = openDatabase(join(tempDir(), "test.db"));
-    const layer = SqliteRepo.Live(db);
+    const layer = SqliteRepo.Live(db, plainCrypto);
 
     await use(layer, (r) =>
       r.insertRecipients([
@@ -143,7 +157,7 @@ describe("SqliteRepo (Seam A)", () => {
   it("inserts nothing when given an empty list, and survives a reopen", async () => {
     const dbPath = join(tempDir(), "test.db");
     const db1 = openDatabase(dbPath);
-    const layer1 = SqliteRepo.Live(db1);
+    const layer1 = SqliteRepo.Live(db1, plainCrypto);
 
     await use(layer1, (r) => r.insertRecipients([]));
     const count = db1.prepare("SELECT COUNT(*) AS n FROM recipients").get() as { n: number };
@@ -413,7 +427,7 @@ describe("send job log queries (ticket 16)", () => {
 
   it("lists send jobs most recent first with outcome counts and the template name", async () => {
     const db = openDatabase(join(tempDir(), "test.db"));
-    const layer = SqliteRepo.Live(db);
+    const layer = SqliteRepo.Live(db, plainCrypto);
     await use(layer, (r) =>
       r.insertRecipients([
         { name: "Budi", email: "budi@example.com", phone: null, metadata: {}, importBatch: "b" },
@@ -474,7 +488,7 @@ describe("send job log queries (ticket 16)", () => {
 
   it("filters send jobs by status and creation date", async () => {
     const db = openDatabase(join(tempDir(), "test.db"));
-    const layer = SqliteRepo.Live(db);
+    const layer = SqliteRepo.Live(db, plainCrypto);
     await use(layer, (r) =>
       r.insertRecipients([
         { name: "Budi", email: "budi@example.com", phone: null, metadata: {}, importBatch: "b" },
@@ -552,7 +566,7 @@ describe("send job log queries (ticket 16)", () => {
 
   it("getSendJob joins the template and the recipient email, surviving deleted recipients", async () => {
     const db = openDatabase(join(tempDir(), "test.db"));
-    const layer = SqliteRepo.Live(db);
+    const layer = SqliteRepo.Live(db, plainCrypto);
     await use(layer, (r) =>
       r.insertRecipients([
         { name: "Budi", email: "budi@example.com", phone: null, metadata: {}, importBatch: "b" },
@@ -591,6 +605,237 @@ describe("send job log queries (ticket 16)", () => {
       recipientEmail: null,
       status: "sent",
     });
+    db.close();
+  });
+});
+
+/**
+ * A reversible fake keychain producing real `enc:v1:` ciphertext, so the
+ * at-rest assertions match what the live safeStorage crypto writes. The
+ * marker inside the base64 lets the tests tell which values a given fake
+ * encrypted.
+ */
+function fakeCrypto(marker: string): CredentialCrypto {
+  return {
+    available: () => true,
+    store: (plaintext) => CIPHERTEXT_PREFIX + Buffer.from(`${marker}<${plaintext}>`).toString("base64"),
+    read: (stored) => {
+      if (!stored.startsWith(CIPHERTEXT_PREFIX)) return stored;
+      const text = Buffer.from(stored.slice(CIPHERTEXT_PREFIX.length), "base64").toString();
+      return text.startsWith(`${marker}<`) && text.endsWith(">") ? text.slice(marker.length + 1, -1) : "";
+    },
+  };
+}
+
+describe("credential encryption at rest (ticket 02)", () => {
+  it("stores profile passwords encrypted and decrypts them on read", async () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    const layer = SqliteRepo.Live(db, fakeCrypto("f"));
+
+    const created = await use(layer, (r) =>
+      r.insertSmtpProfile({
+        name: "Gmail",
+        host: "smtp.gmail.com",
+        port: 587,
+        username: "me@gmail.com",
+        password: "hunter2",
+        senderName: null,
+        senderAddress: null,
+        replyTo: null,
+      }),
+    );
+
+    // At rest: the column holds ciphertext, never the plaintext.
+    const row = db
+      .prepare("SELECT password FROM smtp_profiles WHERE id = ?")
+      .get(created.id) as { password: string };
+    expect(row.password).not.toBe("hunter2");
+    expect(isCiphertext(row.password)).toBe(true);
+
+    // On read: the plaintext comes back to the service.
+    const fetched = await use(layer, (r) => r.getSmtpProfile(created.id));
+    expect(Option.isSome(fetched) ? fetched.value.password : null).toBe("hunter2");
+    db.close();
+  });
+
+  it("stores the inline override blob encrypted and decrypts it on read", async () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    const layer = SqliteRepo.Live(db, fakeCrypto("f"));
+
+    const template = await use(layer, (r) =>
+      r.insertTemplate({
+        name: "LOA",
+        filePath: join(tempDir(), "template.docx"),
+        type: "docx",
+        slots: ["name"],
+        outputPattern: "LOA_{name}.pdf",
+      }),
+    );
+    const generateJobId = await use(layer, (r) => r.insertGenerateJob(template.id));
+    const jobId = await use(layer, (r) =>
+      r.insertSendJob({
+        generateJobId,
+        smtpProfileId: null,
+        smtpOverrideJson: JSON.stringify({
+          host: "127.0.0.1",
+          port: 587,
+          username: "me",
+          password: "secret",
+        }),
+        subject: "Undangan",
+        bodyHtml: "<p>body</p>",
+        senderName: "Yayasan X",
+        senderAddress: "iym@example.org",
+        replyTo: null,
+        delayMs: 1000,
+        totalCount: 0,
+      }),
+    );
+
+    // At rest: the whole override blob is ciphertext; the password and
+    // even the host are not readable from the database file.
+    const row = db
+      .prepare("SELECT smtp_override FROM send_jobs WHERE id = ?")
+      .get(jobId) as { smtp_override: string };
+    expect(row.smtp_override).not.toContain("secret");
+    expect(row.smtp_override).not.toContain("127.0.0.1");
+    expect(isCiphertext(row.smtp_override)).toBe(true);
+
+    // On read: the pipeline sees the plaintext JSON exactly as before.
+    const loaded = await use(layer, (r) => r.getSendJob(jobId));
+    const overrideJson = Option.isSome(loaded) ? loaded.value.job.smtpOverrideJson : null;
+    expect(overrideJson).toBe(
+      JSON.stringify({ host: "127.0.0.1", port: 587, username: "me", password: "secret" }),
+    );
+    db.close();
+  });
+
+  it("keeps the stored password when an update patches with null", async () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    const layer = SqliteRepo.Live(db, fakeCrypto("f"));
+
+    const created = await use(layer, (r) =>
+      r.insertSmtpProfile({
+        name: "Gmail",
+        host: "smtp.gmail.com",
+        port: 587,
+        username: "me@gmail.com",
+        password: "hunter2",
+        senderName: null,
+        senderAddress: null,
+        replyTo: null,
+      }),
+    );
+    const updated = await use(layer, (r) =>
+      r.updateSmtpProfile(created.id, {
+        name: "Gmail",
+        host: "smtp.gmail.com",
+        port: 587,
+        username: "me@gmail.com",
+        password: null,
+        senderName: null,
+        senderAddress: null,
+        replyTo: null,
+      }),
+    );
+    expect(Option.isSome(updated) ? updated.value.password : null).toBe("hunter2");
+
+    // The stored ciphertext is untouched by the null-password update.
+    const row = db
+      .prepare("SELECT password FROM smtp_profiles WHERE id = ?")
+      .get(created.id) as { password: string };
+    expect(row.password).not.toBe("hunter2");
+    expect(isCiphertext(row.password)).toBe(true);
+    db.close();
+  });
+
+  it("reads an unreadable ciphertext value as an unset password", async () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    const layer = SqliteRepo.Live(db, fakeCrypto("f"));
+    // A ciphertext blob this fake's key cannot open (e.g. the database
+    // moved machines): the read must not hand the bytes to SMTP as the
+    // password - the service sees an empty one and prompts to re-enter.
+    db.prepare(
+      `INSERT INTO smtp_profiles (id, name, host, port, username, password)
+       VALUES ('p1', 'Gmail', 'smtp.gmail.com', 587, 'me@gmail.com', ?)`,
+    ).run(`${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`);
+
+    const fetched = await use(layer, (r) => r.getSmtpProfile("p1"));
+    expect(Option.isSome(fetched) ? fetched.value.password : null).toBe("");
+    db.close();
+  });
+});
+
+/** The stored values of every profile password and override blob. */
+function storedValues(db: Database.Database): { profiles: string[]; overrides: string[] } {
+  return {
+    profiles: (
+      db.prepare("SELECT password FROM smtp_profiles ORDER BY rowid").all() as {
+        password: string;
+      }[]
+    ).map((row) => row.password),
+    overrides: (
+      db
+        .prepare(
+          "SELECT smtp_override FROM send_jobs WHERE smtp_override IS NOT NULL ORDER BY rowid",
+        )
+        .all() as { smtp_override: string }[]
+    ).map((row) => row.smtp_override),
+  };
+}
+
+describe("migrateCredentialsAtRest (ticket 02)", () => {
+  it("encrypts legacy plaintext values in place, leaving ciphertext untouched", () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    // The `mk` marker tells which values this fake encrypted - the
+    // migration's own rewrites vs the pre-seeded ciphertext rows.
+    const crypto = fakeCrypto("mk");
+    const insert = db.prepare(
+      `INSERT INTO smtp_profiles (id, name, host, port, username, password)
+       VALUES (?, 'Gmail', 'smtp.gmail.com', 587, 'me@gmail.com', ?)`,
+    );
+    insert.run("plain", "hunter2");
+    insert.run("already", `${CIPHERTEXT_PREFIX}${Buffer.from("mk<already-secret>").toString("base64")}`);
+    insert.run("other-key", `${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`);
+    const jobInsert = db.prepare(
+      `INSERT INTO send_jobs (id, status, smtp_override, subject, body_html, sender_name, sender_address, total_count)
+       VALUES (?, 'pending', ?, 'S', '<p>B</p>', 'N', 'n@x.y', 0)`,
+    );
+    jobInsert.run("job-plain", JSON.stringify({ host: "127.0.0.1", password: "secret" }));
+    jobInsert.run("job-enc", `${CIPHERTEXT_PREFIX}${Buffer.from('mk<{"host":"x"}>').toString("base64")}`);
+
+    const log = vi.fn();
+    migrateCredentialsAtRest(db, crypto, log);
+
+    const { profiles, overrides } = storedValues(db);
+    // The legacy plaintext became ciphertext; both ciphertext rows were
+    // left as-is (idempotence across relaunches).
+    expect(profiles[0]).toBe(crypto.store("hunter2"));
+    expect(isCiphertext(profiles[1])).toBe(true);
+    expect(profiles[2]).toBe(`${CIPHERTEXT_PREFIX}${Buffer.from("from-another-keychain").toString("base64")}`);
+    expect(overrides[0]).toBe(crypto.store(JSON.stringify({ host: "127.0.0.1", password: "secret" })));
+    expect(overrides[1]).toBe(`${CIPHERTEXT_PREFIX}${Buffer.from('mk<{"host":"x"}>').toString("base64")}`);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining("migrated 1 profile password(s) and 1 inline override(s)"),
+    );
+
+    // Second run: nothing left to migrate, no rewrite log.
+    log.mockClear();
+    migrateCredentialsAtRest(db, crypto, log);
+    expect(log).not.toHaveBeenCalled();
+    db.close();
+  });
+
+  it("skips with a clear log when the keychain is unavailable", () => {
+    const db = openDatabase(join(tempDir(), "test.db"));
+    db.prepare(
+      `INSERT INTO smtp_profiles (id, name, host, port, username, password)
+       VALUES ('p1', 'Gmail', 'smtp.gmail.com', 587, 'me@gmail.com', 'hunter2')`,
+    ).run();
+    const log = vi.fn();
+    migrateCredentialsAtRest(db, makeCredentialCrypto(null, () => {}), log);
+    expect(storedValues(db).profiles).toEqual(["hunter2"]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("safeStorage unavailable"));
     db.close();
   });
 });

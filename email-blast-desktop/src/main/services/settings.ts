@@ -13,6 +13,7 @@ import {
 } from "../../shared/settings";
 import type { DefaultPaths } from "./default-paths";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
+import type { CredentialCrypto } from "./credential-crypto";
 
 /**
  * The settings the app lives by, typed instead of raw key/values:
@@ -151,6 +152,7 @@ export class Settings extends Context.Service<Settings, SettingsShape>()("Settin
     db: Database.Database,
     defaults: DefaultPaths,
     systemLocale: string = DEFAULT_UI_LOCALE,
+    credCrypto: CredentialCrypto,
   ): Layer.Layer<Settings | SqliteRepo> => {
     seedSettings(db, defaults, systemLocale);
     return Layer.provideMerge(
@@ -161,7 +163,7 @@ export class Settings extends Context.Service<Settings, SettingsShape>()("Settin
           return makeSettings(repo, defaults);
         }),
       ),
-      SqliteRepo.Live(db),
+      SqliteRepo.Live(db, credCrypto),
     );
   };
 }

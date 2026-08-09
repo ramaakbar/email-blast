@@ -7,6 +7,7 @@ import { PDFDocument } from "pdf-lib";
 import PizZip from "pizzip";
 import type Database from "better-sqlite3";
 import { openDatabase, makeSqliteRepo } from "../db/repository";
+import { makeCredentialCrypto } from "./credential-crypto";
 import { LibreOfficeFailed, makeGenerateJobService, type GenerateEnv } from "./generate-jobs";
 import { makeProgressHub } from "./progress-hub";
 import type { HubEvent } from "../../shared/ipc";
@@ -97,7 +98,7 @@ const RECIPIENT_ROWS = [
 
 function makeSvc() {
   const db = openDatabase(join(tempDir(), "generate.db"));
-  const repo = makeSqliteRepo(db);
+  const repo = makeSqliteRepo(db, makeCredentialCrypto(null, () => {}));
   const hub = makeProgressHub();
   const stub = stubEnv();
   const service = makeGenerateJobService(repo, hub, stub.env);
@@ -108,7 +109,7 @@ function makeSvc() {
 
 /** Inserts recipients synchronously and returns their ids in insertion order (rowid order). */
 function seedRecipients(db: Database.Database): string[] {
-  Effect.runSync(makeSqliteRepo(db).insertRecipients(RECIPIENT_ROWS));
+  Effect.runSync(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients(RECIPIENT_ROWS));
   return (db.prepare("SELECT id FROM recipients ORDER BY rowid").all() as { id: string }[]).map(
     (row) => row.id,
   );
@@ -313,7 +314,7 @@ describe("GenerateJobService run - docx (Seam A)", () => {
     // A recipient whose row has no {no} - his letter cannot be filled.
     // Unique email so the row query below cannot pick up the seeded Andi.
     Effect.runSync(
-      makeSqliteRepo(db).insertRecipients([
+      makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients([
         {
           name: "Andi Wijaya",
           email: "andi-nomail@example.com",
@@ -353,7 +354,7 @@ describe("GenerateJobService run - docx (Seam A)", () => {
     const [budi] = seedRecipients(db);
     // A second recipient with identical slot values (same {no} and {name}).
     Effect.runSync(
-      makeSqliteRepo(db).insertRecipients([
+      makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).insertRecipients([
         {
           name: "Budi Santoso",
           email: "clone@example.com",
@@ -511,7 +512,7 @@ describe("GenerateJobService gate, status, and re-run (Seam A)", () => {
 
     // Simulate a partial failure by deleting Andi's row before the run.
     const andiId = ids[2];
-    await Effect.runPromise(makeSqliteRepo(db).deleteRecipients([andiId]));
+    await Effect.runPromise(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).deleteRecipients([andiId]));
     const done = await Effect.runPromise(service.run(job.id));
     expect(done.recipients.find((r) => r.recipientId === andiId)?.status).toBe("failed");
 
@@ -561,7 +562,7 @@ describe("GenerateJobService gate, status, and re-run (Seam A)", () => {
     const job = await Effect.runPromise(service.start(templateId, ids));
 
     const andiId = ids[2];
-    await Effect.runPromise(makeSqliteRepo(db).deleteRecipients([andiId]));
+    await Effect.runPromise(makeSqliteRepo(db, makeCredentialCrypto(null, () => {})).deleteRecipients([andiId]));
     await Effect.runPromise(service.run(job.id));
 
     const status = await Effect.runPromise(service.getStatus(job.id));

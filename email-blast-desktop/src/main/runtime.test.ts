@@ -3,6 +3,7 @@ import { Effect } from "effect";
 import { join } from "path";
 import { rootLayer } from "./runtime";
 import { AppInfo } from "./services/app-info";
+import { makeCredentialCrypto } from "./services/credential-crypto";
 import { defaultPathsForHome } from "./services/default-paths";
 import { openDatabase } from "./db/repository";
 import { tempDir } from "./services/test-helpers";
@@ -18,7 +19,7 @@ describe("Seam A: main-process Effect runtime", () => {
   it("composes the root layer and resolves the AppInfo service", async () => {
     const home = tempDir();
     const db = openDatabase(join(home, "test.db"));
-    const layer = rootLayer(db, defaultPathsForHome(home));
+    const layer = rootLayer(db, defaultPathsForHome(home), undefined, makeCredentialCrypto(null, () => {}));
 
     const info = await Effect.runPromise(
       Effect.gen(function* () {

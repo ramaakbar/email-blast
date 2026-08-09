@@ -11,6 +11,7 @@ import {
   type SmtpProfilePatch,
   type SmtpStoredProfile,
 } from "../db/repository";
+import type { CredentialCrypto } from "./credential-crypto";
 
 /**
  * The SMTP domain (ticket 14): named profiles (host, port, username, app
@@ -311,7 +312,10 @@ export function makeSmtpService(repo: SqliteRepoShape): SmtpServiceShape {
  * alongside, so a program can depend on either.
  */
 export class SmtpService extends Context.Service<SmtpService, SmtpServiceShape>()("SmtpService") {
-  static readonly Live = (db: Database.Database): Layer.Layer<SmtpService | SqliteRepo> =>
+  static readonly Live = (
+    db: Database.Database,
+    credCrypto: CredentialCrypto,
+  ): Layer.Layer<SmtpService | SqliteRepo> =>
     Layer.provideMerge(
       Layer.effect(
         SmtpService,
@@ -320,6 +324,6 @@ export class SmtpService extends Context.Service<SmtpService, SmtpServiceShape>(
           return makeSmtpService(repo);
         }),
       ),
-      SqliteRepo.Live(db),
+      SqliteRepo.Live(db, credCrypto),
     );
 }

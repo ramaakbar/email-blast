@@ -466,7 +466,8 @@
     "quitInProgress": "Send in progress - {sent} of {total} sent. The job will pause and you can resume it later from Logs.",
     "quitAndPause": "Quit & Pause",
     "keepSending": "Keep Sending",
-    "launchBanner": "Send paused: {subject} - {sent} of {total} sent."
+    "launchBanner": "Send paused: {subject} - {sent} of {total} sent.",
+    "credentialUnreadable": "The stored SMTP credentials for this job could not be decrypted. Re-enter them or recreate the job."
   },
   "generateJob": {
     "templateMissing": "The template no longer exists.",

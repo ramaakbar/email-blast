@@ -1,6 +1,7 @@
 import { Layer } from "effect";
 import Database from "better-sqlite3";
 import { AppInfo } from "./services/app-info";
+import type { CredentialCrypto } from "./services/credential-crypto";
 import type { DefaultPaths } from "./services/default-paths";
 import { GenerateEnvService, GenerateJobService } from "./services/generate-jobs";
 import { ImportService } from "./services/import";
@@ -38,12 +39,13 @@ export const rootLayer = (
   db: Database.Database,
   defaults: DefaultPaths,
   systemLocale: string = "en",
+  credCrypto: CredentialCrypto,
 ): Layer.Layer<AppServices> =>
   Layer.mergeAll(
-    Settings.Live(db, defaults, systemLocale),
-    ImportService.Live(db),
-    RecipientsService.Live(db),
-    TemplatesService.Live(db),
-    SendJobService.Live(db, defaults),
+    Settings.Live(db, defaults, systemLocale, credCrypto),
+    ImportService.Live(db, credCrypto),
+    RecipientsService.Live(db, credCrypto),
+    TemplatesService.Live(db, credCrypto),
+    SendJobService.Live(db, defaults, credCrypto),
     AppInfo.Live,
   );

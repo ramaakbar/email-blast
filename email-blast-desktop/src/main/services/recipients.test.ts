@@ -3,6 +3,7 @@ import { Effect, Layer, Option } from "effect";
 import { join } from "path";
 import { openDatabase, SqliteRepo, type RecipientDraft } from "../db/repository";
 import { RecipientsService, type RecipientsServiceShape } from "./recipients";
+import { makeCredentialCrypto } from "./credential-crypto";
 import { tempDir } from "./test-helpers";
 
 /**
@@ -69,7 +70,7 @@ const SAMPLE_DRAFTS: RecipientDraft[] = [
 describe("RecipientsService get (Seam A)", () => {
   it("returns the full recipient for an existing id", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const listed = await use(layer, (s) =>
@@ -88,7 +89,7 @@ describe("RecipientsService get (Seam A)", () => {
 
   it("returns none for an unknown id", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     await expect(use(layer, (s) => s.get("no-such-id"))).resolves.toEqual(Option.none());
@@ -99,7 +100,7 @@ describe("RecipientsService get (Seam A)", () => {
 describe("RecipientsService delete (Seam A)", () => {
   it("deletes the given ids, returns the count, and shrinks list totals", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const page = await use(layer, (s) =>
@@ -123,7 +124,7 @@ describe("RecipientsService delete (Seam A)", () => {
 
   it("deletes nothing for an empty id list", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     await expect(use(layer, (s) => s.delete([]))).resolves.toBe(0);
@@ -138,7 +139,7 @@ describe("RecipientsService delete (Seam A)", () => {
 describe("RecipientsService listBatches (Seam A)", () => {
   it("returns every import batch with its size and stamp, newest first", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const batches = await use(layer, (s) => s.listBatches());
@@ -157,7 +158,7 @@ describe("RecipientsService listBatches (Seam A)", () => {
 
   it("returns an empty list for an empty database", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
 
     await expect(use(layer, (s) => s.listBatches())).resolves.toEqual([]);
     db.close();
@@ -167,7 +168,7 @@ describe("RecipientsService listBatches (Seam A)", () => {
 describe("RecipientsService list (Seam A)", () => {
   it("returns an empty page for an empty database", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const page = await use(layer, (s) =>
       s.list({ search: null, importBatch: null, page: 1, pageSize: 25 }),
@@ -178,7 +179,7 @@ describe("RecipientsService list (Seam A)", () => {
 
   it("paginates a seeded batch with the total across all matches", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const first = await use(layer, (s) =>
@@ -204,7 +205,7 @@ describe("RecipientsService list (Seam A)", () => {
 
   it("searches case-insensitively across name, email, phone, and metadata values", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const byName = await use(layer, (s) =>
@@ -232,7 +233,7 @@ describe("RecipientsService list (Seam A)", () => {
 
   it("matches LIKE wildcards literally in the search text", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, [
       {
         name: "Grant",
@@ -258,7 +259,7 @@ describe("RecipientsService list (Seam A)", () => {
 
   it("filters by import batch and combines with search", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const batchB = await use(layer, (s) =>
@@ -276,7 +277,7 @@ describe("RecipientsService list (Seam A)", () => {
 
   it("round-trips the full recipient shape, metadata bag included", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));
-    const layer = RecipientsService.Live(db);
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
     await seed(layer, SAMPLE_DRAFTS);
 
     const page = await use(layer, (s) =>

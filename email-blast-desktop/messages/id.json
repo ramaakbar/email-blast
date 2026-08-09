@@ -466,7 +466,8 @@
     "quitInProgress": "Pengiriman berlangsung - {sent} dari {total} terkirim. Pekerjaan akan dijeda dan Anda dapat melanjutkannya nanti dari Log.",
     "quitAndPause": "Keluar & Jeda",
     "keepSending": "Lanjutkan Mengirim",
-    "launchBanner": "Pengiriman dijeda: {subject} - {sent} dari {total} terkirim."
+    "launchBanner": "Pengiriman dijeda: {subject} - {sent} dari {total} terkirim.",
+    "credentialUnreadable": "Kredensial SMTP tersimpan untuk pekerjaan ini tidak dapat didekripsi. Masukkan ulang kredensialnya atau buat pekerjaan baru."
   },
   "generateJob": {
     "templateMissing": "Template sudah tidak ada.",

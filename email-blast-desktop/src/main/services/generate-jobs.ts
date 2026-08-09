@@ -10,10 +10,12 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { m } from "@paraglide/messages";
 import type { GenerateJob, Recipient, Template } from "../../shared/ipc";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
+import { DEFAULT_UI_LOCALE } from "../../shared/settings";
 import type { DefaultPaths } from "./default-paths";
 import { LibreOfficeService, LibreOfficeFailed } from "./libreoffice";
 import { ProgressHub, type ProgressHubShape } from "./progress-hub";
 import { Settings } from "./settings";
+import type { CredentialCrypto } from "./credential-crypto";
 import {
   SqliteRepo,
   type GenerateJobRecipientRow,
@@ -673,6 +675,7 @@ export class GenerateJobService extends Context.Service<
   static readonly Live = (
     db: Database.Database,
     defaults: DefaultPaths,
+    credCrypto: CredentialCrypto,
   ): Layer.Layer<
     | GenerateJobService
     | GenerateEnvService
@@ -699,6 +702,6 @@ export class GenerateJobService extends Context.Service<
         ),
         ProgressHub.Live,
       ),
-      Settings.Live(db, defaults),
+      Settings.Live(db, defaults, DEFAULT_UI_LOCALE, credCrypto),
     );
 }

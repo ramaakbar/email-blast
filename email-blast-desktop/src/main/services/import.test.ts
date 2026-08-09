@@ -5,6 +5,7 @@ import { join } from "path";
 import * as XLSX from "@e965/xlsx";
 import { openDatabase } from "../db/repository";
 import { ImportService, UnreadableExcel, type ImportServiceShape } from "./import";
+import { makeCredentialCrypto } from "./credential-crypto";
 import { tempDir } from "./test-helpers";
 import type { ColumnMapping, ExcelRow } from "../../shared/ipc";
 
@@ -48,7 +49,7 @@ describe("ImportService read (Seam A)", () => {
       ["Carol", "carol@example.com", "", "Kampus C", ""],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.columns).toEqual(["Name", "Email", "Phone", "Instansi", "Keterangan"]);
@@ -94,7 +95,7 @@ describe("ImportService read (Seam A)", () => {
       ["Alice", "alice@example.com", "0811", "0811", "Kampus A"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.suggestedMapping).toEqual({
@@ -117,7 +118,7 @@ describe("ImportService read (Seam A)", () => {
       ["Carol", ""],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.skippedDuplicates).toBe(1);
@@ -134,7 +135,7 @@ describe("ImportService read (Seam A)", () => {
       ["x", "y"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.warnings.some((w) => w.includes("name"))).toBe(true);
@@ -153,7 +154,7 @@ describe("ImportService read (Seam A)", () => {
       ["Alice", "alice@example.com"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.recipients.map((r) => r.name)).toEqual(["Alice"]);
@@ -163,7 +164,7 @@ describe("ImportService read (Seam A)", () => {
 
   it("fails with a typed error on a missing file", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const error = await use(layer, (s) => s.read(join(tempDir(), "nope.xlsx"))).catch(
       (e: unknown) => e,
@@ -176,7 +177,7 @@ describe("ImportService read (Seam A)", () => {
     const notExcel = join(tempDir(), "notes.txt");
     writeFileSync(notExcel, "just some text");
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const error = await use(layer, (s) => s.read(notExcel)).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(UnreadableExcel);
@@ -190,7 +191,7 @@ describe("ImportService read (Seam A)", () => {
       ["Alice", "Bob", "alice@example.com"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.columns).toEqual(["Nama", "Email"]);
@@ -207,7 +208,7 @@ describe("ImportService read (Seam A)", () => {
 describe("ImportService commit (Seam A)", () => {
   it("persists recipients as one import batch with their metadata bag", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const rows: ExcelRow[] = [
       { Name: "Alice", Email: "alice@example.com", Instansi: "Kampus A" },
@@ -249,7 +250,7 @@ describe("ImportService commit (Seam A)", () => {
 
   it("applies the user's overridden mapping, not the suggestion", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const rows: ExcelRow[] = [
       { Person: "Alice", Mail: "alice@example.com" },
@@ -270,7 +271,7 @@ describe("ImportService commit (Seam A)", () => {
 
   it("skips duplicates within the batch and against existing recipients", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const rows: ExcelRow[] = [
       { Name: "Alice", Email: "alice@example.com" },
@@ -303,7 +304,7 @@ describe("ImportService commit (Seam A)", () => {
 
   it("commits nothing when no column is mapped to name", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const result = await use(layer, (s) =>
       s.commit([{ A: "x", B: "y@example.com" }], { A: "metadata", B: "email" }),
@@ -322,7 +323,7 @@ describe("ImportService commit (Seam A)", () => {
 
   it("reports rows whose name is empty under the final mapping", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const result = await use(layer, (s) =>
       s.commit(
@@ -344,7 +345,7 @@ describe("ImportService commit (Seam A)", () => {
 
   it("stores skip-mapped columns nowhere, not even metadata", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
 
     const result = await use(layer, (s) =>
       s.commit([{ Name: "Alice", Email: "alice@example.com", Keterangan: "secret" }], {
@@ -364,7 +365,7 @@ describe("ImportService commit (Seam A)", () => {
 
   it("persists a second import as its own batch", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db);
+    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
     const mapping: ColumnMapping = { Name: "name", Email: "email" };
 
     const first = await use(layer, (s) =>

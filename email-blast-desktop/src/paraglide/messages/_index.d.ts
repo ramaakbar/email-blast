@@ -439,6 +439,7 @@ export * from "./sendjob_quitinprogress3.js";
 export * from "./sendjob_quitandpause3.js";
 export * from "./sendjob_keepsending2.js";
 export * from "./sendjob_launchbanner2.js";
+export * from "./sendjob_credentialunreadable2.js";
 export * from "./generatejob_templatemissing2.js";
 export * from "./generatejob_templatefilemissing3.js";
 export * from "./generatejob_libreofficemissing3.js";

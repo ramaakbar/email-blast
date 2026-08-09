@@ -26,6 +26,7 @@ import {
   smtpProfiles as sp,
   templates as t,
 } from "./schema";
+import { isCiphertext, type CredentialCrypto } from "../services/credential-crypto";
 
 /**
  * The migrations folder applied on open (drizzle/): packaged builds get it
@@ -56,6 +57,59 @@ export function openDatabase(dbPath: string): Database.Database {
   db.exec("PRAGMA foreign_keys = OFF");
   migrate(drizzle(db), { migrationsFolder: resolveMigrationsFolder() });
   return db;
+}
+
+/**
+ * Ticket 02's one-time upgrade: every legacy plaintext credential still in
+ * the database is encrypted in place - profile passwords and the inline
+ * override blobs stored with past Send Jobs - so a leaked database file
+ * exposes no password. Runs once at boot, right after the schema
+ * migration, before any service reads a credential.
+ *
+ * Values that already carry the ciphertext marker are untouched, so the
+ * migration is idempotent across relaunches. When the OS keychain is
+ * unavailable the migration is skipped with a clear log - the app
+ * degrades to plaintext storage rather than crashing (graceful
+ * degradation, ticket 02 acceptance).
+ */
+export function migrateCredentialsAtRest(
+  db: Database.Database,
+  credCrypto: CredentialCrypto,
+  log: (message: string) => void = console.log,
+): void {
+  if (!credCrypto.available()) {
+    log("[boot] safeStorage unavailable - SMTP passwords stay plaintext (graceful degradation)");
+    return;
+  }
+  db.transaction(() => {
+    let profiles = 0;
+    for (const row of db
+      .prepare("SELECT id, password FROM smtp_profiles")
+      .all() as { id: string; password: string }[]) {
+      if (isCiphertext(row.password)) continue;
+      db.prepare("UPDATE smtp_profiles SET password = ? WHERE id = ?").run(
+        credCrypto.store(row.password),
+        row.id,
+      );
+      profiles++;
+    }
+    let overrides = 0;
+    for (const row of db
+      .prepare("SELECT id, smtp_override FROM send_jobs WHERE smtp_override IS NOT NULL")
+      .all() as { id: string; smtp_override: string }[]) {
+      if (isCiphertext(row.smtp_override)) continue;
+      db.prepare("UPDATE send_jobs SET smtp_override = ? WHERE id = ?").run(
+        credCrypto.store(row.smtp_override),
+        row.id,
+      );
+      overrides++;
+    }
+    if (profiles + overrides > 0) {
+      log(
+        `[boot] migrated ${profiles} profile password(s) and ${overrides} inline override(s) to keychain-encrypted storage`,
+      );
+    }
+  })();
 }
 
 /**
@@ -311,11 +365,12 @@ export interface GenerateJobRecipientRow {
 }
 
 /**
- * An SMTP profile row as stored, password included. The smtp service maps
- * this to the shared `SmtpProfile` shape (password dropped, `hasPassword`
- * set) at its boundary, so the credential never leaves the main process.
- * The nullable Sender Identity fields (ticket 01) are the profile's
- * defaults; null means "not set", never an empty string.
+ * An SMTP profile row as stored, password included as the DECRYPTED
+ * plaintext - the column itself holds ciphertext (ticket 02). The smtp
+ * service maps this to the shared `SmtpProfile` shape (password dropped,
+ * `hasPassword` set) at its boundary, so the credential never leaves the
+ * main process. The nullable Sender Identity fields (ticket 01) are the
+ * profile's defaults; null means "not set", never an empty string.
  */
 export interface SmtpStoredProfile {
   readonly id: string;
@@ -496,14 +551,14 @@ interface SmtpProfileRow {
   created_at: string;
 }
 
-function toSmtpStoredProfile(row: SmtpProfileRow): SmtpStoredProfile {
+function toSmtpStoredProfile(row: SmtpProfileRow, password: string): SmtpStoredProfile {
   return {
     id: row.id,
     name: row.name,
     host: row.host,
     port: row.port,
     username: row.username,
-    password: row.password,
+    password,
     senderName: row.default_sender_name,
     senderAddress: row.default_sender_address,
     replyTo: row.default_reply_to,
@@ -576,7 +631,10 @@ const smtpProfileColumns = {
   created_at: sp.createdAt,
 } as const;
 
-export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
+export function makeSqliteRepo(
+  db: Database.Database,
+  credCrypto: CredentialCrypto,
+): SqliteRepoShape {
   const dbx = drizzle(db);
   return {
     getSetting: (key) =>
@@ -851,14 +909,16 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
           // most recently added profile comes first.
           .orderBy(desc(sp.createdAt), sql`${sp}.rowid DESC`)
           .all() as unknown as SmtpProfileRow[];
-        return rows.map(toSmtpStoredProfile);
+        return rows.map((row) => toSmtpStoredProfile(row, credCrypto.read(row.password)));
       }),
     getSmtpProfile: (id) =>
       Effect.sync(() => {
         const row = dbx.select(smtpProfileColumns).from(sp).where(eq(sp.id, id)).get() as
           | SmtpProfileRow
           | undefined;
-        return row === undefined ? Option.none() : Option.some(toSmtpStoredProfile(row));
+        return row === undefined
+          ? Option.none()
+          : Option.some(toSmtpStoredProfile(row, credCrypto.read(row.password)));
       }),
     insertSmtpProfile: (draft) =>
       Effect.sync(() => {
@@ -871,7 +931,9 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             host: draft.host,
             port: draft.port,
             username: draft.username,
-            password: draft.password,
+            // Encrypted at rest (ticket 02); store() falls back to
+            // plaintext only when the keychain is unusable.
+            password: credCrypto.store(draft.password),
             defaultSenderName: draft.senderName,
             defaultSenderAddress: draft.senderAddress,
             defaultReplyTo: draft.replyTo,
@@ -883,14 +945,15 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
           .from(sp)
           .where(eq(sp.id, id))
           .get() as SmtpProfileRow;
-        return toSmtpStoredProfile(row);
+        return toSmtpStoredProfile(row, credCrypto.read(row.password));
       }),
     updateSmtpProfile: (id, patch) =>
       Effect.sync(() => {
         // null password keeps the stored one: drizzle skips `undefined`
         // columns in the SET clause, so a null patch never clears it (the
         // service rejects "" before persisting, mirroring the old
-        // COALESCE(?, password)).
+        // COALESCE(?, password)). A given password is encrypted at rest
+        // like the insert path.
         const result = dbx
           .update(sp)
           .set({
@@ -898,7 +961,10 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             host: patch.host,
             port: patch.port,
             username: patch.username,
-            password: patch.password ?? undefined,
+            password:
+              patch.password === null || patch.password === undefined
+                ? undefined
+                : credCrypto.store(patch.password),
             defaultSenderName: patch.senderName,
             defaultSenderAddress: patch.senderAddress,
             defaultReplyTo: patch.replyTo,
@@ -909,7 +975,9 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
         const row = dbx.select(smtpProfileColumns).from(sp).where(eq(sp.id, id)).get() as
           | SmtpProfileRow
           | undefined;
-        return row === undefined ? Option.none() : Option.some(toSmtpStoredProfile(row));
+        return row === undefined
+          ? Option.none()
+          : Option.some(toSmtpStoredProfile(row, credCrypto.read(row.password)));
       }),
     deleteSmtpProfile: (id) =>
       Effect.sync(() => {
@@ -924,7 +992,10 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             id,
             generateJobId: draft.generateJobId,
             smtpProfileId: draft.smtpProfileId,
-            smtpOverride: draft.smtpOverrideJson,
+            // The whole inline override blob is encrypted at rest (ticket
+            // 02) - the host/port/username ride along with the password.
+            smtpOverride:
+              draft.smtpOverrideJson === null ? null : credCrypto.store(draft.smtpOverrideJson),
             subject: draft.subject,
             bodyHtml: draft.bodyHtml,
             senderName: draft.senderName,
@@ -1021,7 +1092,16 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
             status: row.status,
             smtpProfileId: row.smtpProfileId,
             smtpProfileName: row.smtpProfileName,
-            smtpOverrideJson: row.smtpOverrideJson,
+            // Decrypted here so the send pipeline and the job detail read
+            // the plaintext JSON exactly as before; an unreadable
+            // ciphertext blob (keychain unavailable) reads as no override
+            // (read() returns "" only for unreadable ciphertext - the
+            // stored blob is never an empty string) and the job's send
+            // fails at preflight with a clear error.
+            smtpOverrideJson:
+              row.smtpOverrideJson === null
+                ? null
+                : (credCrypto.read(row.smtpOverrideJson) || null),
             templateId: row.templateId,
             templateName: row.templateName,
             subject: row.subject,
@@ -1137,6 +1217,8 @@ export function makeSqliteRepo(db: Database.Database): SqliteRepoShape {
  * Domain services (Settings) and later tickets build on top of this.
  */
 export class SqliteRepo extends Context.Service<SqliteRepo, SqliteRepoShape>()("SqliteRepo") {
-  static readonly Live = (db: Database.Database): Layer.Layer<SqliteRepo> =>
-    Layer.succeed(SqliteRepo, makeSqliteRepo(db));
+  static readonly Live = (
+    db: Database.Database,
+    credCrypto: CredentialCrypto,
+  ): Layer.Layer<SqliteRepo> => Layer.succeed(SqliteRepo, makeSqliteRepo(db, credCrypto));
 }
