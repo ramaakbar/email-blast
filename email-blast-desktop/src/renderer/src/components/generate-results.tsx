@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Download,
   Loader2,
+  Send,
   X,
 } from "lucide-react";
 import { m } from "@paraglide/messages";
@@ -22,15 +23,20 @@ import type { GenerateJob, Recipient } from "../../../shared/ipc";
  * per-recipient failure list with errors, and the spot-check preview with
  * prev/next navigation. The Save PDF button re-downloads the previewed
  * recipient's PDF through a native save dialog - the workspace's
- * "re-download" action, available on any finished job.
+ * "re-download" action, available on any finished job. When a handler is
+ * given, the banner's "Send these" action jumps into the Send workspace
+ * pre-linked to this job (ticket 06).
  */
 export function GenerateResults({
   job,
   recipients,
+  onSendThese,
 }: {
   job: GenerateJob;
   /** Live recipient rows for the spot-check details; deleted recipients fall back to the job's names. */
   recipients: Recipient[];
+  /** The Send workspace pre-link ("Send these"); optional in the wizard. */
+  onSendThese?: (jobId: string) => void;
 }) {
   const [spotIndex, setSpotIndex] = useState(0);
   const [spotPdf, setSpotPdf] = useState<{ fileName: string; dataBase64: string } | null>(null);
@@ -110,6 +116,16 @@ export function GenerateResults({
               failed: failed.length,
             })}
           </>
+        )}
+        {onSendThese !== undefined && generated.length > 0 && (
+          <Button
+            size="sm"
+            className="ml-auto"
+            onClick={() => onSendThese(job.id)}
+            title={m["send.sendThese"]()}
+          >
+            <Send className="size-4" /> {m["send.sendThese"]()}
+          </Button>
         )}
       </div>
 

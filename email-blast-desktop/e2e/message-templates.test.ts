@@ -68,9 +68,7 @@ describe("Seam B: Message Templates (ticket 03)", () => {
     await page.getByRole("button", { name: "Add message template" }).first().click();
     await page.getByLabel("Template name").fill("Undangan Rapat");
     await page.getByLabel("Subject").fill("Undangan Rapat {name}");
-    await page
-      .getByLabel(/HTML body/)
-      .fill("<p>Dear {name}, dari {instansi}, Anda diundang.</p>");
+    await page.getByLabel(/HTML body/).fill("<p>Dear {name}, dari {instansi}, Anda diundang.</p>");
     // The live preview interpolates against the imported recipients: the
     // subject lines render on the page, the bodies in sandboxed iframes
     // (one per previewed recipient, in the imported list's name order -
@@ -96,7 +94,11 @@ describe("Seam B: Message Templates (ticket 03)", () => {
     await page.waitForSelector("text=Undangan Rapat {name}", { timeout: 20_000 });
 
     // ---- Wizard: pick the template on the message step ----
-    await page.click("aside a:has-text('Send')");
+    // The sidebar Send now opens the Send workspace; the old wizard stays
+    // reachable at #/compose until ticket 07 retires it.
+    await page.evaluate(() => {
+      window.location.hash = "#/compose";
+    });
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
     await page.waitForSelector("text=4 recipients selected");
@@ -157,8 +159,9 @@ describe("Seam B: Message Templates (ticket 03)", () => {
     await page.waitForSelector("text=Message template deleted.", { timeout: 20_000 });
     await page.waitForSelector("text=Undangan Revisi v2", { state: "detached", timeout: 20_000 });
 
-    expect(state.session.errors, `renderer console errors:\n${state.session.errors.join("\n")}`).toEqual(
-      [],
-    );
+    expect(
+      state.session.errors,
+      `renderer console errors:\n${state.session.errors.join("\n")}`,
+    ).toEqual([]);
   });
 });

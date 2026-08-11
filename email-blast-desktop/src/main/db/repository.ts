@@ -486,7 +486,8 @@ export interface SmtpProfilePatch {
  * `cursorIndex` starts at 0 and `totalCount` is the recipient count.
  */
 export interface SendJobDraft {
-  readonly generateJobId: string;
+  /** Null for a plain no-attachment send; the job then has no generate history. */
+  readonly generateJobId: string | null;
   readonly smtpProfileId: string | null;
   readonly smtpOverrideJson: string | null;
   readonly subject: string;
@@ -503,7 +504,8 @@ export interface SendJobDraft {
 export interface SendJobWithRecipients {
   readonly job: {
     readonly id: string;
-    readonly generateJobId: string;
+    /** Null for plain sends with no generate job (no attachments). */
+    readonly generateJobId: string | null;
     readonly status: SendJobStatus;
     readonly smtpProfileId: string | null;
     readonly smtpProfileName: string | null;
@@ -1272,10 +1274,7 @@ export function makeSqliteRepo(
         return Option.some({
           job: {
             id: row.id,
-            // The column is nullable in the schema (mirroring the on-disk
-            // format) but every insert provides it, so the repo's contract
-            // keeps it non-null, as before.
-            generateJobId: row.generateJobId as string,
+            generateJobId: row.generateJobId,
             status: row.status,
             smtpProfileId: row.smtpProfileId,
             smtpProfileName: row.smtpProfileName,

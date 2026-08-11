@@ -49,6 +49,7 @@ export function GenerateStep({
   onStateChange,
   onGenerated,
   startDisabled = false,
+  onSendThese,
 }: {
   recipients: Recipient[];
   template: Template | null;
@@ -62,6 +63,8 @@ export function GenerateStep({
    * never needs this.
    */
   startDisabled?: boolean;
+  /** The Send workspace pre-link ("Send these"); optional in the wizard. */
+  onSendThese?: (jobId: string) => void;
 }) {
   const [outputDir, setOutputDir] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
@@ -133,7 +136,10 @@ export function GenerateStep({
     } catch (error) {
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
-      onStateChange({ kind: "error", message: errorMessage(error, m["compose.generationFailed"]()) });
+      onStateChange({
+        kind: "error",
+        message: errorMessage(error, m["compose.generationFailed"]()),
+      });
     } finally {
       setStarting(false);
     }
@@ -229,7 +235,9 @@ export function GenerateStep({
         </div>
       )}
 
-      {state.kind === "done" && <GenerateResults job={state.job} recipients={recipients} />}
+      {state.kind === "done" && (
+        <GenerateResults job={state.job} recipients={recipients} onSendThese={onSendThese} />
+      )}
     </div>
   );
 }

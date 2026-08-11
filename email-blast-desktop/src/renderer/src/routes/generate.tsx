@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Clock, FileText, Loader2, X } from "lucide-react";
 import { m } from "@paraglide/messages";
@@ -23,9 +23,9 @@ export const Route = createFileRoute("/generate")({
  * single page - recipient picker, Document Template with slot-coverage
  * validation, and generate & review with live progress, failures, and
  * PDF re-download. No message, SMTP, or send step exists anywhere here;
- * the old composer route remains the send-side bridge until the Send
- * workspace (06) replaces it. Past Generate Jobs can be reopened below
- * with their PDFs re-downloaded.
+ * the Send workspace (06) is the send side. Past Generate Jobs can be
+ * reopened below with their PDFs re-downloaded, and "Send these" jumps
+ * into the Send workspace pre-linked to the job.
  */
 function GeneratePage() {
   const [selection, setSelection] = useState<Map<string, Recipient>>(new Map());
@@ -80,6 +80,13 @@ function GeneratePage() {
       setGenerate({ kind: "idle" });
     }
   }, [selection, templateId, generate]);
+
+  const navigate = useNavigate();
+
+  /** The "Send these" pre-link (ticket 06): jump to the Send workspace with this job picked. */
+  const sendThese = (jobId: string): void => {
+    void navigate({ to: "/send", state: { sendPrefill: { generateJobId: jobId } } });
+  };
 
   const openJob = async (jobId: string): Promise<void> => {
     setReopenError(null);
@@ -148,6 +155,7 @@ function GeneratePage() {
             // workspace gates the start action directly, so generation
             // never begins with recipients missing required slot data.
             startDisabled={!coverage.ok}
+            onSendThese={sendThese}
           />
         </section>
 
@@ -208,7 +216,11 @@ function GeneratePage() {
                   <X className="size-4" /> {m["common.close"]()}
                 </Button>
               </div>
-              <GenerateResults job={reopened.job} recipients={reopened.recipients} />
+              <GenerateResults
+                job={reopened.job}
+                recipients={reopened.recipients}
+                onSendThese={sendThese}
+              />
             </div>
           )}
         </section>
@@ -218,13 +230,7 @@ function GeneratePage() {
 }
 
 /** One row of the Past Generate Jobs table. */
-function PastJobRow({
-  job,
-  onOpen,
-}: {
-  job: GenerateJobSummary;
-  onOpen: () => void;
-}) {
+function PastJobRow({ job, onOpen }: { job: GenerateJobSummary; onOpen: () => void }) {
   const statusLabel = generateStatusLabel(job.status);
   return (
     <tr className="transition-colors hover:bg-muted/40">

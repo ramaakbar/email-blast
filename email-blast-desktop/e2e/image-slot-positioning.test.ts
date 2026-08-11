@@ -14,11 +14,7 @@ import {
   startSmtpCapture,
   type E2ECleanupState,
 } from "./harness";
-import {
-  FIXTURE_RECIPIENTS,
-  writeFixtureImageTemplate,
-  writeFixtureSpreadsheet,
-} from "./fixtures";
+import { FIXTURE_RECIPIENTS, writeFixtureImageTemplate, writeFixtureSpreadsheet } from "./fixtures";
 import { pageDrawOps } from "../src/main/services/test-helpers";
 
 /**
@@ -95,7 +91,11 @@ describe("Seam B: image slot positioning (ticket 04)", () => {
     await page.waitForSelector('text=Template "Sertifikat" registered.', { timeout: 20_000 });
 
     // ---- Compose: generate certificates for the imported recipients ----
-    await page.click("aside a:has-text('Send')");
+    // The sidebar Send now opens the Send workspace; the old wizard stays
+    // reachable at #/compose until ticket 07 retires it.
+    await page.evaluate(() => {
+      window.location.hash = "#/compose";
+    });
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
     await page.waitForSelector("text=4 recipients selected");
@@ -142,8 +142,9 @@ describe("Seam B: image slot positioning (ticket 04)", () => {
     expect(Number(ink![2])).toBeCloseTo(36 / 255, 3);
     expect(Number(ink![3])).toBeCloseTo(33 / 255, 3);
 
-    expect(state.session.errors, `renderer console errors:\n${state.session.errors.join("\n")}`).toEqual(
-      [],
-    );
+    expect(
+      state.session.errors,
+      `renderer console errors:\n${state.session.errors.join("\n")}`,
+    ).toEqual([]);
   });
 });

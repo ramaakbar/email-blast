@@ -65,10 +65,13 @@ import { m } from "@paraglide/messages";
  * TestClock and free of Schedule edge cases.
  *
  * Job-level failures fail the `run` effect itself and leave the job
- * pending/paused (pre-flight connect/auth, no confirmed attachments);
- * per-recipient failures (missing slot data, no attachment, SMTP retries
- * exhausted) mark that recipient failed with a reason and, when the
- * retries were exhausted, pause the job so the user decides next.
+ * pending/paused (pre-flight connect/auth, expected attachments missing
+ * on disk); per-recipient failures (missing slot data, expected
+ * attachment gone, SMTP retries exhausted) mark that recipient failed
+ * with a reason and, when the retries were exhausted, pause the job so
+ * the user decides next. Recipients without an attachment by design -
+ * a generate-failed recipient of a job send, or any recipient of a
+ * plain send - receive the message without one (ticket 06).
  */
 
 // ---- Errors ----
@@ -135,12 +138,12 @@ export interface SendJobServiceShape {
     payload: SendStartPayload,
   ) => Effect.Effect<SendJob, InvalidSendRequest | SmtpProfileNotFound | SendJobNotFound>;
   /**
-   * Runs the job: pre-flight (SMTP connect + auth, at least one confirmed
-   * generated attachment) fails fast, then one email per recipient at the
-   * live pacing rate. Resolves with the finished job; a recipient that
-   * exhausts its retries pauses the job (persisted + job-paused event).
-   * Re-running a finished job is a no-op; running while any job is
-   * `sending` is rejected (one active send at a time).
+   * Runs the job: pre-flight (SMTP connect + auth; the attachments a job
+   * send expects must exist on disk) fails fast, then one email per
+   * recipient at the live pacing rate. Resolves with the finished job; a
+   * recipient that exhausts its retries pauses the job (persisted +
+   * job-paused event). Re-running a finished job is a no-op; running
+   * while any job is `sending` is rejected (one active send at a time).
    */
   readonly run: (
     jobId: string,
@@ -226,6 +229,8 @@ export function toSendJob(loaded: SendJobWithRecipients): SendJob {
   }
   return {
     id: job.id,
+    // Null for a plain no-attachment send (ticket 06): the job row's
+    // column is nullable and a plain send writes null.
     generateJobId: job.generateJobId,
     status: job.status,
     smtpProfileId: job.smtpProfileId,
@@ -355,9 +360,17 @@ export function makeSendJobService(
 
   /**
    * The pre-flight (spec decision 5): prove the SMTP identity connects
-   * and authenticates, and that at least one recipient has a confirmed
-   * generated attachment on disk. Any failure fails `run` fast and the
-   * job stays pending/paused - nothing is sent.
+   * and authenticates. For a job send, the generate job it references
+   * must still exist - a missing job would silently turn every email
+   * into a no-attachment send, so it fails fast (ticket 06) - and the
+   * attachments the selection expects must actually exist on disk: a
+   * selection whose attachments were generated but then deleted fails
+   * fast instead of burning a batch of per-recipient failures. A plain
+   * send (no generate job) or a selection whose recipients have no
+   * confirmed attachment at all is a message-only send and needs no
+   * attachment check (the workspace flags attachment-less recipients
+   * explicitly, so the old "at least one confirmed attachment" gate no
+   * longer applies).
    */
   const preflight = (
     loaded: SendJobWithRecipients,
@@ -365,20 +378,25 @@ export function makeSendJobService(
   ): Effect.Effect<void, SendError | InvalidSendRequest> =>
     Effect.gen(function* () {
       yield* smtp.test(credentials);
-      const confirmed = yield* generate.confirmedGoodAttachments(loaded.job.generateJobId);
-      if (confirmed.length === 0) {
+      if (loaded.job.generateJobId === null) return;
+      const generateJob = yield* generate.getStatus(loaded.job.generateJobId);
+      if (Option.isNone(generateJob)) {
         return yield* Effect.fail(
           new InvalidSendRequest({
-            message:
-              m["sendJob.noConfirmedAttachments"](),
+            message: m["sendJob.generateJobMissing"](),
           }),
         );
       }
-      if (!confirmed.some((entry) => existsSync(entry.outputPath))) {
+      const confirmed = yield* generate.confirmedGoodAttachments(loaded.job.generateJobId);
+      const selected = new Set(loaded.recipients.map((row) => row.recipientId));
+      const selectedConfirmed = confirmed.filter((entry) => selected.has(entry.recipientId));
+      if (
+        selectedConfirmed.length > 0 &&
+        !selectedConfirmed.some((entry) => existsSync(entry.outputPath))
+      ) {
         return yield* Effect.fail(
           new InvalidSendRequest({
-            message:
-              m["sendJob.attachmentsMissingOnDisk"](),
+            message: m["sendJob.attachmentsMissingOnDisk"](),
           }),
         );
       }
@@ -407,15 +425,19 @@ export function makeSendJobService(
 
   /**
    * One recipient's delivery. Deterministic failures (recipient deleted,
-   * no email, missing slot data, no confirmed attachment) fail
-   * immediately - retrying cannot fix them, and the batch continues.
-   * Only the SMTP send itself retries: 3 retries at 1s/2s/4s backoff;
-   * exhaustion returns `retry-exhausted` so the caller auto-pauses.
+   * no email, missing slot data, expected attachment missing on disk)
+   * fail immediately - retrying cannot fix them, and the batch continues.
+   * `attachmentPath` null means the recipient has no attachment by
+   * design - a generate-failed recipient of a job send, or every
+   * recipient of a plain send - and the message goes out without one
+   * (ticket 06). Only the SMTP send itself retries: 3 retries at
+   * 1s/2s/4s backoff; exhaustion returns `retry-exhausted` so the
+   * caller auto-pauses.
    */
   const deliverOne = (
     loaded: SendJobWithRecipients,
     recipient: Recipient | undefined,
-    attachmentPath: string | undefined,
+    attachmentPath: string | null,
     credentials: SmtpCredentials,
   ): Effect.Effect<
     | { kind: "sent"; messageId: string }
@@ -431,7 +453,7 @@ export function makeSendJobService(
       if (recipient.email === null || recipient.email.trim() === "") {
         return { kind: "failed", errorMessage: m["sendJob.recipientNoEmail"]() };
       }
-      if (attachmentPath === undefined || !existsSync(attachmentPath)) {
+      if (attachmentPath !== null && !existsSync(attachmentPath)) {
         return {
           kind: "failed",
           errorMessage: m["sendJob.noAttachmentForRecipient"](),
@@ -460,7 +482,10 @@ export function makeSendJobService(
             fromName: loaded.job.senderName,
             fromAddress: loaded.job.senderAddress,
             replyTo: loaded.job.replyTo,
-            attachments: [{ filename: basename(attachmentPath), path: attachmentPath }],
+            attachments:
+              attachmentPath === null
+                ? []
+                : [{ filename: basename(attachmentPath), path: attachmentPath }],
           })
           .pipe(Effect.result);
         if (Result.isSuccess(attempt)) return { kind: "sent", messageId: attempt.success };
@@ -477,7 +502,9 @@ export function makeSendJobService(
       }
       return {
         kind: "retry-exhausted",
-        errorMessage: m["sendJob.retriesExhausted"]({ message: sendErrorMessage(lastError as SendError) }),
+        errorMessage: m["sendJob.retriesExhausted"]({
+          message: sendErrorMessage(lastError as SendError),
+        }),
       };
     });
 
@@ -497,8 +524,22 @@ export function makeSendJobService(
       const { job, recipients: rows } = loaded;
       const recipients = yield* repo.getRecipientsByIds(rows.map((row) => row.recipientId));
       const byId = new Map(recipients.map((recipient) => [recipient.id, recipient]));
-      const confirmed = yield* generate.confirmedGoodAttachments(job.generateJobId);
-      const attachmentByRecipient = new Map(confirmed.map((c) => [c.recipientId, c.outputPath]));
+      // Ticket 06: attachment presence comes from the generate job's
+      // per-recipient status - `generated` recipients carry their PDF,
+      // failed (or pending) ones receive the message without an
+      // attachment. A plain send (no generate job) has no attachments.
+      const attachmentByRecipient = new Map<string, string | null>();
+      if (job.generateJobId !== null) {
+        const generated = yield* generate.getStatus(job.generateJobId);
+        if (Option.isSome(generated)) {
+          for (const row of generated.value.recipients) {
+            attachmentByRecipient.set(
+              row.recipientId,
+              row.status === "generated" ? row.outputPath : null,
+            );
+          }
+        }
+      }
       const total = rows.length;
       let current = job.cursorIndex;
 
@@ -528,7 +569,7 @@ export function makeSendJobService(
         const outcome = yield* deliverOne(
           loaded,
           byId.get(row.recipientId),
-          attachmentByRecipient.get(row.recipientId),
+          attachmentByRecipient.get(row.recipientId) ?? null,
           credentials,
         );
         // The critical section: outcome and cursor land in one
@@ -592,7 +633,9 @@ export function makeSendJobService(
           );
         }
         if (payload.subject.trim() === "") {
-          return yield* Effect.fail(new InvalidSendRequest({ message: m["sendJob.writeSubject"]() }));
+          return yield* Effect.fail(
+            new InvalidSendRequest({ message: m["sendJob.writeSubject"]() }),
+          );
         }
         if (payload.bodyHtml.trim() === "") {
           return yield* Effect.fail(new InvalidSendRequest({ message: m["sendJob.writeBody"]() }));
@@ -801,26 +844,22 @@ export function makeSendJobService(
     recoverInterrupted: () => repo.recoverInterruptedSends(),
 
     activeJobSummary: () =>
-      repo
-        .listSendJobs({ statusFilter: null, dateFrom: null, dateTo: null })
-        .pipe(
-          Effect.map((rows) => {
-            const sending = rows.find((row) => row.status === "sending");
-            if (sending !== undefined) return Option.some(toSendJobSummary(sending));
-            const paused = rows.find((row) => row.status === "paused");
-            return paused === undefined ? Option.none() : Option.some(toSendJobSummary(paused));
-          }),
-        ),
+      repo.listSendJobs({ statusFilter: null, dateFrom: null, dateTo: null }).pipe(
+        Effect.map((rows) => {
+          const sending = rows.find((row) => row.status === "sending");
+          if (sending !== undefined) return Option.some(toSendJobSummary(sending));
+          const paused = rows.find((row) => row.status === "paused");
+          return paused === undefined ? Option.none() : Option.some(toSendJobSummary(paused));
+        }),
+      ),
 
     launchBannerJob: () =>
-      repo
-        .listSendJobs({ statusFilter: null, dateFrom: null, dateTo: null })
-        .pipe(
-          Effect.map((rows) => {
-            const paused = rows.filter((row) => row.status === "paused");
-            return paused.length === 1 ? Option.some(toSendJobSummary(paused[0])) : Option.none();
-          }),
-        ),
+      repo.listSendJobs({ statusFilter: null, dateFrom: null, dateTo: null }).pipe(
+        Effect.map((rows) => {
+          const paused = rows.filter((row) => row.status === "paused");
+          return paused.length === 1 ? Option.some(toSendJobSummary(paused[0])) : Option.none();
+        }),
+      ),
   };
 }
 

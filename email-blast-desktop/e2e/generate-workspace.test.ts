@@ -20,12 +20,14 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
  * (no message, SMTP, or send step anywhere), the PDFs land in the output
  * folder named by the template's pattern, the past Generate Job can be
  * reopened, and its PDFs re-downloaded through a native save dialog. The
- * old composer route still works as the send-side bridge. The second
- * scenario covers the failure side: a past job with failed recipients
- * reopens with the per-recipient failure list and their errors.
+ * Send workspace (ticket 06) is the send side. The second scenario
+ * covers the failure side: a past job with failed recipients reopens
+ * with the per-recipient failure list and their errors.
  */
 
-async function seedWorkspace(state: E2ECleanupState): Promise<{ xlsxPath: string; outputDir: string }> {
+async function seedWorkspace(
+  state: E2ECleanupState,
+): Promise<{ xlsxPath: string; outputDir: string }> {
   const fixturesDir = join(state.userDataDir, "fixtures");
   mkdirSync(fixturesDir, { recursive: true });
   const xlsxPath = join(fixturesDir, "recipients.xlsx");
@@ -122,14 +124,27 @@ describe("Seam B: Generate workspace (ticket 05)", () => {
     });
     expect(readdirSync(savedDir)).toEqual(["LOA_andi_wijaya.pdf"]);
 
-    // ---- The old composer route still works for the send side ----
+    // ---- The Send workspace is the send side (ticket 06) ----
     await page.click("aside a:has-text('Send')");
-    await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
-    await page.waitForSelector("footer button", { timeout: 20_000 });
-
-    expect(state.session.errors, `renderer console errors:\n${state.session.errors.join("\n")}`).toEqual(
-      [],
+    await page.waitForSelector("text=Recipient source", { timeout: 20_000 });
+    // The job generated above is offered in the picker (with its counts).
+    await page.waitForSelector("text=From a Generate Job", { timeout: 20_000 });
+    await page.waitForSelector("text=From the imported list", { timeout: 20_000 });
+    // The job generated above is offered in the picker (with its counts);
+    // native select options are hidden to visibility checks, so read the
+    // DOM directly.
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll("select option")].some((option) =>
+          option.textContent?.includes("LOA · 4 generated · 0 failed"),
+        ),
+      { timeout: 20_000 },
     );
+
+    expect(
+      state.session.errors,
+      `renderer console errors:\n${state.session.errors.join("\n")}`,
+    ).toEqual([]);
   });
 
   it("reopens a past job with failed recipients and lists their errors", async () => {
@@ -154,8 +169,18 @@ describe("Seam B: Generate workspace (ticket 05)", () => {
         outputPattern: "LOA_{name}.pdf",
       },
       recipients: [
-        { id: "r-budi", name: "Budi Santoso", email: "budi@example.com", metadata: { instansi: "Yayasan X" } },
-        { id: "r-sari", name: "Sari Putri", email: "sari@example.com", metadata: { instansi: "Yayasan X" } },
+        {
+          id: "r-budi",
+          name: "Budi Santoso",
+          email: "budi@example.com",
+          metadata: { instansi: "Yayasan X" },
+        },
+        {
+          id: "r-sari",
+          name: "Sari Putri",
+          email: "sari@example.com",
+          metadata: { instansi: "Yayasan X" },
+        },
       ],
       generateJob: {
         id: "gj-failed",
@@ -185,10 +210,9 @@ describe("Seam B: Generate workspace (ticket 05)", () => {
     // The failure list names the recipient and her error (the row also
     // carries her email between them).
     await page.waitForSelector("text=Sari Putri", { timeout: 20_000 });
-    await page.waitForSelector(
-      "text=Recipient no longer exists in the database.",
-      { timeout: 20_000 },
-    );
+    await page.waitForSelector("text=Recipient no longer exists in the database.", {
+      timeout: 20_000,
+    });
     // The surviving recipient still spot-checks and re-downloads.
     await page.waitForSelector("text=LOA_budi_santoso.pdf", { timeout: 20_000 });
     const savedDir = join(state.userDataDir, "re-downloaded-fail");
@@ -203,8 +227,9 @@ describe("Seam B: Generate workspace (ticket 05)", () => {
       label: "re-downloaded PDF from the failed job",
     });
 
-    expect(state.session.errors, `renderer console errors:\n${state.session.errors.join("\n")}`).toEqual(
-      [],
-    );
+    expect(
+      state.session.errors,
+      `renderer console errors:\n${state.session.errors.join("\n")}`,
+    ).toEqual([]);
   });
 });

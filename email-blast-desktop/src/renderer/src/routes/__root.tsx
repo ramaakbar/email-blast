@@ -23,15 +23,15 @@ import { SETTING_KEYS } from "../../../shared/settings";
 import type { SendJobSummary } from "../../../shared/ipc";
 
 // The workspace split (ticket 05): Generate and Send replace Compose.
-// Generate opens the offline workspace; Send still points at the old
-// composer route as a temporary bridge until the Send workspace (06)
-// replaces it.
+// Generate opens the offline workspace; Send opens the Send workspace
+// (ticket 06). The old composer route still exists behind the scenes
+// until ticket 07 retires it.
 const NAV_ITEMS = [
   { to: "/import", label: () => m["nav.import"](), icon: Upload },
   { to: "/recipients", label: () => m["nav.recipients"](), icon: Users },
   { to: "/templates", label: () => m["nav.templates"](), icon: FileText },
   { to: "/generate", label: () => m["nav.generate"](), icon: FileOutput },
-  { to: "/compose", label: () => m["nav.send"](), icon: Send },
+  { to: "/send", label: () => m["nav.send"](), icon: Send },
   { to: "/logs", label: () => m["nav.logs"](), icon: History },
   { to: "/settings", label: () => m["nav.settings"](), icon: Settings },
 ] as const;

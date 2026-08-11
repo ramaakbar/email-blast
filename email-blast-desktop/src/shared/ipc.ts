@@ -554,18 +554,18 @@ export type SendRecipientStatus = Schema.Schema.Type<typeof SendRecipientStatus>
 
 /**
  * `send.start` payload: the generate job whose confirmed attachments this
- * send delivers, the recipients (the generated-only handoff from step 5),
- * the SMTP identity (a saved profile id OR an inline override, never
- * both), the message, and the per-job rate limit - the value the
- * wizard's slider set, recorded on the job for history (the gate itself
- * reads the live setting every iteration, so a later change applies to
- * a running job without restart). The inline password crosses the
- * bridge exactly once, at start - afterwards it lives only in the
- * send_jobs row (plaintext at rest, the ticket-14 posture) and never
- * in any response.
+ * send delivers (null for a plain no-attachment send from the imported
+ * list), the recipients, the SMTP identity (a saved profile id OR an
+ * inline override, never both), the message, and the per-job rate limit -
+ * the value the wizard's slider set, recorded on the job for history (the
+ * gate itself reads the live setting every iteration, so a later change
+ * applies to a running job without restart). The inline password crosses
+ * the bridge exactly once, at start - afterwards it lives only in the
+ * send_jobs row (plaintext at rest, the ticket-14 posture) and never in
+ * any response.
  */
 export const SendStartPayload = Schema.Struct({
-  generateJobId: Schema.String,
+  generateJobId: Schema.Union([Schema.Null, Schema.String]),
   recipientIds: Schema.Array(Schema.String),
   smtpProfileId: Schema.Union([Schema.Null, Schema.String]),
   smtpOverride: Schema.Union([
@@ -623,7 +623,8 @@ export type SendJobRecipient = Schema.Schema.Type<typeof SendJobRecipient>;
  */
 export const SendJob = Schema.Struct({
   id: Schema.String,
-  generateJobId: Schema.String,
+  /** Null for plain sends with no generate job (no attachments). */
+  generateJobId: Schema.Union([Schema.Null, Schema.String]),
   status: SendJobStatus,
   smtpProfileId: Schema.Union([Schema.Null, Schema.String]),
   /** The profile name at send time; "(deleted profile)" when it was removed. */

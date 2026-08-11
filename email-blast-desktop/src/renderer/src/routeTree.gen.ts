@@ -15,6 +15,7 @@ import { Route as GenerateRouteImport } from './routes/generate'
 import { Route as ImportRouteImport } from './routes/import'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as RecipientsRouteImport } from './routes/recipients'
+import { Route as SendRouteImport } from './routes/send'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as LogsJobIdRouteImport } from './routes/logs.$jobId'
@@ -49,6 +50,11 @@ const RecipientsRoute = RecipientsRouteImport.update({
   path: '/recipients',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SendRoute = SendRouteImport.update({
+  id: '/send',
+  path: '/send',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -72,6 +78,7 @@ export interface FileRoutesByFullPath {
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
   '/recipients': typeof RecipientsRoute
+  '/send': typeof SendRoute
   '/settings': typeof SettingsRoute
   '/templates': typeof TemplatesRoute
   '/logs/$jobId': typeof LogsJobIdRoute
@@ -83,6 +90,7 @@ export interface FileRoutesByTo {
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
   '/recipients': typeof RecipientsRoute
+  '/send': typeof SendRoute
   '/settings': typeof SettingsRoute
   '/templates': typeof TemplatesRoute
   '/logs/$jobId': typeof LogsJobIdRoute
@@ -95,6 +103,7 @@ export interface FileRoutesById {
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
   '/recipients': typeof RecipientsRoute
+  '/send': typeof SendRoute
   '/settings': typeof SettingsRoute
   '/templates': typeof TemplatesRoute
   '/logs/$jobId': typeof LogsJobIdRoute
@@ -108,6 +117,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/logs'
     | '/recipients'
+    | '/send'
     | '/settings'
     | '/templates'
     | '/logs/$jobId'
@@ -119,6 +129,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/logs'
     | '/recipients'
+    | '/send'
     | '/settings'
     | '/templates'
     | '/logs/$jobId'
@@ -130,6 +141,7 @@ export interface FileRouteTypes {
     | '/import'
     | '/logs'
     | '/recipients'
+    | '/send'
     | '/settings'
     | '/templates'
     | '/logs/$jobId'
@@ -142,6 +154,7 @@ export interface RootRouteChildren {
   ImportRoute: typeof ImportRoute
   LogsRoute: typeof LogsRouteWithChildren
   RecipientsRoute: typeof RecipientsRoute
+  SendRoute: typeof SendRoute
   SettingsRoute: typeof SettingsRoute
   TemplatesRoute: typeof TemplatesRoute
 }
@@ -190,6 +203,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof RecipientsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/send': {
+      id: '/send'
+      path: '/send'
+      fullPath: '/send'
+      preLoaderRoute: typeof SendRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -231,6 +251,7 @@ const rootRouteChildren: RootRouteChildren = {
   ImportRoute: ImportRoute,
   LogsRoute: LogsRouteWithChildren,
   RecipientsRoute: RecipientsRoute,
+  SendRoute: SendRoute,
   SettingsRoute: SettingsRoute,
   TemplatesRoute: TemplatesRoute,
 }

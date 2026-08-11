@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { Clock, Effect, Exit, Fiber, Latch, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
-import { writeFileSync } from "fs";
+import { rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { createServer } from "net";
 import type Database from "better-sqlite3";
@@ -480,7 +480,7 @@ describe("SendJobService run (Seam A)", () => {
     expect(finished.recipients[1].errorMessage).toContain('"{no}"');
   });
 
-  it("fails a recipient with no confirmed attachment and continues the batch", async () => {
+  it("sends without an attachment to a recipient whose generate failed (ticket 06)", async () => {
     const svc = await makeSvc();
     const job = await Effect.runPromise(
       svc.service.start(
@@ -488,7 +488,8 @@ describe("SendJobService run (Seam A)", () => {
       ),
     );
     // Recipient 2's generate row becomes failed, so only recipient 1 has
-    // a confirmed attachment.
+    // a confirmed attachment; recipient 2 still receives the message,
+    // without the PDF.
     Effect.runSync(
       svc.repo.setGenerateRecipientResult(svc.generateJobId, svc.recipientIds[1], {
         status: "failed",
@@ -500,15 +501,66 @@ describe("SendJobService run (Seam A)", () => {
     const done = await withClock(
       Effect.gen(function* () {
         const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
-        yield* pump(() => svc.captured.length === 1 && progressEvents(svc, "failed") === 1);
+        yield* pump(() => svc.captured.length === 2);
         return yield* pumpUntilExit(fiber);
       }),
     );
     expect(done.status).toBe("completed");
-    expect(svc.captured).toHaveLength(1);
+    expect(svc.captured).toHaveLength(2);
     const finished = await jobStatus(svc, job.id);
-    expect(finished.recipients.map((r) => r.status)).toEqual(["sent", "failed"]);
-    expect(finished.recipients[1].errorMessage).toContain("No confirmed generated attachment");
+    expect(finished.recipients.map((r) => r.status)).toEqual(["sent", "sent"]);
+    // The generated recipient's mail carries the PDF; the failed one's
+    // goes out without an attachment.
+    expect(svc.captured[0]).toContain("attach-0.pdf");
+    expect(svc.captured[1]).not.toContain("attach-1.pdf");
+  });
+
+  it("sends a plain no-attachment job end to end (ticket 06)", async () => {
+    const svc = await makeSvc();
+    // A plain send has no generate job at all: the pre-flight skips the
+    // attachment checks and every recipient receives the message.
+    const job = await Effect.runPromise(
+      svc.service.start(startPayload(svc, { generateJobId: null })),
+    );
+    const done = await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 3);
+        return yield* pumpUntilExit(fiber);
+      }),
+    );
+    expect(done.status).toBe("completed");
+    expect(svc.captured).toHaveLength(3);
+    expect(svc.captured.every((raw) => !raw.includes("attach-"))).toBe(true);
+    expect((await jobStatus(svc, job.id)).generateJobId).toBeNull();
+  });
+
+  it("fails fast on the pre-flight when the selected recipients' attachments are missing on disk", async () => {
+    const svc = await makeSvc();
+    const job = await Effect.runPromise(
+      svc.service.start(
+        startPayload(svc, { recipientIds: [svc.recipientIds[0], svc.recipientIds[1]] }),
+      ),
+    );
+    // Both selected recipients' PDFs are gone; the unselected third one
+    // still has its file. The pre-flight must fail fast instead of
+    // burning a batch of per-recipient attachment failures.
+    const [selected0, selected1] = [svc.recipientIds[0], svc.recipientIds[1]];
+    const selectedPaths = svc.db
+      .prepare(
+        "SELECT output_path FROM generate_job_recipients WHERE job_id = ? AND recipient_id IN (?, ?)",
+      )
+      .all(svc.generateJobId, selected0, selected1) as { output_path: string }[];
+    for (const row of selectedPaths) rmSync(row.output_path, { force: true });
+
+    const outcome = await Effect.runPromise(svc.service.run(job.id).pipe(Effect.result));
+    expect(Result.isFailure(outcome)).toBe(true);
+    if (Result.isFailure(outcome)) {
+      expect(outcome.failure).toBeInstanceOf(InvalidSendRequest);
+      expect(outcome.failure.message).toMatch(/no longer exist on disk/i);
+    }
+    expect(svc.captured).toHaveLength(0);
+    expect((await jobStatus(svc, job.id)).status).toBe("pending");
   });
 
   it("rejects running a finished job as a no-op without sending again", async () => {
@@ -671,19 +723,39 @@ describe("SendJobService run (Seam A)", () => {
     expect((await jobStatus(svc, job.id)).status).toBe("pending");
   });
 
-  it("fails fast when no recipient has a confirmed generated attachment", async () => {
+  it("sends a job-linked batch as message-only when nothing has a confirmed attachment (ticket 06)", async () => {
     const svc = await makeSvc();
-    // A second generate job with no confirmed output; the send job
-    // references it, so the pre-flight fails fast.
+    // A generate job with no confirmed output; the send job references
+    // it, so every recipient is attachment-less and the run proceeds as
+    // a message-only send.
     const emptyGenJobId = Effect.runSync(svc.repo.insertGenerateJob("some-template"));
     const job = await Effect.runPromise(
       svc.service.start(startPayload(svc, { generateJobId: emptyGenJobId })),
+    );
+    const done = await withClock(
+      Effect.gen(function* () {
+        const fiber = yield* svc.service.run(job.id).pipe(Effect.forkChild);
+        yield* pump(() => svc.captured.length === 3);
+        return yield* pumpUntilExit(fiber);
+      }),
+    );
+    expect(done.status).toBe("completed");
+    expect(svc.captured).toHaveLength(3);
+    expect(svc.captured.every((raw) => !raw.includes("attach-"))).toBe(true);
+  });
+
+  it("fails fast on the pre-flight when the referenced generate job no longer exists", async () => {
+    const svc = await makeSvc();
+    // The send job references a generate job that is gone: every email
+    // would silently lose its attachment, so the run fails fast instead.
+    const job = await Effect.runPromise(
+      svc.service.start(startPayload(svc, { generateJobId: "gone-generate-job" })),
     );
     const outcome = await Effect.runPromise(svc.service.run(job.id).pipe(Effect.result));
     expect(Result.isFailure(outcome)).toBe(true);
     if (Result.isFailure(outcome)) {
       expect(outcome.failure).toBeInstanceOf(InvalidSendRequest);
-      expect(outcome.failure.message).toMatch(/generated attachment/i);
+      expect(outcome.failure.message).toMatch(/no longer exists/i);
     }
     expect(svc.captured).toHaveLength(0);
     expect((await jobStatus(svc, job.id)).status).toBe("pending");
@@ -1431,11 +1503,9 @@ describe("SendJobService logs (ticket 16)", () => {
   it("retries failures by creating a NEW job scoped to the failed recipients, leaving the original untouched", async () => {
     const svc = await makeSvc();
     const andi = svc.recipientIds[2];
-    // Andi has no confirmed attachment: the send fails her immediately
+    // Andi has no email address: the send fails her immediately
     // (deterministic, no retries) and the batch completes with 1 failed.
-    svc.db
-      .prepare("DELETE FROM generate_job_recipients WHERE job_id = ? AND recipient_id = ?")
-      .run(svc.generateJobId, andi);
+    svc.db.prepare("UPDATE recipients SET email = NULL WHERE id = ?").run(andi);
     const job = await Effect.runPromise(svc.service.start(startPayload(svc)));
     const done = await withClock(
       Effect.gen(function* () {
@@ -1447,7 +1517,7 @@ describe("SendJobService logs (ticket 16)", () => {
     expect(done.status).toBe("completed");
     const failed = done.recipients.filter((r) => r.status === "failed");
     expect(failed.map((r) => r.recipientId)).toEqual([andi]);
-    expect(failed[0].errorMessage).toContain("No confirmed generated attachment");
+    expect(failed[0].errorMessage).toContain("no email address");
 
     // The Logs retry re-sends the failures through the wizard pre-fill:
     // the failed recipients, the same message, the same SMTP identity,
@@ -1457,6 +1527,8 @@ describe("SendJobService logs (ticket 16)", () => {
     const { templateId } = svc.db
       .prepare("SELECT template_id AS templateId FROM generate_jobs WHERE id = ?")
       .get(svc.generateJobId) as { templateId: string };
+    // The user fixed Andi's data in the directory before the retry.
+    svc.db.prepare("UPDATE recipients SET email = 'andi@example.com' WHERE id = ?").run(andi);
     const retryGenerateJobId = Effect.runSync(svc.repo.insertGenerateJob(templateId));
     Effect.runSync(svc.repo.insertGenerateJobRecipients(retryGenerateJobId, [andi]));
     const retryAttachment = join(tempDir(), "retry-attach.pdf");
