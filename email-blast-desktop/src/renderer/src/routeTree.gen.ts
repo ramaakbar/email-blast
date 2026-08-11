@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ComposeRouteImport } from './routes/compose'
+import { Route as GenerateRouteImport } from './routes/generate'
 import { Route as ImportRouteImport } from './routes/import'
 import { Route as LogsRouteImport } from './routes/logs'
 import { Route as RecipientsRouteImport } from './routes/recipients'
@@ -26,6 +27,11 @@ const IndexRoute = IndexRouteImport.update({
 const ComposeRoute = ComposeRouteImport.update({
   id: '/compose',
   path: '/compose',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GenerateRoute = GenerateRouteImport.update({
+  id: '/generate',
+  path: '/generate',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ImportRoute = ImportRouteImport.update({
@@ -62,6 +68,7 @@ const LogsJobIdRoute = LogsJobIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/compose': typeof ComposeRoute
+  '/generate': typeof GenerateRoute
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
   '/recipients': typeof RecipientsRoute
@@ -72,6 +79,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/compose': typeof ComposeRoute
+  '/generate': typeof GenerateRoute
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
   '/recipients': typeof RecipientsRoute
@@ -83,6 +91,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/compose': typeof ComposeRoute
+  '/generate': typeof GenerateRoute
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
   '/recipients': typeof RecipientsRoute
@@ -95,6 +104,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/compose'
+    | '/generate'
     | '/import'
     | '/logs'
     | '/recipients'
@@ -105,6 +115,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/compose'
+    | '/generate'
     | '/import'
     | '/logs'
     | '/recipients'
@@ -115,6 +126,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/compose'
+    | '/generate'
     | '/import'
     | '/logs'
     | '/recipients'
@@ -126,6 +138,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ComposeRoute: typeof ComposeRoute
+  GenerateRoute: typeof GenerateRoute
   ImportRoute: typeof ImportRoute
   LogsRoute: typeof LogsRouteWithChildren
   RecipientsRoute: typeof RecipientsRoute
@@ -147,6 +160,13 @@ declare module '@tanstack/react-router' {
       path: '/compose'
       fullPath: '/compose'
       preLoaderRoute: typeof ComposeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/generate': {
+      id: '/generate'
+      path: '/generate'
+      fullPath: '/generate'
+      preLoaderRoute: typeof GenerateRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/import': {
@@ -207,6 +227,7 @@ const LogsRouteWithChildren = LogsRoute._addFileChildren(LogsRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ComposeRoute: ComposeRoute,
+  GenerateRoute: GenerateRoute,
   ImportRoute: ImportRoute,
   LogsRoute: LogsRouteWithChildren,
   RecipientsRoute: RecipientsRoute,

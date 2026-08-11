@@ -44,6 +44,8 @@ export const IPC = {
   "generate:run": "generate:run",
   "generate:get-status": "generate:get-status",
   "generate:get-recipient-pdf": "generate:get-recipient-pdf",
+  "generate:list": "generate:list",
+  "generate:save-recipient-pdf": "generate:save-recipient-pdf",
   "generate-progress": "generate-progress",
   "smtp:list": "smtp:list",
   "smtp:get": "smtp:get",

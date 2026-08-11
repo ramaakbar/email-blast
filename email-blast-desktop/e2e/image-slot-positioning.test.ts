@@ -95,7 +95,7 @@ describe("Seam B: image slot positioning (ticket 04)", () => {
     await page.waitForSelector('text=Template "Sertifikat" registered.', { timeout: 20_000 });
 
     // ---- Compose: generate certificates for the imported recipients ----
-    await page.click("aside a:has-text('Compose')");
+    await page.click("aside a:has-text('Send')");
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
     await page.waitForSelector("text=4 recipients selected");

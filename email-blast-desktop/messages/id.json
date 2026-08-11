@@ -29,7 +29,9 @@
     "templates": "Template",
     "compose": "Buat Email",
     "logs": "Log",
-    "settings": "Pengaturan"
+    "settings": "Pengaturan",
+    "generate": "Generate",
+    "send": "Kirim"
   },
   "app": {
     "backendUnreachable": "Tidak dapat menjangkau backend aplikasi. Database mungkin belum siap."
@@ -58,7 +60,9 @@
     "cancelled": "Dibatalkan",
     "failed": "Gagal",
     "skipped": "Dilewati",
-    "sent": "Terkirim"
+    "sent": "Terkirim",
+    "generating": "Memproses",
+    "generated": "Selesai"
   },
   "settingsPage": {
     "title": "Pengaturan",
@@ -526,7 +530,8 @@
   },
   "dialogs": {
     "excelFilter": "Excel",
-    "templateFilter": "Template"
+    "templateFilter": "Template",
+    "pdfFilter": "PDF"
   },
   "messages": {
     "documentsTab": "Dokumen",
@@ -562,5 +567,22 @@
     "copyOnPickHint": "Salin-saat-dipilih: pekerjaan yang memilih template ini menyimpan salinannya sendiri - mengeditnya di sini tidak pernah mengubah pekerjaan, dan mengedit pesan pekerjaan tidak pernah mengubah template ini.",
     "saveTemplate": "Simpan template",
     "name": "Nama template"
+  },
+  "generate": {
+    "title": "Generate",
+    "description": "Buat dokumen untuk penerima terpilih - tanpa perlu konfigurasi email.",
+    "pastJobs": "Riwayat Generate",
+    "pastJobsEmpty": "Belum ada riwayat generate.",
+    "jobTemplate": "Template",
+    "jobStatus": "Status",
+    "jobCreated": "Dibuat",
+    "reopenJob": "Buka",
+    "reopenedTitle": "Hasil Pekerjaan",
+    "savePdf": "Simpan PDF",
+    "couldNotSavePdf": "Tidak dapat menyimpan PDF.",
+    "couldNotLoadJobs": "Tidak dapat memuat riwayat generate.",
+    "couldNotReopenJob": "Tidak dapat membuka kembali pekerjaan generate.",
+    "jobNoLongerExists": "Pekerjaan generate ini sudah tidak ada.",
+    "startDisabledCoverage": "Pilih penerima yang datanya lengkap untuk semua slot agar bisa generate."
   }
 }

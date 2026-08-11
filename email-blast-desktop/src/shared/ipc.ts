@@ -428,6 +428,33 @@ export const GeneratePdfResponse = Schema.Struct({
 });
 export type GeneratePdfResponse = Schema.Schema.Type<typeof GeneratePdfResponse>;
 
+/**
+ * One row of the workspace's Past Generate Jobs list: the job header plus
+ * the per-recipient counts (generated/failed), joined with the template
+ * it generated from. `total` is the recipient count, so the list renders
+ * "N generated, M failed" without loading every recipient row.
+ */
+export const GenerateJobSummary = Schema.Struct({
+  id: Schema.String,
+  templateId: Schema.String,
+  /** The template name at generate time; "(deleted template)" when it was removed. */
+  templateName: Schema.String,
+  status: GenerateJobStatus,
+  generatedCount: Schema.Number,
+  failedCount: Schema.Number,
+  total: Schema.Number,
+  createdAt: Schema.String,
+  completedAt: Schema.Union([Schema.Null, Schema.String]),
+});
+export type GenerateJobSummary = Schema.Schema.Type<typeof GenerateJobSummary>;
+
+/**
+ * `generate.saveRecipientPdf` response: the path the PDF was written to,
+ * or null when the user cancelled the save dialog (or the PDF is gone).
+ */
+export const GenerateSavePdfResponse = Schema.Union([Schema.Null, Schema.String]);
+export type GenerateSavePdfResponse = Schema.Schema.Type<typeof GenerateSavePdfResponse>;
+
 // ---- SMTP domain (ticket 14) ----
 
 /**
@@ -800,6 +827,17 @@ export interface Api {
      * preview; null when the recipient has no generated output.
      */
     getRecipientPdf(payload: GeneratePdfPayload): Promise<GeneratePdfResponse | null>;
+    /**
+     * Every generate job, most recent first, with per-recipient counts -
+     * the workspace's Past Generate Jobs list.
+     */
+    list(): Promise<GenerateJobSummary[]>;
+    /**
+     * Saves one recipient's generated PDF through a native save dialog
+     * (prefilled with the file's name). Resolves with the saved path, or
+     * null when the dialog was cancelled or the PDF is gone.
+     */
+    saveRecipientPdf(payload: GeneratePdfPayload): Promise<GenerateSavePdfResponse>;
     /**
      * Subscribes to per-recipient generate progress. Returns an
      * unsubscribe function; events are deltas, the snapshot from

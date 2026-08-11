@@ -29,7 +29,9 @@
     "templates": "Templates",
     "compose": "Compose",
     "logs": "Logs",
-    "settings": "Settings"
+    "settings": "Settings",
+    "generate": "Generate",
+    "send": "Send"
   },
   "app": {
     "backendUnreachable": "Could not reach the app backend. The database may not be ready yet."
@@ -58,7 +60,9 @@
     "cancelled": "Cancelled",
     "failed": "Failed",
     "skipped": "Skipped",
-    "sent": "Sent"
+    "sent": "Sent",
+    "generating": "Generating",
+    "generated": "Generated"
   },
   "settingsPage": {
     "title": "Settings",
@@ -526,7 +530,8 @@
   },
   "dialogs": {
     "excelFilter": "Excel",
-    "templateFilter": "Template"
+    "templateFilter": "Template",
+    "pdfFilter": "PDF"
   },
   "messages": {
     "documentsTab": "Documents",
@@ -562,5 +567,22 @@
     "copyOnPickHint": "Copy-on-pick: a job that picked this template keeps its own copy - editing it here never changes a job, and editing a job's message never changes this template.",
     "saveTemplate": "Save template",
     "name": "Template name"
+  },
+  "generate": {
+    "title": "Generate",
+    "description": "Generate documents for the selected recipients - no email configuration needed.",
+    "pastJobs": "Past Generate Jobs",
+    "pastJobsEmpty": "No generate jobs yet.",
+    "jobTemplate": "Template",
+    "jobStatus": "Status",
+    "jobCreated": "Created",
+    "reopenJob": "Reopen",
+    "reopenedTitle": "Job Results",
+    "savePdf": "Save PDF",
+    "couldNotSavePdf": "Could not save the PDF.",
+    "couldNotLoadJobs": "Could not load past generate jobs.",
+    "couldNotReopenJob": "Could not reopen the generate job.",
+    "jobNoLongerExists": "This generate job no longer exists.",
+    "startDisabledCoverage": "Select recipients with data for every required slot to generate."
   }
 }

@@ -8,7 +8,7 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { m } from "@paraglide/messages";
-import type { GenerateJob, Recipient, Template } from "../../shared/ipc";
+import type { GenerateJob, GenerateJobSummary, Recipient, Template } from "../../shared/ipc";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
 import {
   fitFontSize,
@@ -147,6 +147,11 @@ export interface GenerateJobServiceShape {
   ) => Effect.Effect<GenerateJob, GenerateJobNotFound | TemplateNotFound | LibreOfficeFailed>;
   /** The full job snapshot, or none when the job id does not exist. */
   readonly getStatus: (jobId: string) => Effect.Effect<Option.Option<GenerateJob>>;
+  /**
+   * Every generate job, most recent first, with per-recipient outcome
+   * counts - the workspace's Past Generate Jobs list.
+   */
+  readonly list: () => Effect.Effect<GenerateJobSummary[]>;
   /**
    * The generate-then-send gate: only recipients whose output is confirmed
    * generated on disk. Ticket 15's send step starts from this list, so
@@ -668,6 +673,23 @@ export function makeGenerateJobService(
       }),
 
     getStatus: (jobId) => repo.getGenerateJob(jobId).pipe(Effect.map(Option.map(toGenerateJob))),
+
+    list: () =>
+      repo.listGenerateJobs().pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            id: row.id,
+            templateId: row.templateId,
+            templateName: row.templateName,
+            status: row.status,
+            generatedCount: row.generatedCount,
+            failedCount: row.failedCount,
+            total: row.totalCount,
+            createdAt: row.createdAt,
+            completedAt: row.completedAt,
+          })),
+        ),
+      ),
 
     confirmedGoodAttachments: (jobId) =>
       Effect.gen(function* () {

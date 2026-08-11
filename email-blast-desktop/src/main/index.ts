@@ -1,14 +1,17 @@
 import { app, shell, BrowserWindow, ipcMain, dialog, safeStorage } from "electron";
 import { join } from "path";
 import { homedir } from "os";
+import { writeFileSync } from "fs";
 import assert from "node:assert";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import { Context, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
+import { Context, Effect, Exit, Layer, Option, Result, Schema, Scope } from "effect";
 import {
   API_VERSION,
   GenerateJob,
+  GenerateJobSummary,
   GeneratePdfPayload,
   GeneratePdfResponse,
+  GenerateSavePdfResponse,
   GenerateStartPayload,
   GetAppInfoResponse,
   ImportBatch,
@@ -564,6 +567,45 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
             .getRecipientPdf(jobId, recipientId)
             .pipe(Effect.map(Option.map((pdf) => Schema.encodeSync(GeneratePdfResponse)(pdf)))),
         );
+      }),
+    );
+  });
+
+  registerWindowHandler(IPC["generate:list"], () => {
+    return run(
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        return Schema.encodeSync(Schema.Array(GenerateJobSummary))(yield* service.list());
+      }),
+    );
+  });
+
+  // The workspace's PDF re-download: a native save dialog prefilled with
+  // the generated file's name, then the bytes written to the chosen path.
+  // Null when the dialog is cancelled or the PDF is gone; the renderer
+  // treats both as "no save", not as an error.
+  registerWindowHandler(IPC["generate:save-recipient-pdf"], (payload) => {
+    const { jobId, recipientId } = decodePayload(GeneratePdfPayload, payload);
+    return run(
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        const pdf = yield* service.getRecipientPdf(jobId, recipientId);
+        if (Option.isNone(pdf)) return null;
+        const result = yield* Effect.promise(() =>
+          dialog.showSaveDialog({
+            defaultPath: pdf.value.fileName,
+            filters: [{ name: m["dialogs.pdfFilter"](), extensions: ["pdf"] }],
+          }),
+        );
+        if (result.canceled || result.filePath === undefined || result.filePath === "") {
+          return null;
+        }
+        const write = yield* Effect.try({
+          try: () => writeFileSync(result.filePath as string, Buffer.from(pdf.value.dataBase64, "base64")),
+          catch: (error) => error,
+        }).pipe(Effect.result);
+        if (Result.isFailure(write)) return yield* Effect.fail(write.failure);
+        return Schema.encodeSync(GenerateSavePdfResponse)(result.filePath);
       }),
     );
   });

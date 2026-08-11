@@ -52,6 +52,8 @@ const api: Api = {
     runGenerate: (jobId) => ipcRenderer.invoke(IPC["generate:run"], jobId),
     getGenerateStatus: (jobId) => ipcRenderer.invoke(IPC["generate:get-status"], jobId),
     getRecipientPdf: (payload) => ipcRenderer.invoke(IPC["generate:get-recipient-pdf"], payload),
+    list: () => ipcRenderer.invoke(IPC["generate:list"]),
+    saveRecipientPdf: (payload) => ipcRenderer.invoke(IPC["generate:save-recipient-pdf"], payload),
     onGenerateProgress: (cb) => {
       const listener = (_event: unknown, payload: Parameters<typeof cb>[0]): void => cb(payload);
       ipcRenderer.on(IPC["generate-progress"], listener);

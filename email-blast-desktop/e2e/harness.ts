@@ -272,6 +272,12 @@ export interface GenerateOutputSeed {
   readonly outputPath: string;
 }
 
+/** One failed recipient outcome of a seeded generate job. */
+export interface GenerateFailureSeed {
+  readonly recipientId: string;
+  readonly errorMessage: string;
+}
+
 export interface SendRecipientOutcomeSeed {
   readonly recipientId: string;
   readonly status: "sent" | "failed" | "pending" | "skipped";
@@ -297,6 +303,8 @@ export interface DatabaseSeed {
     readonly id: string;
     readonly templateId: string;
     readonly outputs: readonly GenerateOutputSeed[];
+    /** Failed recipients of the job; each renders in the failure list. */
+    readonly failures?: readonly GenerateFailureSeed[];
   };
   readonly sendJobs?: readonly SendJobSeed[];
   /** The capture port the seeded jobs' SMTP override points at. */
@@ -366,6 +374,12 @@ export function seedDatabase(userDataDir: string, seed: DatabaseSeed): void {
         mkdirSync(dirname(output.outputPath), { recursive: true });
         writeFileSync(output.outputPath, "%PDF-1.4 fake");
         insertOutput.run(generateJob.id, output.recipientId, output.outputPath);
+      }
+      const insertFailure = db.prepare(
+        "INSERT INTO generate_job_recipients (job_id, recipient_id, status, error_message) VALUES (?, ?, 'failed', ?)",
+      );
+      for (const failure of generateJob.failures ?? []) {
+        insertFailure.run(generateJob.id, failure.recipientId, failure.errorMessage);
       }
     }
 

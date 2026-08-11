@@ -230,6 +230,12 @@ export interface SqliteRepoShape {
   readonly getGenerateJob: (
     jobId: string,
   ) => Effect.Effect<Option.Option<GenerateJobWithRecipients>>;
+  /**
+   * Every generate job, most recent first, with the per-recipient
+   * outcome counts and the template it generated from - the workspace's
+   * Past Generate Jobs list.
+   */
+  readonly listGenerateJobs: () => Effect.Effect<GenerateJobSummaryRow[]>;
   /** Records one recipient's outcome inside a generate job. */
   readonly setGenerateRecipientResult: (
     jobId: string,
@@ -409,6 +415,20 @@ export interface GenerateJobRecipientRow {
   readonly status: GenerateRecipientStatus;
   readonly outputPath: string | null;
   readonly errorMessage: string | null;
+}
+
+/** One Past-Generate-Jobs row: the job header plus the outcome counts. */
+export interface GenerateJobSummaryRow {
+  readonly id: string;
+  readonly templateId: string;
+  /** Never null - the list query COALESCEs a deleted template's name. */
+  readonly templateName: string;
+  readonly status: GenerateJobStatus;
+  readonly generatedCount: number;
+  readonly failedCount: number;
+  readonly totalCount: number;
+  readonly createdAt: string;
+  readonly completedAt: string | null;
 }
 
 /**
@@ -1005,6 +1025,30 @@ export function makeSqliteRepo(
           },
           recipients,
         });
+      }),
+    listGenerateJobs: () =>
+      Effect.sync(() => {
+        const rows = dbx
+          .select({
+            id: gj.id,
+            templateId: gj.templateId,
+            // COALESCE so a deleted template never renders as an empty
+            // cell - the row keeps its history either way.
+            templateName: sql<string>`COALESCE(${t.name}, '(deleted template)')`,
+            status: gj.status,
+            generatedCount: sql<number>`(SELECT COUNT(*) FROM ${gjr} WHERE ${gjr.jobId} = ${gj.id} AND ${gjr.status} = 'generated')`,
+            failedCount: sql<number>`(SELECT COUNT(*) FROM ${gjr} WHERE ${gjr.jobId} = ${gj.id} AND ${gjr.status} = 'failed')`,
+            totalCount: sql<number>`(SELECT COUNT(*) FROM ${gjr} WHERE ${gjr.jobId} = ${gj.id})`,
+            createdAt: gj.createdAt,
+            completedAt: gj.completedAt,
+          })
+          .from(gj)
+          .leftJoin(t, eq(t.id, gj.templateId))
+          // rowid DESC breaks ties within the same creation second: the
+          // most recent job comes first.
+          .orderBy(desc(gj.createdAt), sql`${gj}.rowid DESC`)
+          .all() as unknown as GenerateJobSummaryRow[];
+        return rows;
       }),
     setGenerateRecipientResult: (jobId, recipientId, result) =>
       Effect.sync(() => {

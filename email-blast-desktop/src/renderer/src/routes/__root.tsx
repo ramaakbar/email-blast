@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, Outlet, createRootRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { FileText, History, Loader2, Play, Send, Settings, Upload, Users, X } from "lucide-react";
+import {
+  FileOutput,
+  FileText,
+  History,
+  Loader2,
+  Play,
+  Send,
+  Settings,
+  Upload,
+  Users,
+  X,
+} from "lucide-react";
 import { Toaster } from "sonner";
 import { m } from "@paraglide/messages";
 import { Button } from "@/components/ui/button";
@@ -11,11 +22,16 @@ import { WelcomeScreen } from "@/components/welcome-screen";
 import { SETTING_KEYS } from "../../../shared/settings";
 import type { SendJobSummary } from "../../../shared/ipc";
 
+// The workspace split (ticket 05): Generate and Send replace Compose.
+// Generate opens the offline workspace; Send still points at the old
+// composer route as a temporary bridge until the Send workspace (06)
+// replaces it.
 const NAV_ITEMS = [
   { to: "/import", label: () => m["nav.import"](), icon: Upload },
   { to: "/recipients", label: () => m["nav.recipients"](), icon: Users },
   { to: "/templates", label: () => m["nav.templates"](), icon: FileText },
-  { to: "/compose", label: () => m["nav.compose"](), icon: Send },
+  { to: "/generate", label: () => m["nav.generate"](), icon: FileOutput },
+  { to: "/compose", label: () => m["nav.send"](), icon: Send },
   { to: "/logs", label: () => m["nav.logs"](), icon: History },
   { to: "/settings", label: () => m["nav.settings"](), icon: Settings },
 ] as const;

@@ -96,7 +96,7 @@ describe("Seam B: Message Templates (ticket 03)", () => {
     await page.waitForSelector("text=Undangan Rapat {name}", { timeout: 20_000 });
 
     // ---- Wizard: pick the template on the message step ----
-    await page.click("aside a:has-text('Compose')");
+    await page.click("aside a:has-text('Send')");
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
     await page.waitForSelector("text=4 recipients selected");

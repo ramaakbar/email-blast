@@ -99,7 +99,8 @@ try {
   await page.locator("button:has-text('Bahasa Indonesia')").click();
   await page.waitForSelector("h1:text-is('Pengaturan')", { timeout: 15000 });
   await page.waitForSelector("aside a:has-text('Penerima')");
-  await page.waitForSelector("aside a:has-text('Buat Email')");
+  await page.waitForSelector("aside a:has-text('Generate')");
+  await page.waitForSelector("aside a:has-text('Kirim')");
   console.log("id: switcher flipped the shell and Settings to Bahasa Indonesia instantly");
 
   const shot = join(import.meta.dirname, "i18n-e2e-id.png");
