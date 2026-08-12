@@ -6,17 +6,17 @@ import { getLocale, experimentalStaticLocale } from '../runtime.js';
 /** @typedef {{}} Importpage_Columnmappinghint3Inputs */
 
 const en_importpage_columnmappinghint3 = /** @type {(inputs: Importpage_Columnmappinghint3Inputs) => LocalizedString} */ () => {
-	return /** @type {LocalizedString} */ (`Match each Excel column to a recipient field. Name, email, and phone can each be used once; other columns become metadata available to template placeholders.`)
+	return /** @type {LocalizedString} */ (`Match each Excel column to a recipient field. Name, email, and phone can each be used once; a Template column becomes the generate-time routing key; other columns become metadata available to template placeholders.`)
 };
 
 const id_importpage_columnmappinghint3 = /** @type {(inputs: Importpage_Columnmappinghint3Inputs) => LocalizedString} */ () => {
-	return /** @type {LocalizedString} */ (`Cocokkan setiap kolom Excel ke bidang penerima. Nama, email, dan telepon masing-masing bisa dipakai sekali; kolom lain menjadi metadata yang tersedia untuk placeholder template.`)
+	return /** @type {LocalizedString} */ (`Cocokkan setiap kolom Excel ke bidang penerima. Nama, email, dan telepon masing-masing hanya bisa dipakai sekali; kolom Template menjadi kunci perutean saat generate; kolom lain menjadi metadata yang tersedia untuk placeholder template.`)
 };
 
 /**
 * | output |
 * | --- |
-* | "Match each Excel column to a recipient field. Name, email, and phone can each be used once; other columns become metadata available to template placeholders." |
+* | "Match each Excel column to a recipient field. Name, email, and phone can each be used once; a Template column becomes the generate-time routing key; other co..." |
 *
 * @param {Importpage_Columnmappinghint3Inputs} inputs
 * @param {{ locale?: "en" | "id" }} options

@@ -10,6 +10,7 @@ import type {
   ImportPreview,
   ImportRecipient,
 } from "../../shared/ipc";
+import { suggestTemplateColumn } from "../../shared/template-assignment";
 import { m } from "@paraglide/messages";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 import type { CredentialCrypto } from "./credential-crypto";
@@ -103,6 +104,14 @@ export function suggestMapping(columns: readonly string[]): ColumnMapping {
       claimed.add(pick);
     }
   }
+  // The template routing role (ticket 08, ADR 0006): auto-suggested for
+  // headers like template/jenis/kategori, always confirmable in the
+  // column-mapping UI. One column per role, like the address fields.
+  const suggestedTemplate = suggestTemplateColumn(columns);
+  if (suggestedTemplate !== null && !claimed.has(suggestedTemplate)) {
+    mapping[suggestedTemplate] = "template";
+    claimed.add(suggestedTemplate);
+  }
   return mapping;
 }
 
@@ -110,7 +119,10 @@ export function suggestMapping(columns: readonly string[]): ColumnMapping {
  * Applies the mapping to one parsed row. The first column mapped to each
  * role (in mapping insertion order, which is sheet order) wins; rows
  * without a name are dropped. Columns mapped to "skip" are ignored;
- * "metadata" columns land in the bag with their column name as the key.
+ * "metadata" and "template" columns land in the bag with their column
+ * name as the key - the import never interprets the template column (the
+ * value stays under its original header); the Generate Job interprets it
+ * by declared role (ticket 08, ADR 0006).
  */
 export function applyMapping(row: ExcelRow, mapping: ColumnMapping): ImportRecipient | null {
   const columnFor = (role: ColumnRole): string | undefined =>
@@ -127,7 +139,7 @@ export function applyMapping(row: ExcelRow, mapping: ColumnMapping): ImportRecip
 
   const metadata: Record<string, string> = {};
   for (const [column, role] of Object.entries(mapping)) {
-    if (role !== "metadata") continue;
+    if (role !== "metadata" && role !== "template") continue;
     const value = (row[column] ?? "").trim();
     if (value !== "") metadata[column] = value;
   }
@@ -225,7 +237,9 @@ function buildPreview(buffer: Uint8Array): ImportPreview {
   const warnings: string[] = [];
   if (droppedHeaders.length > 0) {
     warnings.push(
-      m["importService.duplicateHeaders"]({ headers: [...new Set(droppedHeaders)].map((h) => `"${h}"`).join(", ") }),
+      m["importService.duplicateHeaders"]({
+        headers: [...new Set(droppedHeaders)].map((h) => `"${h}"`).join(", "),
+      }),
     );
   }
   const roles = new Set(Object.values(mapping));

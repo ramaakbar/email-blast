@@ -205,12 +205,21 @@ export interface SqliteRepoShape {
   ) => Effect.Effect<Option.Option<MessageTemplate>>;
   /** Deletes a Message Template and returns how many rows were removed. */
   readonly deleteMessageTemplate: (id: string) => Effect.Effect<number>;
-  /** Inserts a generate job row and returns its assigned id. */
-  readonly insertGenerateJob: (templateId: string) => Effect.Effect<string>;
-  /** Inserts one pending recipient row per id, in the given order. */
+  /**
+   * Inserts a generate job row and returns its assigned id. The draft
+   * carries the Template Assignment (ticket 08): the routing column, the
+   * serialized value -> template-id mapping, and the job's own output
+   * pattern - all null for a job without a template column.
+   */
+  readonly insertGenerateJob: (draft: GenerateJobDraft) => Effect.Effect<string>;
+  /**
+   * Inserts one pending recipient row per entry, in the given order,
+   * recording each recipient's routing value at job start (the audit
+   * trail of which template-column value routed it).
+   */
   readonly insertGenerateJobRecipients: (
     jobId: string,
-    recipientIds: readonly string[],
+    rows: readonly { recipientId: string; templateValue: string | null }[],
   ) => Effect.Effect<void>;
   /**
    * Moves a generate job through its lifecycle. `completedAt` is written
@@ -354,6 +363,20 @@ export interface SqliteRepoShape {
 }
 
 /**
+ * A generate job ready to be persisted (ticket 08): the default template
+ * plus the Template Assignment. All routing fields are null for a job
+ * without a template column - the job then behaves exactly as before.
+ */
+export interface GenerateJobDraft {
+  readonly templateId: string;
+  readonly templateColumn: string | null;
+  /** The serialized value -> template-id mapping, or null when no routing. */
+  readonly templateAssignmentJson: string | null;
+  /** The job's own output naming pattern; null falls back to the template's. */
+  readonly outputPattern: string | null;
+}
+
+/**
  * A template ready to be persisted: the fields from the registration form,
  * without the id (assigned here) or the created stamp.
  */
@@ -395,13 +418,23 @@ export interface MessageTemplatePatch {
   readonly bodyHtml: string;
 }
 
-/** A generate job row as stored, with the template name for display. */
+/**
+ * A generate job row as stored, with the template name for display.
+ * The Template Assignment (ticket 08) is parsed here: `templateAssignment`
+ * is the value -> template-id mapping (null when the job has no routing),
+ * `templateColumn` the routing header, and `outputPattern` the job's own
+ * naming pattern (null falls back to the template's pattern - legacy
+ * jobs and non-routed jobs).
+ */
 export interface GenerateJobWithRecipients {
   readonly job: {
     readonly id: string;
     readonly templateId: string;
     readonly templateName: string;
     readonly status: GenerateJobStatus;
+    readonly templateColumn: string | null;
+    readonly templateAssignment: Record<string, string> | null;
+    readonly outputPattern: string | null;
     readonly createdAt: string;
     readonly completedAt: string | null;
   };
@@ -965,18 +998,27 @@ export function makeSqliteRepo(
       Effect.sync(() => {
         return dbx.delete(mt).where(eq(mt.id, id)).run().changes;
       }),
-    insertGenerateJob: (templateId) =>
+    insertGenerateJob: (draft) =>
       Effect.sync(() => {
         const id = crypto.randomUUID();
-        dbx.insert(gj).values({ id, templateId }).run();
+        dbx
+          .insert(gj)
+          .values({
+            id,
+            templateId: draft.templateId,
+            templateColumn: draft.templateColumn,
+            templateAssignment: draft.templateAssignmentJson,
+            outputPattern: draft.outputPattern,
+          })
+          .run();
         return id;
       }),
-    insertGenerateJobRecipients: (jobId, recipientIds) =>
+    insertGenerateJobRecipients: (jobId, rows) =>
       Effect.sync(() => {
-        if (recipientIds.length === 0) return;
+        if (rows.length === 0) return;
         dbx.transaction((tx) => {
-          for (const recipientId of recipientIds) {
-            tx.insert(gjr).values({ jobId, recipientId }).run();
+          for (const { recipientId, templateValue } of rows) {
+            tx.insert(gjr).values({ jobId, recipientId, templateValue }).run();
           }
         });
       }),
@@ -992,6 +1034,9 @@ export function makeSqliteRepo(
             templateId: gj.templateId,
             templateName: sql<string>`COALESCE(${t.name}, '(deleted template)')`,
             status: gj.status,
+            templateColumn: gj.templateColumn,
+            templateAssignment: gj.templateAssignment,
+            outputPattern: gj.outputPattern,
             createdAt: gj.createdAt,
             completedAt: gj.completedAt,
           })
@@ -1022,6 +1067,12 @@ export function makeSqliteRepo(
             templateId: row.templateId,
             templateName: row.templateName,
             status: row.status,
+            templateColumn: row.templateColumn,
+            templateAssignment:
+              row.templateAssignment === null
+                ? null
+                : (JSON.parse(row.templateAssignment) as Record<string, string>),
+            outputPattern: row.outputPattern,
             createdAt: row.createdAt,
             completedAt: row.completedAt,
           },

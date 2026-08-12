@@ -49,7 +49,10 @@ describe("ImportService read (Seam A)", () => {
       ["Carol", "carol@example.com", "", "Kampus C", ""],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.columns).toEqual(["Name", "Email", "Phone", "Instansi", "Keterangan"]);
@@ -95,7 +98,10 @@ describe("ImportService read (Seam A)", () => {
       ["Alice", "alice@example.com", "0811", "0811", "Kampus A"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.suggestedMapping).toEqual({
@@ -103,6 +109,63 @@ describe("ImportService read (Seam A)", () => {
       "Alamat Email": "email",
       "No HP": "phone",
       WA: "metadata",
+      Instansi: "metadata",
+    });
+    db.close();
+  });
+
+  it("auto-suggests a template routing column and keeps its value in the metadata bag", async () => {
+    const file = join(tempDir(), "routed.xlsx");
+    writeWorkbook(file, [
+      ["Name", "Email", "Template", "Instansi"],
+      ["Alice", "alice@example.com", "LOA", "Kampus A"],
+      ["Bob", "bob@example.com", "SK", "Kampus B"],
+      ["Carol", "carol@example.com", "", "Kampus C"],
+    ]);
+    const db = openDatabase(join(tempDir(), "import.db"));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
+
+    const preview = await use(layer, (s) => s.read(file));
+    expect(preview.suggestedMapping).toEqual({
+      Name: "name",
+      Email: "email",
+      Template: "template",
+      Instansi: "metadata",
+    });
+    // The routing value rides in the metadata bag under its original
+    // header - the import never interprets it (ADR 0006).
+    expect(preview.recipients[0]).toMatchObject({
+      name: "Alice",
+      metadata: { Template: "LOA", Instansi: "Kampus A" },
+    });
+    // A blank routing value simply has no bag entry.
+    expect(preview.recipients[2]).toMatchObject({
+      name: "Carol",
+      metadata: { Instansi: "Kampus C" },
+    });
+    db.close();
+  });
+
+  it("suggests the jenis/kategori synonyms for the template role", async () => {
+    const file = join(tempDir(), "jenis.xlsx");
+    writeWorkbook(file, [
+      ["Nama", "Email", "Jenis", "Instansi"],
+      ["Alice", "alice@example.com", "LOA", "Kampus A"],
+    ]);
+    const db = openDatabase(join(tempDir(), "import.db"));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
+
+    const preview = await use(layer, (s) => s.read(file));
+    expect(preview.suggestedMapping).toEqual({
+      Nama: "name",
+      Email: "email",
+      Jenis: "template",
       Instansi: "metadata",
     });
     db.close();
@@ -118,7 +181,10 @@ describe("ImportService read (Seam A)", () => {
       ["Carol", ""],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.skippedDuplicates).toBe(1);
@@ -135,7 +201,10 @@ describe("ImportService read (Seam A)", () => {
       ["x", "y"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.warnings.some((w) => w.includes("name"))).toBe(true);
@@ -154,7 +223,10 @@ describe("ImportService read (Seam A)", () => {
       ["Alice", "alice@example.com"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.recipients.map((r) => r.name)).toEqual(["Alice"]);
@@ -164,7 +236,10 @@ describe("ImportService read (Seam A)", () => {
 
   it("fails with a typed error on a missing file", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const error = await use(layer, (s) => s.read(join(tempDir(), "nope.xlsx"))).catch(
       (e: unknown) => e,
@@ -177,7 +252,10 @@ describe("ImportService read (Seam A)", () => {
     const notExcel = join(tempDir(), "notes.txt");
     writeFileSync(notExcel, "just some text");
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const error = await use(layer, (s) => s.read(notExcel)).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(UnreadableExcel);
@@ -191,7 +269,10 @@ describe("ImportService read (Seam A)", () => {
       ["Alice", "Bob", "alice@example.com"],
     ]);
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const preview = await use(layer, (s) => s.read(file));
     expect(preview.columns).toEqual(["Nama", "Email"]);
@@ -208,7 +289,10 @@ describe("ImportService read (Seam A)", () => {
 describe("ImportService commit (Seam A)", () => {
   it("persists recipients as one import batch with their metadata bag", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const rows: ExcelRow[] = [
       { Name: "Alice", Email: "alice@example.com", Instansi: "Kampus A" },
@@ -250,7 +334,10 @@ describe("ImportService commit (Seam A)", () => {
 
   it("applies the user's overridden mapping, not the suggestion", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const rows: ExcelRow[] = [
       { Person: "Alice", Mail: "alice@example.com" },
@@ -271,7 +358,10 @@ describe("ImportService commit (Seam A)", () => {
 
   it("skips duplicates within the batch and against existing recipients", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const rows: ExcelRow[] = [
       { Name: "Alice", Email: "alice@example.com" },
@@ -304,7 +394,10 @@ describe("ImportService commit (Seam A)", () => {
 
   it("commits nothing when no column is mapped to name", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const result = await use(layer, (s) =>
       s.commit([{ A: "x", B: "y@example.com" }], { A: "metadata", B: "email" }),
@@ -323,7 +416,10 @@ describe("ImportService commit (Seam A)", () => {
 
   it("reports rows whose name is empty under the final mapping", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const result = await use(layer, (s) =>
       s.commit(
@@ -345,7 +441,10 @@ describe("ImportService commit (Seam A)", () => {
 
   it("stores skip-mapped columns nowhere, not even metadata", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
 
     const result = await use(layer, (s) =>
       s.commit([{ Name: "Alice", Email: "alice@example.com", Keterangan: "secret" }], {
@@ -365,7 +464,10 @@ describe("ImportService commit (Seam A)", () => {
 
   it("persists a second import as its own batch", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
-    const layer = ImportService.Live(db, makeCredentialCrypto(null, () => {}));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
     const mapping: ColumnMapping = { Name: "name", Email: "email" };
 
     const first = await use(layer, (s) =>

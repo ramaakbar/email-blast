@@ -218,8 +218,20 @@ async function makeSvc(
       slotLayout: {},
     }),
   ).id;
-  const generateJobId = Effect.runSync(repo.insertGenerateJob(templateId));
-  Effect.runSync(repo.insertGenerateJobRecipients(generateJobId, recipientIds));
+  const generateJobId = Effect.runSync(
+    repo.insertGenerateJob({
+      templateId,
+      templateColumn: null,
+      templateAssignmentJson: null,
+      outputPattern: null,
+    }),
+  );
+  Effect.runSync(
+    repo.insertGenerateJobRecipients(
+      generateJobId,
+      recipientIds.map((recipientId) => ({ recipientId, templateValue: null })),
+    ),
+  );
   const attachDir = tempDir();
   recipientIds.forEach((id, i) => {
     const outputPath = join(attachDir, `attach-${i}.pdf`);
@@ -728,7 +740,14 @@ describe("SendJobService run (Seam A)", () => {
     // A generate job with no confirmed output; the send job references
     // it, so every recipient is attachment-less and the run proceeds as
     // a message-only send.
-    const emptyGenJobId = Effect.runSync(svc.repo.insertGenerateJob("some-template"));
+    const emptyGenJobId = Effect.runSync(
+      svc.repo.insertGenerateJob({
+        templateId: "some-template",
+        templateColumn: null,
+        templateAssignmentJson: null,
+        outputPattern: null,
+      }),
+    );
     const job = await Effect.runPromise(
       svc.service.start(startPayload(svc, { generateJobId: emptyGenJobId })),
     );
@@ -1529,8 +1548,19 @@ describe("SendJobService logs (ticket 16)", () => {
       .get(svc.generateJobId) as { templateId: string };
     // The user fixed Andi's data in the directory before the retry.
     svc.db.prepare("UPDATE recipients SET email = 'andi@example.com' WHERE id = ?").run(andi);
-    const retryGenerateJobId = Effect.runSync(svc.repo.insertGenerateJob(templateId));
-    Effect.runSync(svc.repo.insertGenerateJobRecipients(retryGenerateJobId, [andi]));
+    const retryGenerateJobId = Effect.runSync(
+      svc.repo.insertGenerateJob({
+        templateId,
+        templateColumn: null,
+        templateAssignmentJson: null,
+        outputPattern: null,
+      }),
+    );
+    Effect.runSync(
+      svc.repo.insertGenerateJobRecipients(retryGenerateJobId, [
+        { recipientId: andi, templateValue: null },
+      ]),
+    );
     const retryAttachment = join(tempDir(), "retry-attach.pdf");
     writeFileSync(retryAttachment, "%PDF-1.4 fake");
     Effect.runSync(

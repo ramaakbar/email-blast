@@ -8,6 +8,9 @@ import { errorMessage } from "@/lib/error-message";
 import { SETTING_KEYS } from "../../../shared/settings";
 import type { GenerateJob, Recipient, Template } from "../../../shared/ipc";
 
+/** The no-routing default: a stable reference for the `routing` prop default. */
+const NO_ROUTING = { templateColumn: null, assignment: {}, outputPattern: "" } as const;
+
 /**
  * The live state of a generate job in the Generate workspace: idle →
  * running (progress events streaming in) → done, or error. `bound`
@@ -23,14 +26,17 @@ export type GenerateState =
       total: number;
       current: number;
       results: Record<string, { status: "generated" | "failed"; error: string | null }>;
-      /** The selection and template the job was started from, for staleness checks. */
-      bound: { recipientIds: string; templateId: string };
+      /**
+       * The selection, default template, and Template Assignment the job
+       * was started from, for staleness checks (ticket 08).
+       */
+      bound: { recipientIds: string; templateId: string; routing: string };
     }
   | {
       kind: "done";
       jobId: string;
       job: GenerateJob;
-      bound: { recipientIds: string; templateId: string };
+      bound: { recipientIds: string; templateId: string; routing: string };
     }
   | { kind: "error"; message: string };
 
@@ -46,6 +52,8 @@ export function GenerateStep({
   state,
   onStateChange,
   startDisabled = false,
+  startDisabledHint,
+  routing = NO_ROUTING,
   onSendThese,
 }: {
   recipients: Recipient[];
@@ -58,6 +66,20 @@ export function GenerateStep({
    * data.
    */
   startDisabled?: boolean;
+  /** The hint under the disabled start button; defaults to the coverage hint. */
+  startDisabledHint?: string;
+  /**
+   * The Template Assignment (ticket 08): the routing column (null = no
+   * routing), the value -> template mapping, and the job's output
+   * pattern. Sent with the start payload and folded into the bound
+   * snapshot, so a later change invalidates the done state exactly like
+   * a selection change.
+   */
+  routing?: {
+    templateColumn: string | null;
+    assignment: Record<string, string>;
+    outputPattern: string;
+  };
   /** The Send workspace pre-link ("Send these"). */
   onSendThese?: (jobId: string) => void;
 }) {
@@ -84,18 +106,23 @@ export function GenerateStep({
     setStarting(true);
     setGenerateError(null);
     try {
-      // Snapshot what the job was started from, so a later selection or
-      // template change can invalidate it (stale-state guard).
+      // Snapshot what the job was started from, so a later selection,
+      // template, or Template Assignment change can invalidate it
+      // (stale-state guard).
       const bound = {
         recipientIds: recipients
           .map((r) => r.id)
           .toSorted()
           .join(","),
         templateId: template.id,
+        routing: JSON.stringify(routing),
       };
       const started = await window.api.generate.startGenerate({
         templateId: template.id,
         recipientIds: recipients.map((r) => r.id),
+        templateColumn: routing.templateColumn,
+        assignment: routing.assignment,
+        outputPattern: routing.outputPattern,
       });
       const running: GenerateState = {
         kind: "running",
@@ -190,7 +217,9 @@ export function GenerateStep({
             {m["compose.generatePdfs"]()}
           </Button>
           {startDisabled && (
-            <p className="mt-2 text-xs text-amber-700">{m["generate.startDisabledCoverage"]()}</p>
+            <p className="mt-2 text-xs text-amber-700">
+              {startDisabledHint ?? m["generate.startDisabledCoverage"]()}
+            </p>
           )}
         </div>
       )}

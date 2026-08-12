@@ -484,7 +484,6 @@ function seedPositionedTemplate(
 }
 
 describe("GenerateJobService run - image slot positioning (ticket 04, Seam A)", () => {
-
   it("renders each configured slot at its position, size, color, and alignment", async () => {
     const { db, repo, service } = makeSvc();
     const [budi] = seedRecipients(db);
@@ -701,5 +700,283 @@ describe("GenerateJobService gate, status, and re-run (Seam A)", () => {
     await expect(Effect.runPromise(service.getRecipientPdf(job.id, "ghost"))).resolves.toEqual(
       Option.none(),
     );
+  });
+});
+
+// ---- Ticket 08: Template Assignment routing (ADR 0006, Seam A) ----
+
+/** Registers a docx template with arbitrary slots, body, and pattern. */
+function seedRoutedTemplate(
+  repo: ReturnType<typeof makeSqliteRepo>,
+  fields: { name: string; slots: readonly string[]; pattern: string },
+): string {
+  const body = `<w:p><w:r><w:t>${fields.slots.map((s) => `{${s}}`).join(" ")}</w:t></w:r></w:p>`;
+  const created = Effect.runSync(
+    repo.insertTemplate({
+      name: fields.name,
+      filePath: writeFixture(body),
+      type: "docx",
+      slots: fields.slots,
+      outputPattern: fields.pattern,
+      slotLayout: {},
+    }),
+  );
+  return created.id;
+}
+
+/** Inserts a recipient with the given metadata and returns its id. */
+function seedRoutedRecipient(
+  db: Database.Database,
+  fields: { name: string; email: string; metadata: Record<string, string> },
+): string {
+  Effect.runSync(
+    makeSqliteRepo(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    ).insertRecipients([
+      {
+        name: fields.name,
+        email: fields.email,
+        phone: null,
+        metadata: fields.metadata,
+        importBatch: "b1",
+      },
+    ]),
+  );
+  return (
+    db.prepare("SELECT id FROM recipients WHERE email = ?").get(fields.email) as { id: string }
+  ).id;
+}
+
+describe("GenerateJobService Template Assignment (ticket 08, Seam A)", () => {
+  it("starts a routed job, records the assignment, and generates every recipient with its own template under one shared pattern", async () => {
+    const { db, repo, service, calls, outputDir } = makeSvc();
+    const budi = seedRoutedRecipient(db, {
+      name: "Budi Santoso",
+      email: "budi@example.com",
+      metadata: { template: "LOA", instansi: "Yayasan X" },
+    });
+    const sari = seedRoutedRecipient(db, {
+      name: "Sari Putri",
+      email: "sari@example.com",
+      metadata: { template: "SK" },
+    });
+    const andi = seedRoutedRecipient(db, {
+      name: "Andi Wijaya",
+      email: "andi@example.com",
+      metadata: { template: "", instansi: "Sekolah Y" },
+    });
+    const dewi = seedRoutedRecipient(db, {
+      name: "Dewi Lestari",
+      email: "dewi@example.com",
+      metadata: { instansi: "SMA Z" },
+    });
+    const loaId = seedRoutedTemplate(repo, {
+      name: "LOA",
+      slots: ["name", "instansi"],
+      pattern: "LOA_{name}.pdf",
+    });
+    const skId = seedRoutedTemplate(repo, {
+      name: "SK",
+      slots: ["name"],
+      pattern: "SK_{name}.pdf",
+    });
+
+    const job = await Effect.runPromise(
+      service.start(loaId, [budi, sari, andi, dewi], {
+        templateColumn: "template",
+        assignment: { LOA: loaId, SK: skId },
+        outputPattern: "BATCH_{name}.pdf",
+      }),
+    );
+
+    // The job echoes its assignment.
+    expect(job.templateColumn).toBe("template");
+    expect(job.assignment).toEqual({ LOA: loaId, SK: skId });
+    expect(job.outputPattern).toBe("BATCH_{name}.pdf");
+
+    const done = await Effect.runPromise(service.run(job.id));
+
+    expect(done.status).toBe("generated");
+    // Blank values (Andi, Dewi) route to the default template (LOA).
+    expect(done.recipients.map((r) => [r.recipientName, r.status, r.outputPath])).toEqual([
+      ["Budi Santoso", "generated", join(outputDir, "BATCH_budi_santoso.pdf")],
+      ["Sari Putri", "generated", join(outputDir, "BATCH_sari_putri.pdf")],
+      ["Andi Wijaya", "generated", join(outputDir, "BATCH_andi_wijaya.pdf")],
+      ["Dewi Lestari", "generated", join(outputDir, "BATCH_dewi_lestari.pdf")],
+    ]);
+    for (const recipient of done.recipients) {
+      expect(existsSync(recipient.outputPath as string)).toBe(true);
+    }
+
+    // ONE LibreOffice invocation per routed template group: LOA first
+    // (Budi, Andi, Dewi), then SK (Sari).
+    expect(calls).toHaveLength(2);
+    expect(calls[0].files).toHaveLength(3);
+    expect(calls[1].files).toHaveLength(1);
+    const zip = new PizZip(calls[0].contents[0]);
+    expect(zip.file("word/document.xml")?.asText() ?? "").toContain("Budi Santoso Yayasan X");
+    const skZip = new PizZip(calls[1].contents[0]);
+    expect(skZip.file("word/document.xml")?.asText() ?? "").toContain("Sari Putri");
+
+    // The audit trail: each job recipient records its routing value.
+    const audit = db
+      .prepare(
+        "SELECT r.name, gjr.template_value FROM generate_job_recipients gjr JOIN recipients r ON r.id = gjr.recipient_id WHERE gjr.job_id = ? ORDER BY gjr.rowid",
+      )
+      .all(job.id) as { name: string; template_value: string | null }[];
+    expect(audit).toEqual([
+      { name: "Budi Santoso", template_value: "LOA" },
+      { name: "Sari Putri", template_value: "SK" },
+      { name: "Andi Wijaya", template_value: null },
+      { name: "Dewi Lestari", template_value: null },
+    ]);
+  });
+
+  it("fails fast with the affected recipients listed when a value is unassigned", async () => {
+    const { db, repo, service } = makeSvc();
+    const budi = seedRoutedRecipient(db, {
+      name: "Budi Santoso",
+      email: "budi@example.com",
+      metadata: { template: "LOA" },
+    });
+    const sari = seedRoutedRecipient(db, {
+      name: "Sari Putri",
+      email: "sari@example.com",
+      metadata: { template: "PIAGAM" },
+    });
+    const loaId = seedRoutedTemplate(repo, {
+      name: "LOA",
+      slots: ["name"],
+      pattern: "LOA_{name}.pdf",
+    });
+
+    await expect(
+      Effect.runPromise(
+        service.start(loaId, [budi, sari], {
+          templateColumn: "template",
+          assignment: { LOA: loaId },
+          outputPattern: "BATCH_{name}.pdf",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "InvalidGenerateRequest",
+      message: expect.stringContaining("Sari Putri"),
+    });
+  });
+
+  it("fails fast when an assigned template no longer exists", async () => {
+    const { db, repo, service } = makeSvc();
+    const budi = seedRoutedRecipient(db, {
+      name: "Budi Santoso",
+      email: "budi@example.com",
+      metadata: { template: "LOA" },
+    });
+    const loaId = seedRoutedTemplate(repo, {
+      name: "LOA",
+      slots: ["name"],
+      pattern: "LOA_{name}.pdf",
+    });
+
+    await expect(
+      Effect.runPromise(
+        service.start(loaId, [budi], {
+          templateColumn: "template",
+          assignment: { LOA: "ghost-template" },
+          outputPattern: "BATCH_{name}.pdf",
+        }),
+      ),
+    ).rejects.toMatchObject({ _tag: "InvalidGenerateRequest" });
+  });
+
+  it("rejects a job output pattern that one routed template cannot fill", async () => {
+    const { db, repo, service } = makeSvc();
+    const budi = seedRoutedRecipient(db, {
+      name: "Budi Santoso",
+      email: "budi@example.com",
+      metadata: { template: "SK" },
+    });
+    const loaId = seedRoutedTemplate(repo, {
+      name: "LOA",
+      slots: ["name", "instansi"],
+      pattern: "LOA_{name}.pdf",
+    });
+    const skId = seedRoutedTemplate(repo, {
+      name: "SK",
+      slots: ["name"],
+      pattern: "SK_{name}.pdf",
+    });
+
+    await expect(
+      Effect.runPromise(
+        service.start(loaId, [budi], {
+          templateColumn: "template",
+          assignment: { SK: skId },
+          // {instansi} exists on LOA but not on SK - the shared pattern
+          // must be fillable by EVERY involved template.
+          outputPattern: "BATCH_{name}_{instansi}.pdf",
+        }),
+      ),
+    ).rejects.toMatchObject({
+      _tag: "InvalidGenerateRequest",
+      message: expect.stringContaining("{instansi}"),
+    });
+  });
+
+  it("fails per-recipient when a routed template's slots are missing, and the batch continues", async () => {
+    const { db, repo, service } = makeSvc();
+    const budi = seedRoutedRecipient(db, {
+      name: "Budi Santoso",
+      email: "budi@example.com",
+      metadata: { template: "LOA" },
+    });
+    const sari = seedRoutedRecipient(db, {
+      name: "Sari Putri",
+      email: "sari@example.com",
+      metadata: { template: "LOA", instansi: "Sekolah Y" },
+    });
+    const loaId = seedRoutedTemplate(repo, {
+      name: "LOA",
+      slots: ["name", "instansi"],
+      pattern: "LOA_{name}.pdf",
+    });
+
+    const job = await Effect.runPromise(
+      service.start(loaId, [budi, sari], {
+        templateColumn: "template",
+        assignment: { LOA: loaId },
+        outputPattern: "BATCH_{name}.pdf",
+      }),
+    );
+    const done = await Effect.runPromise(service.run(job.id));
+
+    expect(done.status).toBe("generated");
+    expect(done.recipients.map((r) => [r.recipientName, r.status, r.errorMessage])).toEqual([
+      ["Budi Santoso", "failed", 'Missing data for slot "instansi".'],
+      ["Sari Putri", "generated", null],
+    ]);
+  });
+
+  it("routed jobs without a template column behave exactly as before", async () => {
+    const { db, repo, service, outputDir } = makeSvc();
+    const [budi, sari] = seedRecipients(db);
+    const templateId = seedDocxTemplate(repo);
+
+    // The IPC layer maps a null template column to no routing draft at
+    // all - the service then behaves exactly as before the ticket.
+    const job = await Effect.runPromise(service.start(templateId, [budi, sari]));
+    expect(job.templateColumn).toBeNull();
+    expect(job.assignment).toBeNull();
+    // The job records its output pattern - for a non-routed job it is the
+    // template's own pattern, so the job owns its naming even if the
+    // template is edited later.
+    expect(job.outputPattern).toBe("LOA_{no}_{name}.pdf");
+
+    const done = await Effect.runPromise(service.run(job.id));
+    // Named by the template's own pattern, exactly like a legacy job.
+    expect(done.recipients.map((r) => r.outputPath)).toEqual([
+      join(outputDir, "LOA_001_budi_santoso.pdf"),
+      join(outputDir, "LOA_002_sari_putri.pdf"),
+    ]);
   });
 });

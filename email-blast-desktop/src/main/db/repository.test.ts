@@ -373,7 +373,7 @@ describe("send job log queries (ticket 16)", () => {
         slotLayout: {},
       }),
     );
-    const generateJobId = await use(layer, (r) => r.insertGenerateJob(template.id));
+    const generateJobId = await use(layer, (r) => r.insertGenerateJob({ templateId: template.id, templateColumn: null, templateAssignmentJson: null, outputPattern: null }));
     const jobId = await use(layer, (r) =>
       r.insertSendJob({
         generateJobId,
@@ -682,7 +682,7 @@ describe("credential encryption at rest (ticket 02)", () => {
         slotLayout: {},
       }),
     );
-    const generateJobId = await use(layer, (r) => r.insertGenerateJob(template.id));
+    const generateJobId = await use(layer, (r) => r.insertGenerateJob({ templateId: template.id, templateColumn: null, templateAssignmentJson: null, outputPattern: null }));
     const jobId = await use(layer, (r) =>
       r.insertSendJob({
         generateJobId,

@@ -62,12 +62,24 @@ export const generateJobs = sqliteTable(
   "generate_jobs",
   {
     id: text("id").primaryKey(),
+    // The job's default Document Template: recipients with a blank
+    // template-column value route here (ticket 08, ADR 0006). A job
+    // without a template column uses it for every recipient.
     templateId: text("template_id")
       .notNull()
       .references(() => templates.id),
     status: text("status", { enum: ["pending", "generating", "generated", "cancelled"] })
       .notNull()
       .default("pending"),
+    // Template Assignment (ticket 08): the routing header name (the
+    // metadata key the recipient's value lives under), the value ->
+    // template-id mapping (JSON), and the ONE output naming pattern the
+    // whole job shares regardless of which template a recipient used.
+    // All nullable: a job without a template column has no routing and
+    // names its files by the template's own pattern (legacy behavior).
+    templateColumn: text("template_column"),
+    templateAssignment: text("template_assignment"),
+    outputPattern: text("output_pattern"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -95,6 +107,10 @@ export const generateJobRecipients = sqliteTable(
       .default("pending"),
     outputPath: text("output_path"),
     errorMessage: text("error_message"),
+    // The recipient's routing value at job start (ticket 08): the audit
+    // trail of which template-column value routed this recipient. Null
+    // when the job has no template column or the value was blank.
+    templateValue: text("template_value"),
   },
   (table) => [
     primaryKey({ columns: [table.jobId, table.recipientId] }),

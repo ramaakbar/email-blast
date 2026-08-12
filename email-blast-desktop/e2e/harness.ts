@@ -296,6 +296,8 @@ export interface SendJobSeed {
 export interface DatabaseSeed {
   readonly settings?: SettingsSeed;
   readonly template?: TemplateSeed;
+  /** Further templates beyond the primary one (e.g. the Template Assignment variants, ticket 08). */
+  readonly extraTemplates?: readonly TemplateSeed[];
   readonly recipients?: readonly RecipientSeed[];
   readonly generateJob?: {
     readonly id: string;
@@ -334,15 +336,25 @@ export function seedDatabase(userDataDir: string, seed: DatabaseSeed): void {
       setSetting.run("templates_dir", seed.settings.templatesDir);
     }
 
+    const insertTemplate = db.prepare(
+      "INSERT INTO templates (id, name, file_path, type, slots, output_pattern, created_at) VALUES (?, ?, ?, 'docx', ?, ?, datetime('now'))",
+    );
     if (seed.template !== undefined) {
-      db.prepare(
-        "INSERT INTO templates (id, name, file_path, type, slots, output_pattern, created_at) VALUES (?, ?, ?, 'docx', ?, ?, datetime('now'))",
-      ).run(
+      insertTemplate.run(
         seed.template.id,
         seed.template.name,
         seed.template.filePath,
         JSON.stringify(seed.template.slots),
         seed.template.outputPattern,
+      );
+    }
+    for (const template of seed.extraTemplates ?? []) {
+      insertTemplate.run(
+        template.id,
+        template.name,
+        template.filePath,
+        JSON.stringify(template.slots),
+        template.outputPattern,
       );
     }
 

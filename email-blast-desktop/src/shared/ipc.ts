@@ -57,9 +57,19 @@ export type SettingsSetPayload = Schema.Schema.Type<typeof SettingsSetPayload>;
 
 /**
  * The role a parsed Excel column plays for the imported recipient:
- * the address fields, a pass-through metadata bag entry, or ignored.
+ * the address fields, the generate-time routing key (ticket 08 - the
+ * value stays in the metadata bag under its original header; the
+ * Generate Job interprets it by declared role), a pass-through metadata
+ * bag entry, or ignored.
  */
-export const ColumnRole = Schema.Literals(["name", "email", "phone", "metadata", "skip"]);
+export const ColumnRole = Schema.Literals([
+  "name",
+  "email",
+  "phone",
+  "template",
+  "metadata",
+  "skip",
+]);
 export type ColumnRole = Schema.Schema.Type<typeof ColumnRole>;
 
 /** One parsed Excel row: column header -> cell value, every value a string. */
@@ -384,6 +394,13 @@ export const GenerateJob = Schema.Struct({
   templateId: Schema.String,
   templateName: Schema.String,
   status: GenerateJobStatus,
+  // The Template Assignment (ticket 08): the routing header (null when
+  // the job has no template column), the value -> template-id mapping,
+  // and the job's own output naming pattern (null = the template's
+  // pattern, the legacy and non-routed behavior).
+  templateColumn: Schema.Union([Schema.Null, Schema.String]),
+  assignment: Schema.Union([Schema.Null, Schema.Record(Schema.String, Schema.String)]),
+  outputPattern: Schema.Union([Schema.Null, Schema.String]),
   total: Schema.Number,
   createdAt: Schema.String,
   completedAt: Schema.Union([Schema.Null, Schema.String]),
@@ -391,10 +408,18 @@ export const GenerateJob = Schema.Struct({
 });
 export type GenerateJob = Schema.Schema.Type<typeof GenerateJob>;
 
-/** `generate.start` payload: the template plus the recipient ids, in job order. */
+/**
+ * `generate.start` payload: the default template, the recipient ids in
+ * job order, and the Template Assignment. All three assignment fields
+ * are null for a job without a template column - the job then behaves
+ * exactly as before (single template, its own output pattern).
+ */
 export const GenerateStartPayload = Schema.Struct({
   templateId: Schema.String,
   recipientIds: Schema.Array(Schema.String),
+  templateColumn: Schema.Union([Schema.Null, Schema.String]),
+  assignment: Schema.Union([Schema.Null, Schema.Record(Schema.String, Schema.String)]),
+  outputPattern: Schema.Union([Schema.Null, Schema.String]),
 });
 export type GenerateStartPayload = Schema.Schema.Type<typeof GenerateStartPayload>;
 

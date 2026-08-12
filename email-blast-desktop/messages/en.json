@@ -328,7 +328,7 @@
     "preview": "Preview",
     "previewRows": "{fileName} - showing {shown} of {total} rows",
     "columnMapping": "Column mapping",
-    "columnMappingHint": "Match each Excel column to a recipient field. Name, email, and phone can each be used once; other columns become metadata available to template placeholders.",
+    "columnMappingHint": "Match each Excel column to a recipient field. Name, email, and phone can each be used once; a Template column becomes the generate-time routing key; other columns become metadata available to template placeholders.",
     "columnRoleAria": "Role of the \"{column}\" column",
     "resetMapping": "Reset mapping",
     "selectNameColumn": "Select a name column to import",
@@ -348,7 +348,8 @@
     "importedToastOther": "Imported {imported} recipients. {duplicatesSkipped} duplicates skipped.",
     "duplicatesSkippedParsingOne": "{count} duplicate already skipped during parsing.",
     "duplicatesSkippedParsingOther": "{count} duplicates already skipped during parsing.",
-    "goToGenerate": "Go to Generate"
+    "goToGenerate": "Go to Generate",
+    "roleTemplate": "Template"
   },
   "recipients": {
     "title": "Recipients",
@@ -517,7 +518,10 @@
     "selectRecipients": "Select at least one recipient.",
     "noRecipientsExist": "None of the selected recipients still exist.",
     "jobCouldNotBeCreated": "The job could not be created.",
-    "noFreeFileName": "Could not find a free file name for \"{name}\"."
+    "noFreeFileName": "Could not find a free file name for \"{name}\".",
+    "unassignedTemplateValues": "Cannot generate: {count} recipients have a template-column value that is not assigned to any template: {names}.",
+    "unassignedTemplateValue": "Template-column value \"{value}\" is not assigned to any template.",
+    "routingColumnRequired": "Choose a template column, or leave routing off."
   },
   "templatesService": {
     "docxOnly": "Slot scanning works on .docx files only.",
@@ -543,7 +547,8 @@
     "messageTemplateNameRequired": "Message template name is required.",
     "messageSubjectRequired": "Subject is required.",
     "messageBodyRequired": "HTML body is required.",
-    "slotLayoutInvalid": "Slot \"{slot}\" has an invalid text position configuration."
+    "slotLayoutInvalid": "Slot \"{slot}\" has an invalid text position configuration.",
+    "patternSlotMissingInTemplate": "The output pattern references \"{slot}\", which template \"{name}\" does not declare."
   },
   "dialogs": {
     "excelFilter": "Excel",
@@ -603,6 +608,31 @@
     "startDisabledCoverage": "Select recipients with data for every required slot to generate.",
     "retryJobHint": "Pre-fill the workspace with this job's recipients and template",
     "prefillDeletedOne": "{count} job recipient was deleted and left out of the pre-fill.",
-    "prefillDeletedOther": "{count} job recipients were deleted and left out of the pre-fill."
+    "prefillDeletedOther": "{count} job recipients were deleted and left out of the pre-fill.",
+    "routingTitle": "Template routing",
+    "routingHint": "Pick the column whose values decide which template each recipient is generated with.",
+    "routingColumnLabel": "Route by column",
+    "routingColumnNone": "None - one template for all recipients",
+    "routingColumnSuggested": "{column} (suggested)",
+    "defaultTemplateLabel": "Default template (blank values)",
+    "defaultTemplateHint": "Recipients with a blank {column} value use this template.",
+    "assignmentTitle": "Assign each value to a template",
+    "assignmentHint": "Recipients whose value is not assigned to any template block generation until it is.",
+    "assignedTo": "Template for \"{value}\"",
+    "valueCountOne": "{count} recipient",
+    "valueCountOther": "{count} recipients",
+    "unassignedSummary": "{count} recipients have a template-column value that is not assigned to any template.",
+    "unassignedValueOne": "\"{value}\" - {count} recipient: {names}",
+    "unassignedValueOther": "\"{value}\" - {count} recipients: {names}",
+    "allValuesAssigned": "Every template-column value is assigned to a template.",
+    "patternLabel": "Output naming pattern (shared by all templates)",
+    "patternHint": "All recipients of this job are named by this one pattern, whichever template they used.",
+    "jobPatternPlaceholder": "e.g. BATCH_{name}.pdf",
+    "templateCoverageOk": "All {count} recipients routed to this template have data for every required slot.",
+    "templateCoverageMissing": "{missing} of {count} recipients routed to this template are missing data for:",
+    "startDisabledRouting": "Assign every template-column value to a template to generate.",
+    "startDisabledPattern": "Fix the output pattern - it references a slot that one of the templates does not declare.",
+    "allBlankValues": "All selected recipients have a blank {column} value - everyone uses the default template.",
+    "unassignedSummaryOne": "{count} recipient has a template-column value that is not assigned to any template."
   }
 }

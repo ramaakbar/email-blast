@@ -4,7 +4,7 @@ export type Importpage_Columnmappinghint3Inputs = {};
 /**
 * | output |
 * | --- |
-* | "Match each Excel column to a recipient field. Name, email, and phone can each be used once; other columns become metadata available to template placeholders." |
+* | "Match each Excel column to a recipient field. Name, email, and phone can each be used once; a Template column becomes the generate-time routing key; other co..." |
 *
 * @param {Importpage_Columnmappinghint3Inputs} inputs
 * @param {{ locale?: "en" | "id" }} options

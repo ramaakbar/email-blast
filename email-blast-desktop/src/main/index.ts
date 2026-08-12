@@ -524,11 +524,26 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
   });
 
   registerWindowHandler(IPC["generate:start"], (payload) => {
-    const { templateId, recipientIds } = decodePayload(GenerateStartPayload, payload);
+    const { templateId, recipientIds, templateColumn, assignment, outputPattern } = decodePayload(
+      GenerateStartPayload,
+      payload,
+    );
     return run(
       Effect.gen(function* () {
         const service = yield* GenerateJobService;
-        return Schema.encodeSync(GenerateJob)(yield* service.start(templateId, recipientIds));
+        return Schema.encodeSync(GenerateJob)(
+          yield* service.start(
+            templateId,
+            recipientIds,
+            templateColumn === null
+              ? undefined
+              : {
+                  templateColumn,
+                  assignment: assignment ?? {},
+                  outputPattern: outputPattern ?? "",
+                },
+          ),
+        );
       }),
     );
   });
@@ -601,7 +616,8 @@ function registerIpcHandlers(context: Context.Context<AppServices>): void {
           return null;
         }
         const write = yield* Effect.try({
-          try: () => writeFileSync(result.filePath as string, Buffer.from(pdf.value.dataBase64, "base64")),
+          try: () =>
+            writeFileSync(result.filePath as string, Buffer.from(pdf.value.dataBase64, "base64")),
           catch: (error) => error,
         }).pipe(Effect.result);
         if (Result.isFailure(write)) return yield* Effect.fail(write.failure);

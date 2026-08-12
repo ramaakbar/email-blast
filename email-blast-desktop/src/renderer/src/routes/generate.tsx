@@ -7,6 +7,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { GenerateResults } from "@/components/generate-results";
 import { GenerateStep, type GenerateState } from "@/components/generate-step";
 import { RecipientsStep } from "@/components/recipients-step";
+import { TemplateRoutingStep, buildRoutingReport } from "@/components/template-routing-step";
 import { TemplateStep } from "@/components/template-step";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
@@ -50,6 +51,12 @@ async function loadJobSnapshot(
 function GeneratePage() {
   const [selection, setSelection] = useState<Map<string, Recipient>>(new Map());
   const [templateId, setTemplateId] = useState<string | null>(null);
+  // The Template Assignment (ticket 08): the routing column (null = no
+  // routing, one template for everyone), the value -> template mapping,
+  // and the job's ONE output naming pattern.
+  const [templateColumn, setTemplateColumn] = useState<string | null>(null);
+  const [assignment, setAssignment] = useState<Record<string, string>>({});
+  const [jobPattern, setJobPattern] = useState<string>("");
   const [generate, setGenerate] = useState<GenerateState>({ kind: "idle" });
   // The reopened past job: its snapshot plus the live recipients for the
   // spot-check details (deleted ones fall back to the job's names).
@@ -66,7 +73,9 @@ function GeneratePage() {
     queryKey: ["templates", "list"],
     queryFn: () => window.api.templates.list(),
   });
-  const templates = templatesQuery.data ?? [];
+  // Memoized so memos below can depend on it without re-running every
+  // render (the query data reference is stable; the `?? []` fallback is not).
+  const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data]);
   const template = templates.find((t) => t.id === templateId) ?? null;
 
   // The Past Generate Jobs list is fetched once on mount; a fresh run
@@ -93,16 +102,66 @@ function GeneratePage() {
     [selectedRecipients, template],
   );
 
-  // A finished generate is bound to the selection and template it was
-  // started from; changing either invalidates the done state, so the
-  // results shown can never be stale relative to the workspace inputs.
+  // The Template Assignment report (ticket 08): unassigned values, the
+  // shared pattern's validity, and per-template slot coverage. Without a
+  // routing column the report is trivially complete and the legacy
+  // single-template coverage gates the start action.
+  const routingReport = useMemo(
+    () =>
+      buildRoutingReport(
+        selectedRecipients,
+        templates,
+        template,
+        templateColumn,
+        assignment,
+        jobPattern,
+      ),
+    [selectedRecipients, templates, template, templateColumn, assignment, jobPattern],
+  );
+  // Same key order as the GenerateStep serializes its `routing` prop -
+  // the bound snapshot must match exactly or a finished job would look
+  // stale and reset to idle.
+  const routingSignature = JSON.stringify({ templateColumn, assignment, outputPattern: jobPattern });
+  const startDisabled = templateColumn === null ? !coverage.ok : !routingReport.complete;
+  const startDisabledHint =
+    templateColumn !== null && routingReport.unassigned.length > 0
+      ? m["generate.startDisabledRouting"]()
+      : templateColumn !== null && routingReport.patternError !== null
+        ? m["generate.startDisabledPattern"]()
+        : m["generate.startDisabledCoverage"]();
+
+  // A finished generate is bound to the selection, default template, and
+  // Template Assignment it was started from; changing any of them
+  // invalidates the done state, so the results shown can never be stale
+  // relative to the workspace inputs.
   useEffect(() => {
     if (generate.kind !== "done") return;
     const nowBound = [...selection.keys()].toSorted().join(",");
-    if (generate.bound.recipientIds !== nowBound || generate.bound.templateId !== templateId) {
+    if (
+      generate.bound.recipientIds !== nowBound ||
+      generate.bound.templateId !== templateId ||
+      generate.bound.routing !== routingSignature
+    ) {
       setGenerate({ kind: "idle" });
     }
-  }, [selection, templateId, generate]);
+  }, [selection, templateId, routingSignature, generate]);
+
+  /** Routing column change: reset the assignment and seed the pattern from the default template. */
+  const handleRoutingColumnChange = (column: string | null): void => {
+    setTemplateColumn(column);
+    setAssignment({});
+    if (column !== null && template !== null) {
+      setJobPattern(template.outputPattern);
+    }
+  };
+
+  /** Default template change: while routing is active, re-seed the shared pattern. */
+  const handleTemplateChange = (id: string | null): void => {
+    setTemplateId(id);
+    if (templateColumn !== null) {
+      setJobPattern(templates.find((t) => t.id === id)?.outputPattern ?? "");
+    }
+  };
 
   const navigate = useNavigate();
 
@@ -141,6 +200,12 @@ function GeneratePage() {
       }
       setReopened(null);
       setTemplateId(snapshot.job.templateId);
+      // The Template Assignment rides along (ticket 08): the routing
+      // column, the value -> template mapping, and the job's own pattern
+      // - a routed job retries as the same routed job.
+      setTemplateColumn(snapshot.job.templateColumn);
+      setAssignment(snapshot.job.assignment ?? {});
+      setJobPattern(snapshot.job.outputPattern ?? "");
       setSelection(new Map(snapshot.recipients.map((r) => [r.id, r])));
       // A done run bound to the same inputs would look stale next to the
       // pre-filled state, so the workspace always starts fresh.
@@ -194,9 +259,30 @@ function GeneratePage() {
           <TemplateStep
             templates={templates}
             template={template}
-            onTemplateChange={setTemplateId}
+            onTemplateChange={handleTemplateChange}
             selectedRecipients={selectedRecipients}
             coverage={coverage}
+          />
+        </section>
+
+        <section aria-labelledby="generate-routing">
+          <h2
+            id="generate-routing"
+            className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            {m["generate.routingTitle"]()}
+          </h2>
+          <TemplateRoutingStep
+            templates={templates}
+            template={template}
+            recipients={selectedRecipients}
+            report={routingReport}
+            templateColumn={templateColumn}
+            onTemplateColumnChange={handleRoutingColumnChange}
+            assignment={assignment}
+            onAssignmentChange={setAssignment}
+            jobPattern={jobPattern}
+            onJobPatternChange={setJobPattern}
           />
         </section>
 
@@ -214,8 +300,11 @@ function GeneratePage() {
             onStateChange={setGenerate}
             // The workspace gates the start action directly, so
             // generation never begins with recipients missing required
-            // slot data.
-            startDisabled={!coverage.ok}
+            // slot data, an unassigned routing value, or a pattern one
+            // routed template cannot fill.
+            startDisabled={startDisabled}
+            startDisabledHint={startDisabledHint}
+            routing={{ templateColumn, assignment, outputPattern: jobPattern }}
             onSendThese={sendThese}
           />
         </section>

@@ -328,7 +328,7 @@
     "preview": "Pratinjau",
     "previewRows": "{fileName} - menampilkan {shown} dari {total} baris",
     "columnMapping": "Pemetaan kolom",
-    "columnMappingHint": "Cocokkan setiap kolom Excel ke bidang penerima. Nama, email, dan telepon masing-masing bisa dipakai sekali; kolom lain menjadi metadata yang tersedia untuk placeholder template.",
+    "columnMappingHint": "Cocokkan setiap kolom Excel ke bidang penerima. Nama, email, dan telepon masing-masing hanya bisa dipakai sekali; kolom Template menjadi kunci perutean saat generate; kolom lain menjadi metadata yang tersedia untuk placeholder template.",
     "columnRoleAria": "Peran kolom \"{column}\"",
     "resetMapping": "Atur ulang pemetaan",
     "selectNameColumn": "Pilih kolom nama untuk diimpor",
@@ -348,7 +348,8 @@
     "importedToastOther": "{imported} penerima diimpor. {duplicatesSkipped} duplikat dilewati.",
     "duplicatesSkippedParsingOne": "{count} duplikat sudah dilewati saat parsing.",
     "duplicatesSkippedParsingOther": "{count} duplikat sudah dilewati saat parsing.",
-    "goToGenerate": "Buka Generate"
+    "goToGenerate": "Buka Generate",
+    "roleTemplate": "Template"
   },
   "recipients": {
     "title": "Penerima",
@@ -517,7 +518,10 @@
     "selectRecipients": "Pilih minimal satu penerima.",
     "noRecipientsExist": "Tidak ada penerima terpilih yang masih ada.",
     "jobCouldNotBeCreated": "Pekerjaan tidak dapat dibuat.",
-    "noFreeFileName": "Tidak dapat menemukan nama file yang tersedia untuk \"{name}\"."
+    "noFreeFileName": "Tidak dapat menemukan nama file yang tersedia untuk \"{name}\".",
+    "unassignedTemplateValues": "Tidak dapat membuat: {count} penerima memiliki nilai kolom template yang belum ditetapkan ke template mana pun: {names}.",
+    "unassignedTemplateValue": "Nilai kolom template \"{value}\" belum ditetapkan ke template mana pun.",
+    "routingColumnRequired": "Pilih kolom template, atau matikan perutean."
   },
   "templatesService": {
     "docxOnly": "Pemindaian slot hanya berfungsi untuk file .docx.",
@@ -543,7 +547,8 @@
     "messageTemplateNameRequired": "Nama template pesan wajib diisi.",
     "messageSubjectRequired": "Subjek wajib diisi.",
     "messageBodyRequired": "Isi HTML wajib diisi.",
-    "slotLayoutInvalid": "Slot \"{slot}\" memiliki konfigurasi posisi teks yang tidak valid."
+    "slotLayoutInvalid": "Slot \"{slot}\" memiliki konfigurasi posisi teks yang tidak valid.",
+    "patternSlotMissingInTemplate": "Pola nama berkas merujuk \"{slot}\", yang tidak dideklarasikan oleh template \"{name}\"."
   },
   "dialogs": {
     "excelFilter": "Excel",
@@ -603,6 +608,31 @@
     "startDisabledCoverage": "Pilih penerima yang datanya lengkap untuk semua slot agar bisa generate.",
     "retryJobHint": "Isi awal ruang kerja dengan penerima dan template pekerjaan ini",
     "prefillDeletedOne": "{count} penerima pekerjaan telah dihapus dan tidak diisi ulang.",
-    "prefillDeletedOther": "{count} penerima pekerjaan telah dihapus dan tidak diisi ulang."
+    "prefillDeletedOther": "{count} penerima pekerjaan telah dihapus dan tidak diisi ulang.",
+    "routingTitle": "Perutean template",
+    "routingHint": "Pilih kolom yang nilainya menentukan template untuk setiap penerima.",
+    "routingColumnLabel": "Rutekan berdasarkan kolom",
+    "routingColumnNone": "Tidak ada - satu template untuk semua penerima",
+    "routingColumnSuggested": "{column} (disarankan)",
+    "defaultTemplateLabel": "Template default (nilai kosong)",
+    "defaultTemplateHint": "Penerima dengan nilai {column} kosong memakai template ini.",
+    "assignmentTitle": "Tetapkan setiap nilai ke template",
+    "assignmentHint": "Penerima yang nilainya belum ditetapkan ke template mana pun memblokir generate sampai ditetapkan.",
+    "assignedTo": "Template untuk \"{value}\"",
+    "valueCountOne": "{count} penerima",
+    "valueCountOther": "{count} penerima",
+    "unassignedSummary": "{count} penerima memiliki nilai kolom template yang belum ditetapkan ke template mana pun.",
+    "unassignedValueOne": "\"{value}\" - {count} penerima: {names}",
+    "unassignedValueOther": "\"{value}\" - {count} penerima: {names}",
+    "allValuesAssigned": "Semua nilai kolom template sudah ditetapkan ke template.",
+    "patternLabel": "Pola penamaan berkas (dipakai bersama semua template)",
+    "patternHint": "Semua penerima pekerjaan ini dinamai dengan satu pola ini, apa pun template yang dipakai.",
+    "jobPatternPlaceholder": "mis. BATCH_{name}.pdf",
+    "templateCoverageOk": "Semua {count} penerima yang dirutekan ke template ini punya data untuk setiap slot yang dibutuhkan.",
+    "templateCoverageMissing": "{missing} dari {count} penerima yang dirutekan ke template ini kekurangan data untuk:",
+    "startDisabledRouting": "Tetapkan setiap nilai kolom template ke sebuah template untuk membuat.",
+    "startDisabledPattern": "Perbaiki pola nama berkas - pola merujuk slot yang tidak dideklarasikan salah satu template.",
+    "allBlankValues": "Semua penerima terpilih memiliki nilai {column} kosong - semua memakai template default.",
+    "unassignedSummaryOne": "{count} penerima memiliki nilai kolom template yang belum ditetapkan ke template mana pun."
   }
 }

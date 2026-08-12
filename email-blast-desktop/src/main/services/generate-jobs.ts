@@ -11,6 +11,12 @@ import { m } from "@paraglide/messages";
 import type { GenerateJob, GenerateJobSummary, Recipient, Template } from "../../shared/ipc";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
 import {
+  recipientTemplateValue,
+  resolveTemplateId,
+  unassignedTemplateValues,
+  validateJobOutputPattern,
+} from "../../shared/template-assignment";
+import {
   fitFontSize,
   LEGACY_TEXT_COLOR,
   parseHexColor,
@@ -130,11 +136,32 @@ export class GenerateEnvService extends Context.Service<GenerateEnvService, Gene
 
 // ---- The domain service ----
 
+/**
+ * The Template Assignment a routed job is started with (ticket 08,
+ * ADR 0006): the routing header, the value -> template-id mapping, and
+ * the ONE output naming pattern the whole job shares. `start` validates
+ * the assignment before anything is persisted - unassigned values fail
+ * fast with the affected recipients listed, so no partial or
+ * wrong-template output can ever be produced.
+ */
+export interface GenerateRoutingDraft {
+  readonly templateColumn: string;
+  readonly assignment: Record<string, string>;
+  readonly outputPattern: string;
+}
+
 export interface GenerateJobServiceShape {
-  /** Creates a pending job (nothing produced yet) for the template and recipient ids. */
+  /**
+   * Creates a pending job (nothing produced yet) for the default
+   * template and recipient ids. With `routing`, each recipient is
+   * generated with the template its routing value points at (blank
+   * values use the default); without it the job behaves exactly as
+   * before - one template, its own output pattern.
+   */
   readonly start: (
     templateId: string,
     recipientIds: readonly string[],
+    routing?: GenerateRoutingDraft,
   ) => Effect.Effect<GenerateJob, TemplateNotFound | InvalidGenerateRequest>;
   /**
    * Runs the job: fills and converts one PDF per recipient, streaming one
@@ -295,6 +322,9 @@ export function toGenerateJob(loaded: GenerateJobWithRecipients): GenerateJob {
     templateId: loaded.job.templateId,
     templateName: loaded.job.templateName,
     status: loaded.job.status,
+    templateColumn: loaded.job.templateColumn,
+    assignment: loaded.job.templateAssignment,
+    outputPattern: loaded.job.outputPattern,
     total: loaded.recipients.length,
     createdAt: loaded.job.createdAt,
     completedAt: loaded.job.completedAt,
@@ -358,7 +388,12 @@ export function makeGenerateJobService(
       });
     });
 
-  /** The DOCX path: fill every letter in-process, convert the batch once, land the PDFs. */
+  /**
+   * The DOCX path: fill every letter in-process, convert the batch once,
+   * land the PDFs. `outputPattern` is the naming pattern this batch's
+   * files land under - the job's own pattern when it has a Template
+   * Assignment, the template's pattern otherwise (ticket 08).
+   */
   const runDocx = (
     jobId: string,
     template: Template,
@@ -366,6 +401,7 @@ export function makeGenerateJobService(
     byId: Map<string, Recipient>,
     state: { current: number; readonly total: number },
     outputDir: string,
+    outputPattern: string,
   ): Effect.Effect<void, LibreOfficeFailed> =>
     Effect.gen(function* () {
       const batchDir = join(tmpdir(), `email-blast-generate-${jobId}`);
@@ -470,7 +506,7 @@ export function makeGenerateJobService(
               yield* failRecipient(state, jobId, row.recipientId, m["generateJob.noPdfProduced"]());
               continue;
             }
-            const wanted = join(outputDir, fillOutputName(template.outputPattern, outcome.values));
+            const wanted = join(outputDir, fillOutputName(outputPattern, outcome.values));
             const finalPath = uniquePath(wanted);
             if (finalPath === null) {
               yield* failRecipient(
@@ -510,7 +546,11 @@ export function makeGenerateJobService(
       }
     });
 
-  /** The image path: embed the background once per document, draw every slot, save. */
+  /**
+   * The image path: embed the background once per document, draw every
+   * slot, save. `outputPattern` is the job's shared pattern when the job
+   * has a Template Assignment (ticket 08).
+   */
   const runImage = (
     jobId: string,
     template: Template,
@@ -518,6 +558,7 @@ export function makeGenerateJobService(
     byId: Map<string, Recipient>,
     state: { current: number; readonly total: number },
     outputDir: string,
+    outputPattern: string,
   ): Effect.Effect<void, never> =>
     Effect.gen(function* () {
       const templateBytes = readFileSync(template.filePath);
@@ -558,7 +599,7 @@ export function makeGenerateJobService(
           });
           continue;
         }
-        const wanted = join(outputDir, fillOutputName(template.outputPattern, resolved.values));
+        const wanted = join(outputDir, fillOutputName(outputPattern, resolved.values));
         const finalPath = uniquePath(wanted);
         if (finalPath === null) {
           yield* failRecipient(
@@ -596,28 +637,115 @@ export function makeGenerateJobService(
   ): Effect.Effect<void, TemplateNotFound | LibreOfficeFailed> =>
     Effect.gen(function* () {
       const { job, recipients: rows } = loaded;
-      const template = yield* loadTemplate(job.templateId);
-      if (!existsSync(template.filePath)) {
-        return yield* Effect.fail(
-          new TemplateNotFound({
-            message: m["generateJob.templateFileMissing"]({ path: template.filePath }),
-          }),
-        );
-      }
       const recipients = yield* repo.getRecipientsByIds(rows.map((row) => row.recipientId));
       const byId = new Map(recipients.map((recipient) => [recipient.id, recipient]));
       const outputDir = yield* env.outputDir();
       mkdirSync(outputDir, { recursive: true });
       const state = { current: 0, total: rows.length };
-      if (template.type === "docx") {
-        yield* runDocx(jobId, template, rows, byId, state, outputDir);
-      } else {
-        yield* runImage(jobId, template, rows, byId, state, outputDir);
+
+      // The Template Assignment (ticket 08): every row resolves to the
+      // template its routing value points at - the job's default
+      // template for blank values. Rows that resolve to nothing (a
+      // deleted recipient, or a value the assignment does not cover -
+      // only reachable when the database was edited behind the service,
+      // since start() rejects incomplete assignments) fail immediately;
+      // the rest group by template, first-appearance order, and each
+      // group runs its own pipeline with the job's shared pattern.
+      type PlanEntry =
+        | { kind: "fail"; row: GenerateJobRecipientRow; message: string }
+        | { kind: "ok"; templateId: string; row: GenerateJobRecipientRow };
+      const plan: PlanEntry[] = [];
+      const groups = new Map<string, GenerateJobRecipientRow[]>();
+      const groupOrder: string[] = [];
+      for (const row of rows) {
+        const recipient = byId.get(row.recipientId);
+        if (recipient === undefined) {
+          plan.push({
+            kind: "fail",
+            row,
+            message: m["generateJob.recipientDeleted"](),
+          });
+          continue;
+        }
+        const templateId =
+          job.templateColumn === null
+            ? job.templateId
+            : resolveTemplateId(
+                recipientTemplateValue(recipient, job.templateColumn),
+                job.templateId,
+                job.templateAssignment ?? {},
+              );
+        if (templateId === null) {
+          plan.push({
+            kind: "fail",
+            row,
+            message: m["generateJob.unassignedTemplateValue"]({
+              value: recipientTemplateValue(recipient, job.templateColumn as string) ?? "",
+            }),
+          });
+          continue;
+        }
+        plan.push({ kind: "ok", templateId, row });
+        const group = groups.get(templateId);
+        if (group === undefined) {
+          groups.set(templateId, [row]);
+          groupOrder.push(templateId);
+        } else {
+          group.push(row);
+        }
+      }
+
+      // Every involved template is validated before ANY recipient is
+      // marked, so a job-level failure (template row or file gone) still
+      // leaves nothing half-done, exactly as before routing existed.
+      const loadedTemplates = new Map<string, Template>();
+      for (const templateId of groupOrder) {
+        const template = yield* loadTemplate(templateId);
+        if (!existsSync(template.filePath)) {
+          return yield* Effect.fail(
+            new TemplateNotFound({
+              message: m["generateJob.templateFileMissing"]({ path: template.filePath }),
+            }),
+          );
+        }
+        loadedTemplates.set(templateId, template);
+      }
+
+      // Unresolvable rows fail first (nothing generated yet, so the
+      // running counts stay correct); then each group runs its pipeline.
+      for (const entry of plan) {
+        if (entry.kind !== "fail") continue;
+        yield* failRecipient(state, jobId, entry.row.recipientId, entry.message);
+      }
+      for (const templateId of groupOrder) {
+        const template = loadedTemplates.get(templateId) as Template;
+        const pattern = job.outputPattern ?? template.outputPattern;
+        if (template.type === "docx") {
+          yield* runDocx(
+            jobId,
+            template,
+            groups.get(templateId) as GenerateJobRecipientRow[],
+            byId,
+            state,
+            outputDir,
+            pattern,
+          );
+        } else {
+          yield* runImage(
+            jobId,
+            template,
+            groups.get(templateId) as GenerateJobRecipientRow[],
+            byId,
+            state,
+            outputDir,
+            pattern,
+          );
+        }
       }
     });
 
   return {
-    start: (templateId, recipientIds) =>
+    start: (templateId, recipientIds, routing) =>
       Effect.gen(function* () {
         const template = yield* loadTemplate(templateId);
         if (recipientIds.length === 0) {
@@ -633,10 +761,78 @@ export function makeGenerateJobService(
             }),
           );
         }
-        const jobId = yield* repo.insertGenerateJob(template.id);
+
+        // The Template Assignment (ticket 08): a job without a routing
+        // draft behaves exactly as before - one template, its own
+        // output pattern. A routed job is validated in full before
+        // anything is persisted: unassigned values fail fast with the
+        // affected recipients listed by name (ADR 0006), every assigned
+        // template must exist, and the job's shared output pattern must
+        // be fillable by EVERY involved template.
+        let templateColumn: string | null = null;
+        let assignmentJson: string | null = null;
+        let outputPattern: string | null = template.outputPattern;
+        if (routing !== undefined) {
+          const column = routing.templateColumn.trim();
+          if (column === "") {
+            return yield* Effect.fail(
+              new InvalidGenerateRequest({ message: m["generateJob.routingColumnRequired"]() }),
+            );
+          }
+          const unassigned = unassignedTemplateValues(
+            recipients,
+            column,
+            template.id,
+            routing.assignment,
+          );
+          if (unassigned.length > 0) {
+            const names = unassigned.flatMap((entry) => entry.recipientNames);
+            return yield* Effect.fail(
+              new InvalidGenerateRequest({
+                message: m["generateJob.unassignedTemplateValues"]({
+                  count: names.length,
+                  names: names.join(", "),
+                }),
+              }),
+            );
+          }
+          const assignedTemplates: Template[] = [];
+          for (const id of new Set(Object.values(routing.assignment))) {
+            const found = yield* repo.getTemplate(id);
+            if (Option.isNone(found)) {
+              return yield* Effect.fail(
+                new InvalidGenerateRequest({ message: m["generateJob.templateMissing"]() }),
+              );
+            }
+            assignedTemplates.push(found.value);
+          }
+          const patternError = validateJobOutputPattern(routing.outputPattern.trim(), [
+            template,
+            ...assignedTemplates,
+          ]);
+          if (patternError !== null) {
+            return yield* Effect.fail(new InvalidGenerateRequest({ message: patternError }));
+          }
+          templateColumn = column;
+          assignmentJson = JSON.stringify(routing.assignment);
+          outputPattern = routing.outputPattern.trim();
+        }
+
+        const jobId = yield* repo.insertGenerateJob({
+          templateId: template.id,
+          templateColumn,
+          templateAssignmentJson: assignmentJson,
+          outputPattern,
+        });
         yield* repo.insertGenerateJobRecipients(
           jobId,
-          recipients.map((recipient) => recipient.id),
+          recipients.map((recipient) => ({
+            recipientId: recipient.id,
+            // The routing value at job start - the audit trail of which
+            // template-column value routed this recipient.
+            templateValue:
+              templateColumn === null ? null : recipientTemplateValue(recipient, templateColumn),
+          })),
         );
         const loaded = yield* repo.getGenerateJob(jobId);
         // The insert above just landed, so the row must exist.

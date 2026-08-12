@@ -35,11 +35,14 @@ const ROLE_OPTIONS: { value: ColumnRole; label: () => string }[] = [
   { value: "name", label: () => m["importPage.roleName"]() },
   { value: "email", label: () => m["importPage.roleEmail"]() },
   { value: "phone", label: () => m["importPage.rolePhone"]() },
+  { value: "template", label: () => m["importPage.roleTemplate"]() },
   { value: "metadata", label: () => m["importPage.roleMetadata"]() },
   { value: "skip", label: () => m["importPage.roleSkip"]() },
 ];
 
-const EXCLUSIVE_ROLES: ReadonlySet<ColumnRole> = new Set(["name", "email", "phone"]);
+// One column per role: name, email, phone, and the template routing key
+// (ticket 08) are each exclusive, so assigning one clears it elsewhere.
+const EXCLUSIVE_ROLES: ReadonlySet<ColumnRole> = new Set(["name", "email", "phone", "template"]);
 
 type ImportState =
   | { kind: "idle" }
@@ -231,7 +234,8 @@ function ImportPage() {
 
       {state.kind === "loading" && (
         <div className="flex items-center gap-2 py-16 text-sm text-muted-foreground">
-          <Loader2 className="size-4 animate-spin" /> {m["importPage.parsing"]({ fileName: state.fileName })}
+          <Loader2 className="size-4 animate-spin" />{" "}
+          {m["importPage.parsing"]({ fileName: state.fileName })}
         </div>
       )}
 
@@ -310,6 +314,7 @@ function PreviewContent({
   const nameColumn = preview.columns.find((column) => mapping[column] === "name");
   const emailColumn = preview.columns.find((column) => mapping[column] === "email");
   const phoneColumn = preview.columns.find((column) => mapping[column] === "phone");
+  const templateColumn = preview.columns.find((column) => mapping[column] === "template");
   const shown = Math.min(preview.rows.length, PREVIEW_ROWS);
 
   return (
@@ -372,7 +377,8 @@ function PreviewContent({
         <p className="mt-3 text-xs text-muted-foreground">
           Name: <span className="font-mono">{nameColumn ?? "none"}</span> · Email:{" "}
           <span className="font-mono">{emailColumn ?? "none"}</span> · Phone:{" "}
-          <span className="font-mono">{phoneColumn ?? "none"}</span>
+          <span className="font-mono">{phoneColumn ?? "none"}</span> · Template:{" "}
+          <span className="font-mono">{templateColumn ?? "none"}</span>
         </p>
       </section>
 
