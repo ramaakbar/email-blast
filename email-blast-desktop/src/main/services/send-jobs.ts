@@ -8,6 +8,7 @@ import {
   SendJob,
   SendJobSummary,
   SendStartPayload,
+  SmtpCredentials,
 } from "../../shared/ipc";
 import { WIRE } from "../../shared/wire";
 import { makeOp } from "../ipc-core";
@@ -33,7 +34,6 @@ import {
   SmtpProfileNotFound,
   SmtpService,
   type SendError,
-  type SmtpCredentials,
   type SmtpServiceShape,
 } from "./smtp";
 import {
@@ -337,26 +337,17 @@ export function makeSendJobService(
       }
       // The job started with an inline override; the credential is stored
       // with the job row, encrypted at rest (ticket 02). An override that
-      // cannot be decrypted (keychain cleared, database moved) reads as no
-      // override at all - fail fast with a clear message instead of
-      // handing undefined host/port/username to the SMTP client.
-      const parsed = JSON.parse(loaded.job.smtpOverrideJson ?? "{}") as Partial<SmtpCredentials>;
-      if (
-        typeof parsed.host !== "string" ||
-        typeof parsed.port !== "number" ||
-        typeof parsed.username !== "string" ||
-        typeof parsed.password !== "string"
-      ) {
-        return yield* Effect.fail(
-          new InvalidSendRequest({ message: m["sendJob.credentialUnreadable"]() }),
-        );
-      }
-      return {
-        host: parsed.host,
-        port: parsed.port,
-        username: parsed.username,
-        password: parsed.password,
-      };
+      // cannot be decrypted (keychain cleared, database moved) or fails
+      // the shared credential schema reads as no override at all - fail
+      // fast with a clear message instead of handing undefined
+      // host/port/username to the SMTP client.
+      return yield* Effect.try({
+        try: () =>
+          Schema.decodeUnknownSync(SmtpCredentials)(
+            JSON.parse(loaded.job.smtpOverrideJson ?? "{}"),
+          ),
+        catch: () => new InvalidSendRequest({ message: m["sendJob.credentialUnreadable"]() }),
+      });
     });
 
   /**

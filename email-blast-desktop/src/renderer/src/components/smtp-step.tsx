@@ -7,6 +7,10 @@ import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { normalizeIdentity, senderIdentityWarning } from "../../../shared/sender-identity";
 import {
+  parseSmtpCredentials,
+  type SmtpCredentialForm,
+} from "../../../shared/smtp-validation";
+import {
   DEFAULT_RATE_LIMIT_DELAY_MS,
   RATE_LIMIT_MAX_MS,
   RATE_LIMIT_MIN_MS,
@@ -22,13 +26,9 @@ import {
  */
 
 /** The SMTP identity + sender fields the step carries. */
-export interface SmtpFormState {
+export interface SmtpFormState extends SmtpCredentialForm {
   mode: "profile" | "inline";
   profileId: string | null;
-  host: string;
-  port: string;
-  username: string;
-  password: string;
   saveAsProfile: boolean;
   profileName: string;
   senderName: string;
@@ -60,12 +60,7 @@ export function smtpFormValid(config: SmtpFormState): boolean {
     config.senderAddress.trim() !== "" &&
     (config.mode === "profile"
       ? config.profileId !== null
-      : config.host.trim() !== "" &&
-        Number.isInteger(Number(config.port)) &&
-        Number(config.port) > 0 &&
-        Number(config.port) < 65536 &&
-        config.username.trim() !== "" &&
-        config.password !== "")
+      : !("message" in parseSmtpCredentials(config)))
   );
 }
 
@@ -118,12 +113,12 @@ export function SmtpStep({
       if (config.mode === "profile" && config.profileId !== null) {
         await window.api.smtp.testProfile(config.profileId);
       } else {
-        await window.api.smtp.test({
-          host: config.host,
-          port: Number(config.port),
-          username: config.username,
-          password: config.password,
-        });
+        const credentials = parseSmtpCredentials(config);
+        if ("message" in credentials) {
+          setTestState({ kind: "error", message: credentials.message });
+          return;
+        }
+        await window.api.smtp.test(credentials);
       }
       setTestState({ kind: "ok" });
     } catch (error) {
@@ -137,15 +132,17 @@ export function SmtpStep({
   const saveProfile = async (): Promise<void> => {
     setSaveError(null);
     try {
+      // The inline fields parse through the shared credential shape; an
+      // invalid form shows the same validation message the main process
+      // would have rejected with.
+      const credentials = parseSmtpCredentials(config);
+      if ("message" in credentials) {
+        setSaveError(credentials.message);
+        return;
+      }
       const created = await window.api.smtp.create({
         name: config.profileName,
-        host: config.host,
-        port: Number(config.port),
-        username: config.username,
-        password: config.password,
-        // The typed identity becomes the profile's default (ticket 01) -
-        // blank stays unset, so a saved one-off connection keeps working
-        // exactly as before.
+        ...credentials,
         senderName: normalizeIdentity(config.senderName),
         senderAddress: normalizeIdentity(config.senderAddress),
         replyTo: normalizeIdentity(config.replyTo),

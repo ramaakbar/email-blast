@@ -15,6 +15,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { normalizeIdentity } from "../../../shared/sender-identity";
+import { parseSmtpCredentials } from "../../../shared/smtp-validation";
 import type { SendJob, SendStartPayload } from "../../../shared/ipc";
 import type { SmtpFormState } from "./smtp-step";
 
@@ -176,19 +177,17 @@ export function SendStep({
   const startSending = async (): Promise<void> => {
     if (recipientIds.length === 0) return;
     try {
+      // The inline override is built through the shared credential shape
+      // (one typed construction, no local port coercion). The send button
+      // is gated on smtpFormValid, which uses the same parse, so the
+      // error branch is unreachable here.
+      const smtpOverride = smtp.mode === "inline" ? parseSmtpCredentials(smtp) : null;
+      if (smtpOverride !== null && "message" in smtpOverride) return;
       const payload: SendStartPayload = {
         generateJobId,
         recipientIds,
         smtpProfileId: smtp.mode === "profile" ? smtp.profileId : null,
-        smtpOverride:
-          smtp.mode === "inline"
-            ? {
-                host: smtp.host,
-                port: Number(smtp.port),
-                username: smtp.username,
-                password: smtp.password,
-              }
-            : null,
+        smtpOverride,
         subject: message.subject,
         bodyHtml: message.bodyHtml,
         senderName: smtp.senderName,

@@ -7,6 +7,7 @@ import {
   SmtpProfileCreatePayload,
   SmtpProfileUpdatePayload,
   SmtpTestPayload,
+  type SmtpCredentials,
 } from "../../shared/ipc";
 import { WIRE } from "../../shared/wire";
 import { makeOp } from "../ipc-core";
@@ -69,14 +70,6 @@ export class AttachmentNotFound extends Data.TaggedError("AttachmentNotFound")<{
 export type SendError = SmtpConnectFailed | SmtpAuthFailed | SmtpSendFailed | AttachmentNotFound;
 
 // ---- Environment ----
-
-/** The credentials a connection test runs against, inline or stored. */
-export interface SmtpCredentials {
-  readonly host: string;
-  readonly port: number;
-  readonly username: string;
-  readonly password: string;
-}
 
 /** One email the send pipeline delivers through the given credentials. */
 export interface SmtpMailMessage {

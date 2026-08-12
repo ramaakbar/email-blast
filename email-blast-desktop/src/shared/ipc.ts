@@ -541,17 +541,29 @@ export const SmtpDeleteResponse = Schema.Struct({
 export type SmtpDeleteResponse = Schema.Schema.Type<typeof SmtpDeleteResponse>;
 
 /**
- * `smtp.test` payload: the credentials of an inline connection (the Send
- * workspace's SMTP step tests before sending). For a saved profile the
- * renderer calls `testProfile(id)` instead - it does not hold the
- * password.
+ * The inline SMTP credential - the one shape the credential crosses the
+ * seam as: the `smtp.test` payload, the `send.start` inline override,
+ * and the send pipeline's stored override all carry exactly these four
+ * fields. The renderer builds every one of those from its form through
+ * `parseSmtpCredentials` (shared/smtp-validation), so the string port is
+ * coerced once, in shared code. `SendSmtpOverrideInfo` is the
+ * password-stripped projection of this schema for read-back contracts.
  */
-export const SmtpTestPayload = Schema.Struct({
+export const SmtpCredentials = Schema.Struct({
   host: Schema.String,
   port: Schema.Number,
   username: Schema.String,
   password: Schema.String,
 });
+export type SmtpCredentials = Schema.Schema.Type<typeof SmtpCredentials>;
+
+/**
+ * `smtp.test` payload: the credentials of an inline connection (the Send
+ * workspace's SMTP step tests before sending). For a saved profile the
+ * renderer calls `testProfile(id)` instead - it does not hold the
+ * password. Same shape as `SmtpCredentials`.
+ */
+export const SmtpTestPayload = SmtpCredentials;
 export type SmtpTestPayload = Schema.Schema.Type<typeof SmtpTestPayload>;
 
 /** `recipients.listAll` payload: the same filters as `list`, without pagination. */
@@ -593,15 +605,7 @@ export const SendStartPayload = Schema.Struct({
   generateJobId: Schema.Union([Schema.Null, Schema.String]),
   recipientIds: Schema.Array(Schema.String),
   smtpProfileId: Schema.Union([Schema.Null, Schema.String]),
-  smtpOverride: Schema.Union([
-    Schema.Null,
-    Schema.Struct({
-      host: Schema.String,
-      port: Schema.Number,
-      username: Schema.String,
-      password: Schema.String,
-    }),
-  ]),
+  smtpOverride: Schema.Union([Schema.Null, SmtpCredentials]),
   subject: Schema.String,
   bodyHtml: Schema.String,
   senderName: Schema.String,
@@ -615,7 +619,8 @@ export type SendStartPayload = Schema.Schema.Type<typeof SendStartPayload>;
 /**
  * The inline SMTP identity as the renderer may ever see it again - the
  * password stays in the main process, so `send.get-status` never echoes
- * a credential back over the bridge.
+ * a credential back over the bridge. The password-stripped projection
+ * of `SmtpCredentials`; a different contract, not the same concept.
  */
 export const SendSmtpOverrideInfo = Schema.Struct({
   host: Schema.String,
