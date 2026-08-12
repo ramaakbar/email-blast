@@ -27,7 +27,8 @@ import type { CredentialCrypto } from "./credential-crypto";
  * skipped rows and warnings. `read` does all of that and hands the result
  * to the renderer as a preview; `commit` re-applies the user's final
  * mapping to the parsed rows, dedupes against existing recipients, and
- * persists everything as one import batch.
+ * persists everything as one import batch. The allow-duplicates choice
+ * (ticket 09, ADR 0007) skips both dedupes - the Test Blast escape hatch.
  */
 
 /** A spreadsheet that could not be read (missing file, not an Excel file, corrupt). */
@@ -36,12 +37,23 @@ export class UnreadableExcel extends Data.TaggedError("UnreadableExcel")<{
 }> {}
 
 export interface ImportServiceShape {
-  /** Parses the file and returns the preview: rows, suggestion, recipients, report. */
-  readonly read: (excelPath: string) => Effect.Effect<ImportPreview, UnreadableExcel>;
-  /** Applies the final mapping, dedupes, and persists the batch. */
+  /**
+   * Parses the file and returns the preview: rows, suggestion, recipients,
+   * report. `allowDuplicates` (ticket 09, ADR 0007) skips the parse-time
+   * dedupe so the preview matches what a duplicate-allowing commit lands.
+   */
+  readonly read: (
+    excelPath: string,
+    allowDuplicates: boolean,
+  ) => Effect.Effect<ImportPreview, UnreadableExcel>;
+  /**
+   * Applies the final mapping and persists the batch. `allowDuplicates`
+   * skips BOTH dedupes - within-file and against the recipients table.
+   */
   readonly commit: (
     rows: readonly ExcelRow[],
     columnMapping: ColumnMapping,
+    allowDuplicates: boolean,
   ) => Effect.Effect<ImportCommitResponse>;
 }
 
@@ -231,14 +243,18 @@ function parseWorkbook(buffer: Uint8Array): ParsedSheet {
 }
 
 /** The parse-time half of `read`: suggest, map, dedupe, and report. */
-function buildPreview(buffer: Uint8Array): ImportPreview {
+function buildPreview(buffer: Uint8Array, allowDuplicates: boolean): ImportPreview {
   const { columns, rows, droppedHeaders } = parseWorkbook(buffer);
   const mapping = suggestMapping(columns);
   const mapped = rows.flatMap((row) => {
     const recipient = applyMapping(row, mapping);
     return recipient === null ? [] : [recipient];
   });
-  const { deduped, skipped } = dedupeRecipients(mapped);
+  // The allow-duplicates escape hatch (ticket 09, ADR 0007): the preview
+  // reports against the same dedupe the commit will apply.
+  const { deduped, skipped } = allowDuplicates
+    ? { deduped: mapped, skipped: 0 }
+    : dedupeRecipients(mapped);
 
   const warnings: string[] = [];
   if (droppedHeaders.length > 0) {
@@ -270,7 +286,7 @@ function buildPreview(buffer: Uint8Array): ImportPreview {
 
 export function makeImportService(repo: SqliteRepoShape): ImportServiceShape {
   return {
-    read: (excelPath) =>
+    read: (excelPath, allowDuplicates) =>
       Effect.gen(function* () {
         if (!/\.(xlsx|xls)$/i.test(excelPath)) {
           return yield* Effect.fail(
@@ -286,16 +302,25 @@ export function makeImportService(repo: SqliteRepoShape): ImportServiceShape {
               message: error instanceof Error ? error.message : String(error),
             }),
         });
-        return buildPreview(buffer);
+        return buildPreview(buffer, allowDuplicates);
       }),
-    commit: (rows, columnMapping) =>
+    commit: (rows, columnMapping, allowDuplicates) =>
       Effect.gen(function* () {
         const mapped = rows.flatMap((row) => {
           const recipient = applyMapping(row, columnMapping);
           return recipient === null ? [] : [recipient];
         });
-        const existing = yield* repo.listRecipientEmails();
-        const { deduped, skipped } = dedupeRecipients(mapped, existing);
+        // With duplicates allowed, neither dedupe runs and the table's
+        // existing emails are never read (ticket 09, ADR 0007).
+        let deduped: ImportRecipient[];
+        let skipped: number;
+        if (allowDuplicates) {
+          deduped = mapped;
+          skipped = 0;
+        } else {
+          const existing = yield* repo.listRecipientEmails();
+          ({ deduped, skipped } = dedupeRecipients(mapped, existing));
+        }
         const batchId = crypto.randomUUID();
         yield* repo.insertRecipients(
           deduped.map((recipient) => ({ ...recipient, importBatch: batchId })),
@@ -338,16 +363,16 @@ export class ImportService extends Context.Service<ImportService, ImportServiceS
  * commit the user's final column mapping as one batch.
  */
 export const importOperations = {
-  read: makeOp(WIRE.import.read, ImportReadPayload, ImportPreview, (excelPath) =>
+  read: makeOp(WIRE.import.read, ImportReadPayload, ImportPreview, (payload) =>
     Effect.gen(function* () {
       const service = yield* ImportService;
-      return yield* service.read(excelPath);
+      return yield* service.read(payload.excelPath, payload.allowDuplicates);
     }),
   ),
   commit: makeOp(WIRE.import.commit, ImportCommitPayload, ImportCommitResponse, (payload) =>
     Effect.gen(function* () {
       const service = yield* ImportService;
-      return yield* service.commit(payload.rows, payload.columnMapping);
+      return yield* service.commit(payload.rows, payload.columnMapping, payload.allowDuplicates);
     }),
   ),
 };

@@ -316,6 +316,8 @@
   "importPage": {
     "title": "Import",
     "description": "Load recipients from an Excel file, review the preview, and commit them to the database.",
+    "allowDuplicates": "Allow duplicate emails",
+    "allowDuplicatesHint": "Import every row even when emails repeat (for test blasts).",
     "importAnotherFile": "Import another file",
     "dragDropHint": "Drag and drop an Excel file here",
     "fileFormatHint": ".xlsx or .xls, with the recipient list in the first sheet",

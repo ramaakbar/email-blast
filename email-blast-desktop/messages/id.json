@@ -316,6 +316,8 @@
   "importPage": {
     "title": "Impor",
     "description": "Muat penerima dari file Excel, tinjau pratinjaunya, dan simpan ke database.",
+    "allowDuplicates": "Izinkan email duplikat",
+    "allowDuplicatesHint": "Impor semua baris meskipun email berulang (untuk test blast).",
     "importAnotherFile": "Impor file lain",
     "dragDropHint": "Seret dan letakkan file Excel di sini",
     "fileFormatHint": ".xlsx atau .xls, dengan daftar penerima di sheet pertama",

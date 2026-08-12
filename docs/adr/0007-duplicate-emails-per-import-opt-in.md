@@ -1,0 +1,3 @@
+# Duplicate recipient emails are a per-import opt-in
+
+Import dedupes by lowercased email (first occurrence wins, seeded against the table at commit), and a checkbox on the import preview lets the user allow duplicates for that batch — the escape hatch for Test Blasts where every row carries the sender's own address. We chose opt-in over removing the dedupe entirely because a dirty spreadsheet silently double-sending a real campaign is worse than a skipped row, and over keeping it mandatory because the CLI-era test workflow (rewrite all emails to one address and blast) is real. The database has never had a unique constraint on email; dedupe is an import-time behavior, and duplicate rows remain ordinary recipients once imported.

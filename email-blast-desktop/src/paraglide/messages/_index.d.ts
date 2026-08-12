@@ -296,6 +296,8 @@ export * from "./templates_slotaligncenter2.js";
 export * from "./templates_slotalignright2.js";
 export * from "./importpage_title1.js";
 export * from "./importpage_description1.js";
+export * from "./importpage_allowduplicates2.js";
+export * from "./importpage_allowduplicateshint3.js";
 export * from "./importpage_importanotherfile3.js";
 export * from "./importpage_dragdrophint3.js";
 export * from "./importpage_fileformathint3.js";

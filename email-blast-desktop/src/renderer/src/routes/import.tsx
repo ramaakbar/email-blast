@@ -50,8 +50,12 @@ type ImportState =
   | {
       kind: "preview";
       fileName: string;
+      /** Kept for re-reading the same file when the allow-duplicates box toggles. */
+      filePath: string;
       preview: ImportPreview;
       mapping: ColumnMapping;
+      /** The allow-duplicates choice (ticket 09, ADR 0007); the preview is read against it. */
+      allowDuplicates: boolean;
       committing: boolean;
     }
   | { kind: "done"; fileName: string; result: ImportCommitResponse };
@@ -69,26 +73,39 @@ function ImportPage() {
   // clobber a newer screen state.
   const loadToken = useRef(0);
 
-  const loadFile = useCallback(async (filePath: string, fileName: string) => {
-    const token = ++loadToken.current;
-    setError(null);
-    setState({ kind: "loading", fileName });
-    try {
-      const preview = await window.api.import.read(filePath);
-      if (token !== loadToken.current) return;
-      setState({
-        kind: "preview",
-        fileName,
-        preview,
-        mapping: preview.suggestedMapping,
-        committing: false,
-      });
-    } catch (err) {
-      if (token !== loadToken.current) return;
-      setState({ kind: "idle" });
-      setError(errorMessage(err, m["importPage.couldNotRead"]()));
-    }
-  }, []);
+  const loadFile = useCallback(
+    async (
+      filePath: string,
+      fileName: string,
+      allowDuplicates = false,
+      mappingOverride?: ColumnMapping,
+    ) => {
+      const token = ++loadToken.current;
+      setError(null);
+      setState({ kind: "loading", fileName });
+      try {
+        const preview = await window.api.import.read({ excelPath: filePath, allowDuplicates });
+        if (token !== loadToken.current) return;
+        setState({
+          kind: "preview",
+          fileName,
+          filePath,
+          preview,
+          // The allow-duplicates toggle re-reads the same file, so the
+          // user's mapping edits survive; a fresh file starts from the
+          // suggestion again.
+          mapping: mappingOverride ?? preview.suggestedMapping,
+          allowDuplicates,
+          committing: false,
+        });
+      } catch (err) {
+        if (token !== loadToken.current) return;
+        setState({ kind: "idle" });
+        setError(errorMessage(err, m["importPage.couldNotRead"]()));
+      }
+    },
+    [],
+  );
 
   /** Handles a drop anywhere on the page - dropping replaces the current file in any state. */
   const acceptDrop = useCallback(
@@ -135,13 +152,33 @@ function ImportPage() {
     );
   }, []);
 
+  /**
+   * The allow-duplicates box (ticket 09, ADR 0007): the preview is read
+   * against the choice, so toggling re-reads the same file - the
+   * skipped-duplicates report then matches what the commit will do. The
+   * current mapping is carried across the re-read so the user's column
+   * overrides survive.
+   */
+  const setAllowDuplicates = useCallback(
+    (next: boolean) => {
+      if (state.kind !== "preview") return;
+      setState({ ...state, allowDuplicates: next });
+      void loadFile(state.filePath, state.fileName, next, state.mapping);
+    },
+    [state, loadFile],
+  );
+
   const commit = useCallback(async () => {
     if (state.kind !== "preview") return;
-    const { preview, mapping, fileName } = state;
+    const { preview, mapping, fileName, filePath, allowDuplicates } = state;
     const token = loadToken.current;
-    setState({ kind: "preview", fileName, preview, mapping, committing: true });
+    setState({ kind: "preview", fileName, filePath, preview, mapping, allowDuplicates, committing: true });
     try {
-      const result = await window.api.import.commit({ rows: preview.rows, columnMapping: mapping });
+      const result = await window.api.import.commit({
+        rows: preview.rows,
+        columnMapping: mapping,
+        allowDuplicates,
+      });
       if (token !== loadToken.current) return; // the user moved on; the commit still landed
       setState({ kind: "done", fileName, result });
       toast.success(
@@ -170,7 +207,15 @@ function ImportPage() {
     } catch (err) {
       if (token !== loadToken.current) return;
       setError(errorMessage(err, m["importPage.couldNotCommit"]()));
-      setState({ kind: "preview", fileName, preview, mapping, committing: false });
+      setState({
+        kind: "preview",
+        fileName,
+        filePath,
+        preview,
+        mapping,
+        allowDuplicates,
+        committing: false,
+      });
     }
   }, [state]);
 
@@ -244,9 +289,11 @@ function ImportPage() {
           fileName={state.fileName}
           preview={state.preview}
           mapping={state.mapping}
+          allowDuplicates={state.allowDuplicates}
           committing={state.committing}
           onRoleChange={setRole}
           onResetMapping={resetMapping}
+          onAllowDuplicatesChange={setAllowDuplicates}
           onCommit={() => void commit()}
         />
       )}
@@ -298,17 +345,21 @@ function PreviewContent({
   fileName,
   preview,
   mapping,
+  allowDuplicates,
   committing,
   onRoleChange,
   onResetMapping,
+  onAllowDuplicatesChange,
   onCommit,
 }: {
   fileName: string;
   preview: ImportPreview;
   mapping: ColumnMapping;
+  allowDuplicates: boolean;
   committing: boolean;
   onRoleChange: (column: string, role: ColumnRole) => void;
   onResetMapping: () => void;
+  onAllowDuplicatesChange: (allowDuplicates: boolean) => void;
   onCommit: () => void;
 }) {
   const nameColumn = preview.columns.find((column) => mapping[column] === "name");
@@ -345,6 +396,23 @@ function PreviewContent({
               : m["importPage.duplicatesSkippedParsingOther"]({ count: preview.skippedDuplicates })}
           </p>
         )}
+        {/* The Test Blast escape hatch (ticket 09, ADR 0007): checked, the
+        commit skips both dedupes and the preview is re-read against it. */}
+        <div className="mt-3 space-y-1">
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={allowDuplicates}
+              disabled={committing}
+              onChange={(event) => onAllowDuplicatesChange(event.target.checked)}
+            />
+            <span className="text-sm font-medium">{m["importPage.allowDuplicates"]()}</span>
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            {m["importPage.allowDuplicatesHint"]()}
+          </p>
+        </div>
       </section>
 
       <section>

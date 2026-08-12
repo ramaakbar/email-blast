@@ -6,7 +6,13 @@
 
 A person the user communicates with. A recipient has a **name** (required) and zero or more **channel addresses**: an email address for email sending, a phone number for WhatsApp (future).
 
+A recipient's name and channel addresses are **editable** in-app: the edit applies to subsequent send attempts, while past send outcomes keep their record.
+
 Additional fields from the imported Excel (e.g. `instansi`, `keterangan`, `no`) are stored in a **metadata bag** (`Map<String, String>`) and passed through to template placeholders by key. The app does not interpret them — Excel column names map directly to template slot names.
+
+**Email dedupe**:
+At import, a row whose email matches one already in the recipients table (or an earlier row of the same file) is skipped, keeping the first occurrence. A per-import allow-duplicates choice disables this for that batch — primarily for Test Blasts. The database itself never enforces email uniqueness.
+_Avoid_: unique email (there is no uniqueness constraint)
 
 ### Document Template
 
@@ -16,8 +22,12 @@ A document template the user configures to generate PDFs. Defined by:
 - **Slots**: user-declared placeholder names the template expects (e.g. `name`, `instansi`, `tanggal`). The app validates that imported Excel columns include all declared slots.
 - **Output pattern**: how generated files are named (e.g. `LOA_{name}.pdf`)
 
-Document template editing (changing the DOCX or image asset itself) is done externally (Word, Figma, Photoshop). Image templates additionally support in-app per-slot text positioning: X/Y, font size, color, and alignment configured per slot on the template, with a live preview.
+Document template editing (changing the DOCX or image asset itself) is done externally (Word, Figma, Photoshop). Image templates additionally support in-app per-slot text positioning: X/Y, font size, font face, color, and alignment configured per slot on the template, with a live preview.
 _Avoid_: Template (ambiguous — use Document Template for PDF-generation assets, Message Template for email bodies).
+
+**Font Face**:
+A typeface a slot layout renders its text with. The app ships a small bundled set and accepts user-uploaded font files; every slot picks one face, and slots without a choice render in Helvetica Bold (the legacy look). A face renders identically in the live preview and the generated PDF.
+_Avoid_: custom font (a face is either bundled or uploaded; both are ordinary faces)
 
 ### Message Template
 
@@ -66,6 +76,10 @@ Outputs per recipient:
 ### Channel
 
 The delivery mechanism for a Send Job. v1 supports **email** (SMTP). Future: **WhatsApp**. Each channel carries its own configuration shape — email has SMTP, WhatsApp will have auth credentials and message template. The channel is set per Send Job, so a single recipient list could be sent via email today and WhatsApp tomorrow.
+
+**Test Blast**:
+A send meant to verify the pipeline without touching real recipients — typically every row's email rewritten to the sender's own address. A Test Blast import enables the allow-duplicates choice so all rows import; the rows remain ordinary recipients and are cleaned up like any other batch.
+_Avoid_: test send (the send itself is ordinary — the special part is the duplicated addresses)
 
 ### IPC Bridge
 

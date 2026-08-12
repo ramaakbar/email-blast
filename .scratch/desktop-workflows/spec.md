@@ -99,3 +99,45 @@ The app splits into two independent workspaces. The **Generate workspace** cover
 - The old 6-step Compose wizard disappears; Logs keeps both job types with the same history and retry semantics.
 - Glossary and ADRs referenced above are authoritative for terminology (Document Template, Message Template, Template Assignment, SMTP Profile, Sender Identity).
 - The template column is the one interpreted column; every other metadata column remains passthrough per the domain glossary.
+
+---
+
+# Round 2 — Test blasts, recipient fixes, custom fonts
+
+Synthesized from: grill-with-docs session (2026-08-12, decisions 1b/2c/3/4a/5a/6c/7, 8a/9b/10b).
+Domain vocabulary: `CONTEXT.md` (Email dedupe, Test Blast, Font Face, editable Recipient).
+Decisions recorded in: `docs/adr/0007-duplicate-emails-per-import-opt-in.md`, `docs/adr/0008-recipient-edits-are-live.md`, `docs/adr/0009-per-slot-font-faces.md`.
+
+## Problem Statement
+
+Three workflow gaps surfaced after the workspace split. First, testing the send pipeline means rewriting every email in the Excel to the sender's own address, but import dedupe (first occurrence per lowercased email) silently keeps one row — the test blast never happens in the app. Second, a typo'd email fails at SMTP time and the only fix is delete-and-reimport, because recipients have no edit operation and retry resends to the same bad address. Third, certificate text is hardcoded Helvetica Bold — the script-font names the user's real certificates use (Great Vibes, Montserrat, Poppins) live only in the CLI-era tooling.
+
+## User Stories
+
+32. As a user, I want a per-import "allow duplicate emails" choice (default off) on the import preview, so that a test blast where every row carries my own address imports fully.
+33. As a user, I want to edit a recipient's name, email, and phone in the Recipients list, so that I can fix a typo without delete-and-reimport.
+34. As a user, I want a failed row in Logs to offer "fix email", editing the recipient's address and then resending through the existing retry flow, so that a bounce or typo is corrected in the same screen it failed.
+35. As a user, I want edits to apply to not-yet-sent recipients of a paused or sending job (resume picks up the fixed address), while sent/failed rows keep their recorded outcome.
+36. As a user, I want to pick a font face (family and weight where available) per slot of an image Document Template, with the same live preview fidelity as positions, so that certificate names can use a script font and body text a clean sans.
+37. As a user, I want to add my own font files (TTF/OTF) from the template editor, so that an event's specific typeface is available without a code change.
+38. As a user, I want slots without an explicit face to render exactly as today (Helvetica Bold), so that existing templates and past certificates are unaffected.
+
+## Implementation Decisions
+
+- **Import duplicates (ADR 0007)**: the import preview gains a checkbox; when checked, both within-file and against-table dedupe are skipped for that batch and the skipped-count warning reflects it. The database keeps no email uniqueness constraint — it never had one.
+- **Recipient edit (ADR 0008)**: one new `recipients.update` operation (name, email, phone) on the existing RecipientsService, validated by the same rules as import plus a light "must contain @" check on email (import stays permissive). Two surfaces share it: a row edit on the Recipients page, and a "fix email" action on failed rows in Logs that fetches the recipient by id, saves through the same op, and hands off to the existing failed-recipients retry flow. Rows whose recipient was deleted are display-only. Send jobs read current recipient rows at send time, so edits take effect for pending recipients; no email snapshot is added to job history (SMTP error text already records the rejected address).
+- **Font faces (ADR 0009)**: the slot layout config gains a font face id (family + weight), defaulting to Helvetica Bold so legacy rendering and unconfigured slots are unchanged. A main-process font manager lists bundled faces and manages uploads (copied into the app data dir); the template editor picker lists bundled + uploaded, with an "add font" file picker. The renderer preview loads the same file bytes via `FontFace` and pdf-lib embeds them at generate time, preserving the preview-equals-PDF invariant including fit-to-width measurement. Bundled set: Great Vibes, Montserrat, Poppins (all SIL OFL; static weights where available). Known cost: pdf-lib embeds whole font files, so a certificate grows by the size of each used face (~100-500KB).
+- **Migration**: slot layout JSON gains an optional face field (absent = Helvetica Bold); no column changes. Uploaded fonts live outside the database.
+
+## Testing Decisions
+
+- **Pure seam**: slot font resolution (face id → file, missing-face fallback to Helvetica Bold) and the email-format check in `src/shared/`, vitest.
+- **Service seam**: `recipients.update` (validation, not-found) and the font manager (list, add, missing file), service-level tests like the existing `recipients.test.ts`.
+- **E2E seam**: Playwright `_electron` — import a sheet with duplicated emails with the checkbox on and off (off keeps one row, on imports all); edit a recipient's email; fix a failed send's email in Logs and retry lands on the SMTP capture server with the corrected address; pause → edit → resume picks up the new address; a slot with a custom face renders in the generated PDF.
+
+## Out of Scope
+
+- WhatsApp channel (unchanged; the edit op's phone field is future-proofing only).
+- Font subsetting or per-PDF font optimization (full-TTF embed accepted, per ADR 0009).
+- Bulk "fix all rows with this address" in Logs; fixing is per-recipient-row.
+- Global per-template default face with inheritance — every slot picks explicitly or stays Helvetica Bold.

@@ -54,7 +54,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.columns).toEqual(["Name", "Email", "Phone", "Instansi", "Keterangan"]);
     expect(preview.rows).toHaveLength(3);
     // Numeric cells are coerced to their formatted string.
@@ -103,7 +103,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.suggestedMapping).toEqual({
       nama: "name",
       "Alamat Email": "email",
@@ -128,7 +128,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.suggestedMapping).toEqual({
       Name: "name",
       Email: "email",
@@ -161,7 +161,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.suggestedMapping).toEqual({
       Nama: "name",
       Email: "email",
@@ -186,11 +186,39 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.skippedDuplicates).toBe(1);
     expect(preview.recipients.map((r) => r.name)).toEqual(["Alice", "Bob", "Carol"]);
     // The empty-email row is kept but never a duplicate candidate.
     expect(preview.recipients[2].email).toBeNull();
+    db.close();
+  });
+
+  it("keeps every row when allowDuplicates is on, even identical emails", async () => {
+    const file = join(tempDir(), "blast.xlsx");
+    writeWorkbook(file, [
+      ["Name", "Email"],
+      ["Alice", "alice@example.com"],
+      ["Alice Again", "ALICE@example.com"],
+      ["Bob", "bob@example.com"],
+      ["Carol", ""],
+    ]);
+    const db = openDatabase(join(tempDir(), "import.db"));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
+
+    const preview = await use(layer, (s) => s.read(file, true));
+    expect(preview.skippedDuplicates).toBe(0);
+    expect(preview.recipients.map((r) => r.name)).toEqual([
+      "Alice",
+      "Alice Again",
+      "Bob",
+      "Carol",
+    ]);
+    // The empty-email row is kept and never a duplicate candidate, unchanged.
+    expect(preview.recipients[3].email).toBeNull();
     db.close();
   });
 
@@ -206,7 +234,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.warnings.some((w) => w.includes("name"))).toBe(true);
     expect(preview.warnings.some((w) => w.includes("email"))).toBe(true);
     expect(preview.suggestedMapping).toEqual({ "Col A": "metadata", "Col B": "metadata" });
@@ -228,7 +256,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.recipients.map((r) => r.name)).toEqual(["Alice"]);
     expect(preview.warnings.some((w) => w.includes("1 row"))).toBe(true);
     db.close();
@@ -241,7 +269,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const error = await use(layer, (s) => s.read(join(tempDir(), "nope.xlsx"))).catch(
+    const error = await use(layer, (s) => s.read(join(tempDir(), "nope.xlsx"), false)).catch(
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(UnreadableExcel);
@@ -257,7 +285,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const error = await use(layer, (s) => s.read(notExcel)).catch((e: unknown) => e);
+    const error = await use(layer, (s) => s.read(notExcel, false)).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(UnreadableExcel);
     db.close();
   });
@@ -274,7 +302,7 @@ describe("ImportService read (Seam A)", () => {
       makeCredentialCrypto(null, () => {}),
     );
 
-    const preview = await use(layer, (s) => s.read(file));
+    const preview = await use(layer, (s) => s.read(file, false));
     expect(preview.columns).toEqual(["Nama", "Email"]);
     // The second "Nama " column is dropped; the first occurrence's value wins.
     expect(preview.rows).toEqual([{ Nama: "Alice", Email: "alice@example.com" }]);
@@ -305,7 +333,7 @@ describe("ImportService commit (Seam A)", () => {
       Instansi: "metadata",
     };
 
-    const result = await use(layer, (s) => s.commit(rows, mapping));
+    const result = await use(layer, (s) => s.commit(rows, mapping, false));
     expect(result.imported).toBe(3);
     expect(result.duplicatesSkipped).toBe(0);
     expect(result.batchId).toMatch(/^[0-9a-f-]{36}$/);
@@ -345,7 +373,7 @@ describe("ImportService commit (Seam A)", () => {
     ];
     const mapping: ColumnMapping = { Person: "name", Mail: "email" };
 
-    const result = await use(layer, (s) => s.commit(rows, mapping));
+    const result = await use(layer, (s) => s.commit(rows, mapping, false));
     expect(result.imported).toBe(2);
 
     const stored = db.prepare("SELECT name, email FROM recipients ORDER BY name").all() as {
@@ -369,7 +397,7 @@ describe("ImportService commit (Seam A)", () => {
     ];
     const mapping: ColumnMapping = { Name: "name", Email: "email" };
 
-    const first = await use(layer, (s) => s.commit(rows, mapping));
+    const first = await use(layer, (s) => s.commit(rows, mapping, false));
     expect(first.imported).toBe(2);
 
     // Re-import: both already exist, plus a duplicate within the batch itself.
@@ -381,6 +409,7 @@ describe("ImportService commit (Seam A)", () => {
           { Name: "Carol Again", Email: "carol@example.com" },
         ],
         mapping,
+        false,
       ),
     );
     // Alice exists in the DB; Carol Again duplicates Carol within the batch.
@@ -392,6 +421,41 @@ describe("ImportService commit (Seam A)", () => {
     db.close();
   });
 
+  it("imports duplicates within the batch and against the table when allowDuplicates is on", async () => {
+    const db = openDatabase(join(tempDir(), "import.db"));
+    const layer = ImportService.Live(
+      db,
+      makeCredentialCrypto(null, () => {}),
+    );
+    const mapping: ColumnMapping = { Name: "name", Email: "email" };
+
+    const first = await use(layer, (s) =>
+      s.commit([{ Name: "Alice", Email: "alice@example.com" }], mapping, false),
+    );
+    expect(first.imported).toBe(1);
+
+    // Every row duplicates either Alice (already imported) or itself.
+    const second = await use(
+      layer,
+      (s) =>
+        s.commit(
+          [
+            { Name: "Alice Again", Email: "ALICE@example.com" },
+            { Name: "Bob", Email: "bob@example.com" },
+            { Name: "Bob Again", Email: "bob@example.com" },
+          ],
+          mapping,
+          true,
+        ),
+    );
+    expect(second.imported).toBe(3);
+    expect(second.duplicatesSkipped).toBe(0);
+
+    const count = db.prepare("SELECT COUNT(*) AS n FROM recipients").get() as { n: number };
+    expect(count.n).toBe(4);
+    db.close();
+  });
+
   it("commits nothing when no column is mapped to name", async () => {
     const db = openDatabase(join(tempDir(), "import.db"));
     const layer = ImportService.Live(
@@ -400,7 +464,7 @@ describe("ImportService commit (Seam A)", () => {
     );
 
     const result = await use(layer, (s) =>
-      s.commit([{ A: "x", B: "y@example.com" }], { A: "metadata", B: "email" }),
+      s.commit([{ A: "x", B: "y@example.com" }], { A: "metadata", B: "email" }, false),
     );
     expect(result).toEqual({
       imported: 0,
@@ -428,6 +492,7 @@ describe("ImportService commit (Seam A)", () => {
           { Name: "", Email: "ghost@example.com" },
         ],
         { Name: "name", Email: "email" },
+        false,
       ),
     );
     expect(result).toEqual({
@@ -451,7 +516,7 @@ describe("ImportService commit (Seam A)", () => {
         Name: "name",
         Email: "email",
         Keterangan: "skip",
-      }),
+      }, false),
     );
     expect(result.imported).toBe(1);
 
@@ -471,10 +536,10 @@ describe("ImportService commit (Seam A)", () => {
     const mapping: ColumnMapping = { Name: "name", Email: "email" };
 
     const first = await use(layer, (s) =>
-      s.commit([{ Name: "Alice", Email: "alice@example.com" }], mapping),
+      s.commit([{ Name: "Alice", Email: "alice@example.com" }], mapping, false),
     );
     const second = await use(layer, (s) =>
-      s.commit([{ Name: "Dana", Email: "dana@example.com" }], mapping),
+      s.commit([{ Name: "Dana", Email: "dana@example.com" }], mapping, false),
     );
     expect(first.batchId).not.toBe(second.batchId);
 

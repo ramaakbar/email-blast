@@ -106,18 +106,30 @@ export const ImportPreview = Schema.Struct({
 });
 export type ImportPreview = Schema.Schema.Type<typeof ImportPreview>;
 
-/** `import.read` payload: the absolute path of the `.xlsx`/`.xls` file. */
-export const ImportReadPayload = Schema.String;
+/**
+ * `import.read` payload: the absolute path of the `.xlsx`/`.xls` file
+ * plus the allow-duplicates choice (ticket 09, ADR 0007). The preview is
+ * computed against the choice so the skipped-duplicates report matches
+ * what the user will commit.
+ */
+export const ImportReadPayload = Schema.Struct({
+  excelPath: Schema.String,
+  allowDuplicates: Schema.Boolean,
+});
+export type ImportReadPayload = Schema.Schema.Type<typeof ImportReadPayload>;
 
 /**
  * `import.commit` payload: the parsed rows from the preview plus the final
  * column mapping. The main process re-applies the mapping, dedupes against
  * existing recipients, and persists - the renderer never constructs
- * recipients itself.
+ * recipients itself. `allowDuplicates` (ticket 09, ADR 0007) skips BOTH
+ * dedupes - within-file and against-table - so a Test Blast sheet whose
+ * rows all carry one address imports every row.
  */
 export const ImportCommitPayload = Schema.Struct({
   rows: Schema.Array(ExcelRow),
   columnMapping: ColumnMapping,
+  allowDuplicates: Schema.Boolean,
 });
 export type ImportCommitPayload = Schema.Schema.Type<typeof ImportCommitPayload>;
 
@@ -779,9 +791,15 @@ export interface Api {
     set(key: string, value: string): Promise<void>;
   };
   import: {
-    /** Parses an Excel file and returns the import preview (rows, mapping suggestion, report). */
-    read(excelPath: string): Promise<ImportPreview>;
-    /** Applies the column mapping, dedupes against existing recipients, and persists the batch. */
+    /**
+     * Parses an Excel file and returns the import preview (rows, mapping
+     * suggestion, report), computed against the allow-duplicates choice.
+     */
+    read(payload: ImportReadPayload): Promise<ImportPreview>;
+    /**
+     * Applies the column mapping, dedupes against existing recipients
+     * (unless allowDuplicates), and persists the batch.
+     */
     commit(payload: ImportCommitPayload): Promise<ImportCommitResponse>;
   };
   recipients: {
