@@ -1,4 +1,4 @@
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Data, Effect, Layer, Option, Schema } from "effect";
 import Database from "better-sqlite3";
 import {
   ImportBatch,
@@ -8,11 +8,21 @@ import {
   RecipientDeleteResponse,
   RecipientListAllPayload,
   RecipientListPayload,
+  RecipientUpdatePayload,
 } from "../../shared/ipc";
+import { validateRecipientEdit } from "../../shared/recipient-edit";
 import { WIRE } from "../../shared/wire";
 import { makeOp } from "../ipc-core";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 import type { CredentialCrypto } from "./credential-crypto";
+
+/** An edit that fails validation (empty name, email without @). */
+export class InvalidRecipientEdit extends Data.TaggedError("InvalidRecipientEdit")<{
+  readonly message: string;
+}> {}
+
+/** Editing a recipient whose id no longer exists (deleted since it was fetched). */
+export class RecipientNotFound extends Data.TaggedError("RecipientNotFound")<{}> {}
 
 /**
  * The recipients directory (ticket 11): listing with search/filter/
@@ -25,6 +35,14 @@ export interface RecipientsServiceShape {
   readonly list: (filter: RecipientListPayload) => Effect.Effect<PaginatedRecipients>;
   /** A single recipient by id, or none when no such id exists. */
   readonly get: (id: string) => Effect.Effect<Option.Option<Recipient>>;
+  /**
+   * Edits a recipient's name, email, and phone (ADR 0008). Same rules as
+   * import (name required, email/phone optional) plus a light "must
+   * contain @" check on the email - edit-only, import stays permissive.
+   */
+  readonly update: (
+    payload: RecipientUpdatePayload,
+  ) => Effect.Effect<Recipient, InvalidRecipientEdit | RecipientNotFound>;
   /** Deletes the given ids and returns how many rows were removed. */
   readonly delete: (ids: readonly string[]) => Effect.Effect<number>;
   /** Every distinct import batch, newest first, with its stamp and size. */
@@ -44,6 +62,18 @@ export function makeRecipientsService(repo: SqliteRepoShape): RecipientsServiceS
         return { items, total, page: filter.page, pageSize: filter.pageSize };
       }),
     get: (id) => repo.getRecipient(id),
+    update: (payload) =>
+      Effect.gen(function* () {
+        const error = validateRecipientEdit(payload.name, payload.email);
+        if (error !== null) return yield* Effect.fail(new InvalidRecipientEdit({ message: error }));
+        const updated = yield* repo.updateRecipient(payload.id, {
+          name: payload.name.trim(),
+          email: payload.email,
+          phone: payload.phone,
+        });
+        if (Option.isNone(updated)) return yield* Effect.fail(new RecipientNotFound());
+        return updated.value;
+      }),
     delete: (ids) => repo.deleteRecipients(ids),
     listBatches: () => repo.listImportBatches(),
     listAll: (filter) => repo.listAllRecipients(filter),
@@ -89,6 +119,12 @@ export const recipientsOperations = {
     Effect.gen(function* () {
       const service = yield* RecipientsService;
       return Option.getOrNull(yield* service.get(id));
+    }),
+  ),
+  update: makeOp(WIRE.recipients.update, RecipientUpdatePayload, Recipient, (payload) =>
+    Effect.gen(function* () {
+      const service = yield* RecipientsService;
+      return yield* service.update(payload);
     }),
   ),
   delete: makeOp(WIRE.recipients.delete, RecipientDeletePayload, RecipientDeleteResponse, (ids) =>

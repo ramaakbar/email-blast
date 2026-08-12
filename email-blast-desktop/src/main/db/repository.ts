@@ -128,6 +128,18 @@ export interface RecipientDraft {
   readonly importBatch: string;
 }
 
+/**
+ * The editable recipient fields (ADR 0008). The metadata bag is a record
+ * of the import and is never edited in-app. Emails are normalized the
+ * same way as on insert (trim + lowercase) so the stored value and the
+ * dedupe key can never drift apart.
+ */
+export interface RecipientPatch {
+  readonly name: string;
+  readonly email: string | null;
+  readonly phone: string | null;
+}
+
 export interface SqliteRepoShape {
   readonly getSetting: (key: string) => Effect.Effect<Option.Option<string>>;
   readonly setSetting: (key: string, value: string) => Effect.Effect<void>;
@@ -152,6 +164,16 @@ export interface SqliteRepoShape {
   ) => Effect.Effect<{ readonly items: Recipient[]; readonly total: number }>;
   /** A single recipient by id, or none when no such row exists. */
   readonly getRecipient: (id: string) => Effect.Effect<Option.Option<Recipient>>;
+  /**
+   * Edits the address fields of one recipient (ADR 0008). Returns the
+   * updated row, or none when no such id exists. Send jobs read current
+   * recipient rows at send time, so the edit applies to recipients still
+   * pending while sent/failed outcomes keep their recorded result.
+   */
+  readonly updateRecipient: (
+    id: string,
+    patch: RecipientPatch,
+  ) => Effect.Effect<Option.Option<Recipient>>;
   /**
    * Deletes the given ids and returns how many rows were removed. Historical
    * job rows keep referencing the deleted ids (foreign keys are not
@@ -837,6 +859,23 @@ export function makeSqliteRepo(
       }),
     getRecipient: (id) =>
       Effect.sync(() => {
+        const row = dbx.select(recipientColumns).from(r).where(eq(r.id, id)).get() as
+          | RecipientRow
+          | undefined;
+        return row === undefined ? Option.none() : Option.some(toRecipient(row));
+      }),
+    updateRecipient: (id, patch) =>
+      Effect.sync(() => {
+        const result = dbx
+          .update(r)
+          .set({
+            name: patch.name,
+            email: normalizeEmail(patch.email),
+            phone: normalizePhone(patch.phone),
+          })
+          .where(eq(r.id, id))
+          .run();
+        if (result.changes === 0) return Option.none();
         const row = dbx.select(recipientColumns).from(r).where(eq(r.id, id)).get() as
           | RecipientRow
           | undefined;

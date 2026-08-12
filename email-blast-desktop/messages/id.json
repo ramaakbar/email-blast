@@ -390,7 +390,13 @@
     "deletedCountOne": "{count} penerima dihapus.",
     "deletedCountOther": "{count} penerima dihapus.",
     "deleteTitleOne": "Hapus {count} penerima?",
-    "deleteTitleOther": "Hapus {count} penerima?"
+    "deleteTitleOther": "Hapus {count} penerima?",
+    "edit": "Edit",
+    "editTitle": "Edit penerima",
+    "updated": "Penerima diperbarui.",
+    "couldNotUpdate": "Gagal memperbarui penerima.",
+    "nameRequired": "Nama wajib diisi.",
+    "emailMustContainAt": "Email harus mengandung @."
   },
   "logs": {
     "title": "Log",
@@ -444,7 +450,12 @@
     "backToLogs": "Kembali ke Log",
     "noMatchSearch": "Tidak ada penerima yang cocok dengan pencarian",
     "noMatchHint": "Coba nama, email, atau status lain.",
-    "status": "Status"
+    "status": "Status",
+    "fixEmail": "Perbaiki email",
+    "fixEmailTitle": "Perbaiki alamat email",
+    "recipientDeletedNoEdit": "Penerima ini telah dihapus - baris ini hanya bisa dibaca.",
+    "emailFixedRetrying": "Alamat diperbaiki - mencoba kirim ulang.",
+    "couldNotFixEmail": "Gagal memperbaiki email."
   },
   "send": {
     "title": "Kirim",

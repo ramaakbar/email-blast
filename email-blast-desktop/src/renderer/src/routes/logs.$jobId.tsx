@@ -8,6 +8,7 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import { ArrowLeft, Loader2, Play, RotateCcw, Search } from "lucide-react";
+import { toast } from "sonner";
 import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { SendStatusBadge } from "@/components/send-status-badge";
@@ -16,7 +17,7 @@ import { buildRetryPrefill } from "@/lib/send-prefill";
 import { errorMessage } from "@/lib/error-message";
 import { formatDuration, formatTimestamp } from "@/lib/format";
 import { useResumeSend } from "@/lib/use-resume-send";
-import type { SendJobRecipient, SendRecipientStatus } from "../../../shared/ipc";
+import type { Recipient, SendJobRecipient, SendRecipientStatus } from "../../../shared/ipc";
 
 export const Route = createFileRoute("/logs/$jobId")({
   component: JobDetailPage,
@@ -53,6 +54,7 @@ function JobDetailPage() {
   const { jobId } = Route.useParams();
   const [searchInput, setSearchInput] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>(ALL_STATUSES);
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const { resumingId, resumeError, dismissResumeError, resume } = useResumeSend();
 
   const detailQuery = useQuery({
@@ -201,13 +203,22 @@ function JobDetailPage() {
         header: "",
         cell: (info) =>
           info.row.original.status === "failed" ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => retry([info.row.original.recipientId])}
-            >
-              {m["jobDetail.retry"]()}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => retry([info.row.original.recipientId])}
+              >
+                {m["jobDetail.retry"]()}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setFixingId(info.row.original.recipientId)}
+              >
+                {m["jobDetail.fixEmail"]()}
+              </Button>
+            </div>
           ) : null,
       }),
     ],
@@ -444,6 +455,144 @@ function JobDetailPage() {
             )}
           </>
         )}
+      </div>
+
+      {fixingId !== null && (
+        <FixEmailDialog
+          recipientId={fixingId}
+          onClose={() => setFixingId(null)}
+          onHandOff={() => {
+            setFixingId(null);
+            retry([fixingId]);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Logs "fix email" dialog (ADR 0008, ticket 10): fetches the failed
+ * recipient by id, lets the user correct the address through the same
+ * `recipients.update` op the Recipients page uses, then hands off to the
+ * existing failed-recipients retry flow. A row whose recipient was
+ * deleted since the job ran is display-only - there is nothing to edit.
+ */
+function FixEmailDialog({
+  recipientId,
+  onClose,
+  onHandOff,
+}: {
+  recipientId: string;
+  onClose: () => void;
+  onHandOff: () => void;
+}) {
+  const [recipient, setRecipient] = useState<Recipient | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [deleted, setDeleted] = useState(false);
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.recipients
+      .get(recipientId)
+      .then((fetched) => {
+        if (cancelled) return;
+        if (fetched === null) {
+          setDeleted(true);
+        } else {
+          setRecipient(fetched);
+          setEmail(fetched.email ?? "");
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(errorMessage(err, m["jobDetail.couldNotFixEmail"]()));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [recipientId]);
+
+  const save = async (): Promise<void> => {
+    if (recipient === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await window.api.recipients.update({
+        id: recipient.id,
+        // The edit touches only the address: the name and phone are
+        // carried through unchanged from the fetched row.
+        name: recipient.name,
+        email: email.trim() === "" ? null : email,
+        phone: recipient.phone,
+      });
+      toast.success(m["jobDetail.emailFixedRetrying"]());
+      onHandOff();
+    } catch (err) {
+      setSaving(false);
+      setError(errorMessage(err, m["jobDetail.couldNotFixEmail"]()));
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fix-email-title"
+        className="w-full max-w-sm rounded-lg border bg-card p-6 shadow-lg"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2 id="fix-email-title" className="text-lg font-semibold">
+          {m["jobDetail.fixEmailTitle"]()}
+        </h2>
+        {loading ? (
+          <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> {m["common.loading"]()}
+          </p>
+        ) : deleted ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            {m["jobDetail.recipientDeletedNoEdit"]()}
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-muted-foreground">{recipient?.name}</p>
+            <label className="mt-4 block text-sm">
+              <span className="font-medium">{m["recipients.email"]()}</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+              />
+            </label>
+          </>
+        )}
+        {error !== null && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            {m["common.cancel"]()}
+          </Button>
+          {!loading && !deleted && (
+            <Button onClick={() => void save()} disabled={saving} autoFocus>
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> {m["common.saving"]()}
+                </>
+              ) : (
+                m["common.save"]()
+              )}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -97,6 +97,121 @@ describe("RecipientsService get (Seam A)", () => {
   });
 });
 
+describe("RecipientsService update (Seam A, ADR 0008)", () => {
+  it("edits name, email, and phone and returns the updated recipient", async () => {
+    const db = openDatabase(join(tempDir(), "recipients.db"));
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
+    await seed(layer, SAMPLE_DRAFTS);
+
+    const page = await use(layer, (s) =>
+      s.list({ search: "alice", importBatch: null, page: 1, pageSize: 25 }),
+    );
+    const alice = page.items[0];
+
+    const updated = await use(layer, (s) =>
+      s.update({ id: alice.id, name: "Alice Rahma", email: "alice.rahma@example.com", phone: "0813" }),
+    );
+    expect(updated).toMatchObject({
+      id: alice.id,
+      name: "Alice Rahma",
+      email: "alice.rahma@example.com",
+      phone: "0813",
+      // The metadata bag is a record of the import; edits never touch it.
+      metadata: { instansi: "Kampus A" },
+      importBatch: BATCH_A,
+    });
+
+    const refetched = await use(layer, (s) => s.get(alice.id));
+    expect(refetched).toEqual(Option.some(updated));
+    db.close();
+  });
+
+  it("normalizes the email (trim + lowercase) and clears blank phone to null", async () => {
+    const db = openDatabase(join(tempDir(), "recipients.db"));
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
+    await seed(layer, SAMPLE_DRAFTS);
+
+    const page = await use(layer, (s) =>
+      s.list({ search: "alice", importBatch: null, page: 1, pageSize: 25 }),
+    );
+    const alice = page.items[0];
+
+    const updated = await use(layer, (s) =>
+      s.update({ id: alice.id, name: "Alice", email: "  Alice@Example.COM  ", phone: "  " }),
+    );
+    expect(updated.email).toBe("alice@example.com");
+    expect(updated.phone).toBeNull();
+    db.close();
+  });
+
+  it("rejects an empty name with InvalidRecipientEdit", async () => {
+    const db = openDatabase(join(tempDir(), "recipients.db"));
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
+    await seed(layer, SAMPLE_DRAFTS);
+
+    const page = await use(layer, (s) =>
+      s.list({ search: "alice", importBatch: null, page: 1, pageSize: 25 }),
+    );
+    const alice = page.items[0];
+
+    await expect(
+      use(layer, (s) => s.update({ id: alice.id, name: "  ", email: "a@b.co", phone: null })),
+    ).rejects.toMatchObject({ _tag: "InvalidRecipientEdit" });
+    db.close();
+  });
+
+  it("rejects an email without @ with InvalidRecipientEdit (edit-only check)", async () => {
+    const db = openDatabase(join(tempDir(), "recipients.db"));
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
+    await seed(layer, SAMPLE_DRAFTS);
+
+    const page = await use(layer, (s) =>
+      s.list({ search: "alice", importBatch: null, page: 1, pageSize: 25 }),
+    );
+    const alice = page.items[0];
+
+    await expect(
+      use(layer, (s) =>
+        s.update({ id: alice.id, name: "Alice", email: "alice.example.com", phone: null }),
+      ),
+    ).rejects.toMatchObject({ _tag: "InvalidRecipientEdit" });
+
+    // The failed edit changed nothing.
+    const unchanged = await use(layer, (s) => s.get(alice.id));
+    expect(unchanged.pipe(Option.map((r) => r.email))).toEqual(Option.some("alice@example.com"));
+    db.close();
+  });
+
+  it("fails with RecipientNotFound for an unknown id", async () => {
+    const db = openDatabase(join(tempDir(), "recipients.db"));
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
+    await seed(layer, SAMPLE_DRAFTS);
+
+    await expect(
+      use(layer, (s) => s.update({ id: "no-such-id", name: "Alice", email: "a@b.co", phone: null })),
+    ).rejects.toMatchObject({ _tag: "RecipientNotFound" });
+    db.close();
+  });
+
+  it("accepts a null email (recipients may have none - import is permissive)", async () => {
+    const db = openDatabase(join(tempDir(), "recipients.db"));
+    const layer = RecipientsService.Live(db, makeCredentialCrypto(null, () => {}));
+    await seed(layer, SAMPLE_DRAFTS);
+
+    const page = await use(layer, (s) =>
+      s.list({ search: "carol", importBatch: null, page: 1, pageSize: 25 }),
+    );
+    const carol = page.items[0];
+
+    const updated = await use(layer, (s) =>
+      s.update({ id: carol.id, name: "Carol", email: null, phone: "0821" }),
+    );
+    expect(updated.email).toBeNull();
+    expect(updated.phone).toBe("0821");
+    db.close();
+  });
+});
+
 describe("RecipientsService delete (Seam A)", () => {
   it("deletes the given ids, returns the count, and shrinks list totals", async () => {
     const db = openDatabase(join(tempDir(), "recipients.db"));

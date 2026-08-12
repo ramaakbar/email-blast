@@ -1,0 +1,3 @@
+# Recipient addresses are editable and edits apply to live jobs
+
+Recipients gained an in-app edit (name, email, phone), surfaced both on the Recipients page and inline on failed rows in Logs, where the fix hands off to the existing retry flow. Edits apply to subsequent send attempts: a paused or sending job reads current recipient rows, so fixing an address mid-job takes effect for recipients still pending, while sent/failed rows keep their recorded outcome. We chose live reads over freezing recipients at job start because the pipeline already resolves addresses at send time and the snapshot model would add storage and code for no observed benefit; the SMTP error text already records the rejected address, so job history needs no email snapshot of its own.

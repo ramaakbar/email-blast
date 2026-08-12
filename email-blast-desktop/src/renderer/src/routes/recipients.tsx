@@ -8,14 +8,14 @@ import {
   useReactTable,
   type RowSelectionState,
 } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight, Loader2, Search, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Pencil, Search, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { formatTimestamp } from "@/lib/format";
-import type { ImportBatch, Recipient } from "../../../shared/ipc";
+import type { ImportBatch, Recipient, RecipientUpdatePayload } from "../../../shared/ipc";
 
 export const Route = createFileRoute("/recipients")({
   component: RecipientsPage,
@@ -42,8 +42,10 @@ function RecipientsPage() {
   const [page, setPage] = useState(1);
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<Recipient | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   // Debounce the search box so typing does not fire an IPC round trip per key.
   useEffect(() => {
@@ -103,6 +105,20 @@ function RecipientsPage() {
     },
   });
 
+  const updateMutation = useMutation({
+    mutationFn: (payload: RecipientUpdatePayload) => window.api.recipients.update(payload),
+    onSuccess: () => {
+      toast.success(m["recipients.updated"]());
+      setEditing(null);
+      // The detail panel reads the row by id, so a closed panel next to
+      // an edited row must not surface stale fields.
+      void queryClient.invalidateQueries({ queryKey: ["recipients"], refetchType: "all" });
+    },
+    onError: (err) => {
+      setUpdateError(errorMessage(err, m["recipients.couldNotUpdate"]()));
+    },
+  });
+
   const selectedCount = Object.keys(rowSelection).length;
   const total = listQuery.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -156,6 +172,27 @@ function RecipientsPage() {
         header: m["recipients.imported"],
         cell: (info) => formatTimestamp(info.getValue()),
       }),
+      columnHelper.display({
+        id: "actions",
+        header: "",
+        cell: ({ row }) => (
+          // Editing must not open the detail panel.
+          // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+          <div onClick={(event) => event.stopPropagation()}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setUpdateError(null);
+                setEditing(row.original);
+              }}
+              aria-label={m["recipients.edit"]()}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          </div>
+        ),
+      }),
     ],
     [batchesQuery.data],
   );
@@ -182,16 +219,18 @@ function RecipientsPage() {
     getCoreRowModel: getCoreRowModel(),
   });
 
-  // Escape closes whichever overlay is open (the panel, then the dialog).
+  // Escape closes whichever overlay is open (the edit dialog, then the
+  // confirm dialog, then the panel).
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
-      if (confirmOpen) setConfirmOpen(false);
+      if (editing !== null) setEditing(null);
+      else if (confirmOpen) setConfirmOpen(false);
       else if (selectedId !== null) setSelectedId(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [confirmOpen, selectedId]);
+  }, [editing, confirmOpen, selectedId]);
 
   // The panel fetches the row by id (the spec's `get`) instead of reading
   // it from the page's items, so it stays correct while the list refetches
@@ -398,6 +437,23 @@ function RecipientsPage() {
           onConfirm={() => deleteMutation.mutate(Object.keys(rowSelection))}
         />
       )}
+
+      {editing !== null && (
+        <EditRecipientDialog
+          recipient={editing}
+          pending={updateMutation.isPending}
+          error={updateError}
+          onCancel={() => setEditing(null)}
+          onSave={(values) =>
+            updateMutation.mutate({
+              id: editing.id,
+              name: values.name,
+              email: values.email,
+              phone: values.phone,
+            })
+          }
+        />
+      )}
     </div>
   );
 }
@@ -484,6 +540,104 @@ function DetailPanel({
         </section>
       </div>
     </aside>
+  );
+}
+
+/**
+ * The per-row edit dialog (ADR 0008): name, email, and phone prefilled
+ * from the row. Email is optional but must contain "@" when given - the
+ * main process validates and rejects with the typed error shown here.
+ * The metadata bag is not editable; it stays a record of the import.
+ */
+function EditRecipientDialog({
+  recipient,
+  pending,
+  error,
+  onCancel,
+  onSave,
+}: {
+  recipient: Recipient;
+  pending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onSave: (values: { name: string; email: string | null; phone: string | null }) => void;
+}) {
+  const [name, setName] = useState(recipient.name);
+  const [email, setEmail] = useState(recipient.email ?? "");
+  const [phone, setPhone] = useState(recipient.phone ?? "");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onMouseDown={onCancel}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-recipient-title"
+        className="w-full max-w-sm rounded-lg border bg-card p-6 shadow-lg"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2 id="edit-recipient-title" className="text-lg font-semibold">
+          {m["recipients.editTitle"]()}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">{recipient.name}</p>
+        <div className="mt-4 space-y-3">
+          <label className="block text-sm">
+            <span className="font-medium">{m["recipients.name"]()}</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium">{m["recipients.email"]()}</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="font-medium">{m["recipients.phone"]()}</span>
+            <input
+              type="tel"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+            />
+          </label>
+        </div>
+        {error !== null && <p className="mt-3 text-sm text-rose-700">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" onClick={onCancel} disabled={pending}>
+            {m["common.cancel"]()}
+          </Button>
+          <Button
+            onClick={() =>
+              onSave({
+                name,
+                email: email.trim() === "" ? null : email,
+                phone: phone.trim() === "" ? null : phone,
+              })
+            }
+            disabled={pending}
+            autoFocus
+          >
+            {pending ? (
+              <>
+                <Loader2 className="size-4 animate-spin" /> {m["common.saving"]()}
+              </>
+            ) : (
+              m["common.save"]()
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

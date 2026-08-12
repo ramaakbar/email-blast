@@ -204,6 +204,20 @@ export const RecipientDeleteResponse = Schema.Struct({
 });
 export type RecipientDeleteResponse = Schema.Schema.Type<typeof RecipientDeleteResponse>;
 
+/**
+ * `recipients.update` payload: the editable address fields of one
+ * recipient (ADR 0008). The metadata bag is not editable here - it stays
+ * a record of the import. The email gets a light "must contain @" check
+ * on edit only; import stays permissive.
+ */
+export const RecipientUpdatePayload = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  email: Schema.Union([Schema.Null, Schema.String]),
+  phone: Schema.Union([Schema.Null, Schema.String]),
+});
+export type RecipientUpdatePayload = Schema.Schema.Type<typeof RecipientUpdatePayload>;
+
 // ---- Templates domain (ticket 12) ----
 
 /**
@@ -807,6 +821,12 @@ export interface Api {
     list(payload: RecipientListPayload): Promise<PaginatedRecipients>;
     /** A single recipient by id, or null when no such id exists. */
     get(id: string): Promise<Recipient | null>;
+    /**
+     * Edits a recipient's name, email, and phone (ADR 0008). The email
+     * must contain "@" (edit-only check; import stays permissive).
+     * Rejects with RecipientNotFound when the id no longer exists.
+     */
+    update(payload: RecipientUpdatePayload): Promise<Recipient>;
     /** Deletes the given recipients and returns how many rows were removed. */
     delete(ids: string[]): Promise<RecipientDeleteResponse>;
     /** Every distinct import batch, newest first, with its size and stamp. */

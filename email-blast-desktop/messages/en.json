@@ -390,7 +390,13 @@
     "deletedCountOne": "Deleted {count} recipient.",
     "deletedCountOther": "Deleted {count} recipients.",
     "deleteTitleOne": "Delete {count} recipient?",
-    "deleteTitleOther": "Delete {count} recipients?"
+    "deleteTitleOther": "Delete {count} recipients?",
+    "edit": "Edit",
+    "editTitle": "Edit recipient",
+    "updated": "Recipient updated.",
+    "couldNotUpdate": "Could not update the recipient.",
+    "nameRequired": "Name is required.",
+    "emailMustContainAt": "Email must contain @."
   },
   "logs": {
     "title": "Logs",
@@ -444,7 +450,12 @@
     "backToLogs": "Back to Logs",
     "noMatchSearch": "No recipients match your search",
     "noMatchHint": "Try a different name, email, or status.",
-    "status": "Status"
+    "status": "Status",
+    "fixEmail": "Fix email",
+    "fixEmailTitle": "Fix email address",
+    "recipientDeletedNoEdit": "This recipient was deleted - the row is read-only.",
+    "emailFixedRetrying": "Address fixed - retrying the send.",
+    "couldNotFixEmail": "Could not fix the email."
   },
   "send": {
     "title": "Send",

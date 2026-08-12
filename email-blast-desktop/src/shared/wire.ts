@@ -46,6 +46,7 @@ export const WIRE = {
   recipients: {
     list: { channel: "recipients:list", args: 1 },
     get: { channel: "recipients:get", args: 1 },
+    update: { channel: "recipients:update", args: 1 },
     delete: { channel: "recipients:delete", args: 1 },
     listBatches: { channel: "recipients:list-batches", args: 0 },
     listAll: { channel: "recipients:list-all", args: 1 },
