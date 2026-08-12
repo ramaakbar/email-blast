@@ -2,7 +2,7 @@
 
 **What to build:** The SMTP inline-credential concept currently exists as three unconnected shapes. Lift it into ONE Effect `Schema` in `shared/ipc.ts`; main and renderer consume that same shape, and the renderer's hand-rolled reshape plus `Number(port)` coercion dies.
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Origin:** architecture review candidate 2 (Strong) — "The SMTP credential leaks across the seam as three unconnected shapes; string/number drift is untyped."
 
@@ -31,3 +31,14 @@
 - `pnpm test` — smtp/send-jobs suites cover the changed paths
 - e2e (19 tests) against a fresh `pnpm package` — the Send workspace's inline override path (connect test + send) is the proof
 - Renderer compiles with zero `Number(` coercion of the port
+
+## Answer
+
+Implemented in `email-blast-desktop/` (commits `d1e0f54` refactor + `cc0eba2`, ADR docs in `0abe5ed`):
+
+- `SmtpCredentials` is now a named `Schema.Struct` in `shared/ipc.ts` (`{ host, port: Schema.Number, username, password }`); `SendStartPayload.smtpOverride` and `SmtpTestPayload` reference it; `SendSmtpOverrideInfo` stays as the password-stripped projection for read-back contracts
+- `main/services/smtp.ts` deleted its local `SmtpCredentials` interface and imports the shared type; `send-jobs.ts` imports the same type
+- `resolveCredentials` (the decrypted-JSON path) now uses `Schema.decodeUnknownSync(SmtpCredentials)` — the hand-rolled four-`typeof` ladder is gone, the error path preserved as `InvalidSendRequest`
+- Renderer: `shared/smtp-validation.ts` owns `parseSmtpCredentials(form)` — the string port is coerced once, in shared code; `smtp-step.tsx` builds the override through that helper, so the renderer holds zero `Number(port)` coercion
+
+Verified: typecheck (node + web), oxlint, smtp/send-jobs unit suites, and the Send workspace inline-override e2e (connect test + send to the SMTP capture server) against a fresh package.

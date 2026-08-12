@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** resolved
+**Status:** done
 
 - [x] User can create, edit, and delete a Message Template (name, subject, HTML body)
 - [x] `{slot}` autocomplete works in the template editor; unknown slots are flagged; missing metadata for a slot warns
