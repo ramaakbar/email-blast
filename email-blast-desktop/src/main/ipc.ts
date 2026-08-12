@@ -1,5 +1,12 @@
-import { ipcMain, BrowserWindow, type IpcMainInvokeEvent } from "electron";
-import { Schema } from "effect";
+import { ipcMain, BrowserWindow, dialog, type IpcMainInvokeEvent } from "electron";
+import { Effect } from "effect";
+import { m } from "@paraglide/messages";
+import { API_VERSION, WIRE } from "../shared/wire";
+import { GetAppInfoResponse, PickPathResponse, PingResponse } from "../shared/ipc";
+import { TEMPLATE_EXTENSIONS } from "../shared/template-validation";
+import { AppInfo } from "./services/app-info";
+import { LibreOfficeService } from "./services/libreoffice";
+import { makeOp, type IpcRegistry } from "./ipc-core";
 
 /**
  * True when the event comes from the top-level frame of one of our own
@@ -15,32 +22,72 @@ export function isTrustedSender(event: IpcMainInvokeEvent): boolean {
 }
 
 /**
- * Decodes a renderer-to-main payload at the boundary. The wire payload is
- * the raw `invoke` argument (bare value for single-argument calls, tuple
- * for multi-argument calls); malformed payloads throw a typed ParseError
- * before any handler logic runs.
+ * The production registry adapter: Electron's `ipcMain.handle` behind the
+ * trusted-sender check. The test adapter is a capturing fake - two
+ * adapters make the seam real.
  */
-export function decodePayload<S extends Schema.ConstraintDecoder<unknown>>(
-  schema: S,
-  payload: unknown,
-): S["Type"] {
-  return Schema.decodeUnknownSync(schema)(payload);
-}
+export const electronRegistry: IpcRegistry = {
+  handle(channel, handler) {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!isTrustedSender(event)) {
+        throw new Error(`Blocked IPC call "${channel}" from an unexpected sender`);
+      }
+      return handler(args.length === 0 ? null : args.length === 1 ? args[0] : args);
+    });
+  },
+};
 
 /**
- * Registers an IPC handler behind the sender check.
- * The handler receives the raw invoke payload (null when the call had no
- * arguments) and must decode it at the boundary before doing any work.
- * Handlers are registered once per channel for the app's lifetime.
+ * The system domain's operation table. Every other domain table is
+ * colocated with its service module; system has no service - its
+ * operations are native dialogs and app identity - so it lives here with
+ * the bridge.
  */
-export function registerWindowHandler(
-  channel: string,
-  handler: (payload: unknown) => Promise<unknown> | unknown,
-): void {
-  ipcMain.handle(channel, (event, ...args) => {
-    if (!isTrustedSender(event)) {
-      throw new Error(`Blocked IPC call "${channel}" from an unexpected sender`);
-    }
-    return handler(args.length === 0 ? null : args.length === 1 ? args[0] : args);
-  });
-}
+export const systemOperations = {
+  ping: makeOp(WIRE.system.ping, null, PingResponse, () =>
+    Effect.sync(() => ({ pong: true as const, apiVersion: API_VERSION })),
+  ),
+  checkLibreOffice: makeOp(WIRE.system.checkLibreOffice, null, PickPathResponse, () =>
+    Effect.gen(function* () {
+      const service = yield* LibreOfficeService;
+      return service.findLibreOffice();
+    }),
+  ),
+  pickFolder: makeOp(WIRE.system.pickFolder, null, PickPathResponse, () =>
+    Effect.promise(() =>
+      dialog
+        .showOpenDialog({ properties: ["openDirectory"] })
+        .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null))),
+    ),
+  ),
+  pickExcelFile: makeOp(WIRE.system.pickExcelFile, null, PickPathResponse, () =>
+    Effect.promise(() =>
+      dialog
+        .showOpenDialog({
+          properties: ["openFile"],
+          filters: [{ name: m["dialogs.excelFilter"](), extensions: ["xlsx", "xls"] }],
+        })
+        .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null))),
+    ),
+  ),
+  pickTemplateFile: makeOp(WIRE.system.pickTemplateFile, null, PickPathResponse, () =>
+    Effect.promise(() => {
+      // The accepted extensions come from the shared template domain so the
+      // dialog filter and the renderer's type detection can never drift apart.
+      const extensions = Object.values(TEMPLATE_EXTENSIONS)
+        .flat()
+        .map((ext) => ext.slice(1));
+      return dialog
+        .showOpenDialog({
+          properties: ["openFile"],
+          filters: [{ name: m["dialogs.templateFilter"](), extensions }],
+        })
+        .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
+    }),
+  ),
+  getAppInfo: makeOp(WIRE.system.getAppInfo, null, GetAppInfoResponse, () =>
+    Effect.gen(function* () {
+      return yield* AppInfo;
+    }),
+  ),
+};

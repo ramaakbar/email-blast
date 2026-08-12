@@ -67,4 +67,8 @@ Outputs per recipient:
 
 The delivery mechanism for a Send Job. v1 supports **email** (SMTP). Future: **WhatsApp**. Each channel carries its own configuration shape — email has SMTP, WhatsApp will have auth credentials and message template. The channel is set per Send Job, so a single recipient list could be sent via email today and WhatsApp tomorrow.
 
+### IPC Bridge
+
+The module that carries calls between the renderer and the main process. One **wire table** (`shared/wire.ts`, zero-dependency by sandbox constraint) names every operation's channel and argument count; the preload derives `window.api` from it, and each domain service exports an **operation table** (`makeOp` rows: channel, payload schema, response schema, handler) that the composition root registers in one loop. Adding an operation touches one service module plus the wire table — never the preload or the registration glue. The registration machinery (`main/ipc-core.ts`) owns decode → run → encode uniformly; the registry is a seam with two adapters (Electron in production, a fake in tests).
+
 <!-- end glossary -->

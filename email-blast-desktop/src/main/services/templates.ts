@@ -1,10 +1,19 @@
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { Context, Data, Effect, Layer, Option, Schema } from "effect";
 import { existsSync, readFileSync } from "fs";
 import Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { m } from "@paraglide/messages";
-import type { Template } from "../../shared/ipc";
+import {
+  ScanSlotsResponse,
+  Template,
+  TemplateCreatePayload,
+  TemplateDeleteResponse,
+  TemplateImageResponse,
+  TemplateUpdatePayload,
+} from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import {
   normalizeSlots,
   templateTypeForFile,
@@ -205,3 +214,53 @@ export class TemplatesService extends Context.Service<TemplatesService, Template
       SqliteRepo.Live(db, credCrypto),
     );
 }
+
+/**
+ * The Document Template domain's IPC operations: CRUD, DOCX slot
+ * scanning, and the image read for the position editor's preview.
+ */
+export const templatesOperations = {
+  list: makeOp(WIRE.templates.list, null, Schema.Array(Template), () =>
+    Effect.gen(function* () {
+      const service = yield* TemplatesService;
+      return yield* service.list();
+    }),
+  ),
+  get: makeOp(WIRE.templates.get, Schema.String, Schema.NullOr(Template), (id) =>
+    Effect.gen(function* () {
+      const service = yield* TemplatesService;
+      return Option.getOrNull(yield* service.get(id));
+    }),
+  ),
+  create: makeOp(WIRE.templates.create, TemplateCreatePayload, Template, (draft) =>
+    Effect.gen(function* () {
+      const service = yield* TemplatesService;
+      return yield* service.create(draft);
+    }),
+  ),
+  update: makeOp(WIRE.templates.update, TemplateUpdatePayload, Template, (payload) =>
+    Effect.gen(function* () {
+      const { id, name, slots, outputPattern, slotLayout } = payload;
+      const service = yield* TemplatesService;
+      return yield* service.update(id, { name, slots, outputPattern, slotLayout });
+    }),
+  ),
+  delete: makeOp(WIRE.templates.delete, Schema.String, TemplateDeleteResponse, (id) =>
+    Effect.gen(function* () {
+      const service = yield* TemplatesService;
+      return { deleted: yield* service.delete(id) };
+    }),
+  ),
+  scanSlots: makeOp(WIRE.templates.scanSlots, Schema.String, ScanSlotsResponse, (docxPath) =>
+    Effect.gen(function* () {
+      const service = yield* TemplatesService;
+      return { slots: yield* service.scanSlots(docxPath) };
+    }),
+  ),
+  getImage: makeOp(WIRE.templates.getImage, Schema.String, Schema.NullOr(TemplateImageResponse), (imagePath) =>
+    Effect.gen(function* () {
+      const service = yield* TemplatesService;
+      return Option.getOrNull(yield* service.getImageData(imagePath));
+    }),
+  ),
+};

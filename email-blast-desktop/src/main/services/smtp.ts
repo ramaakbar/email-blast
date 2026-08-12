@@ -1,7 +1,15 @@
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { Context, Data, Effect, Layer, Option, Schema } from "effect";
 import nodemailer from "nodemailer";
 import Database from "better-sqlite3";
-import type { SmtpProfile } from "../../shared/ipc";
+import {
+  SmtpDeleteResponse,
+  SmtpProfile,
+  SmtpProfileCreatePayload,
+  SmtpProfileUpdatePayload,
+  SmtpTestPayload,
+} from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import { normalizeIdentity } from "../../shared/sender-identity";
 import { validateSmtpProfile } from "../../shared/smtp-validation";
 import {
@@ -327,3 +335,64 @@ export class SmtpService extends Context.Service<SmtpService, SmtpServiceShape>(
       SqliteRepo.Live(db, credCrypto),
     );
 }
+
+/**
+ * The SMTP Profile domain's IPC operations: profile CRUD plus the two
+ * connection tests (inline credentials and saved profile). The password
+ * never crosses this table's responses - the service maps it away.
+ */
+export const smtpOperations = {
+  list: makeOp(WIRE.smtp.list, null, Schema.Array(SmtpProfile), () =>
+    Effect.gen(function* () {
+      const service = yield* SmtpService;
+      return yield* service.list();
+    }),
+  ),
+  get: makeOp(WIRE.smtp.get, Schema.String, Schema.NullOr(SmtpProfile), (id) =>
+    Effect.gen(function* () {
+      const service = yield* SmtpService;
+      return Option.getOrNull(yield* service.get(id));
+    }),
+  ),
+  create: makeOp(WIRE.smtp.create, SmtpProfileCreatePayload, SmtpProfile, (draft) =>
+    Effect.gen(function* () {
+      const service = yield* SmtpService;
+      return yield* service.create(draft);
+    }),
+  ),
+  update: makeOp(WIRE.smtp.update, SmtpProfileUpdatePayload, SmtpProfile, (payload) =>
+    Effect.gen(function* () {
+      const { id, name, host, port, username, password, senderName, senderAddress, replyTo } =
+        payload;
+      const service = yield* SmtpService;
+      return yield* service.update(id, {
+        name,
+        host,
+        port,
+        username,
+        password,
+        senderName,
+        senderAddress,
+        replyTo,
+      });
+    }),
+  ),
+  delete: makeOp(WIRE.smtp.delete, Schema.String, SmtpDeleteResponse, (id) =>
+    Effect.gen(function* () {
+      const service = yield* SmtpService;
+      return { deleted: yield* service.delete(id) };
+    }),
+  ),
+  test: makeOp(WIRE.smtp.test, SmtpTestPayload, null, (credentials) =>
+    Effect.gen(function* () {
+      const service = yield* SmtpService;
+      yield* service.test(credentials);
+    }),
+  ),
+  testProfile: makeOp(WIRE.smtp.testProfile, Schema.String, null, (id) =>
+    Effect.gen(function* () {
+      const service = yield* SmtpService;
+      yield* service.testProfile(id);
+    }),
+  ),
+};

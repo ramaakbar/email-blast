@@ -1,0 +1,3 @@
+# Message Templates use copy-on-pick semantics
+
+Picking a Message Template in a Send Job copies its subject and body into the job, and the job then owns its own editable copy — editing it never mutates the saved template, and saving a job's message back to the library creates a new template. We chose this over referenced (shared) templates because send config is per-job by domain definition: past Send Jobs must render history exactly as sent even if the template changes later, and a shared-reference model could silently alter a queued campaign mid-flight when someone edits a template. The cost is that a template change doesn't propagate to jobs that already picked it — which is the point.

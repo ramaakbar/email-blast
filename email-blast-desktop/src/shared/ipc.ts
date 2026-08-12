@@ -1,16 +1,15 @@
 import { Schema } from "effect";
-import { API_VERSION, IPC } from "./ipc-channels";
-
-export { API_VERSION, IPC };
 
 /**
  * The IPC contract between the renderer and the main process.
  *
- * This module is the single source of truth for the contract:
- * - `API_VERSION` guards against stale builds (dev-asserted between preload and main)
- * - `IPC` holds every channel name; the renderer never sees these strings,
- *   the preload maps them to the typed `window.api` object
+ * This module is the single source of truth for the wire schemas:
+ * - the zero-dependency operation table (channel names, argument counts,
+ *   push channels) lives in `wire.ts` and must stay dependency-free for
+ *   the sandboxed preload
  * - Effect `Schema`s define every payload; types are derived, never hand-written
+ * - `Api` is the renderer contract the preload's derived surface is
+ *   compile-checked against
  *
  * Versioning is additive-only: channels and fields are added, never removed
  * or renamed; fields demote to `optional` rather than delete.

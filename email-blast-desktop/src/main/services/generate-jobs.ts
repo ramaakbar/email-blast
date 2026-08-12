@@ -1,4 +1,5 @@
-import { Context, Data, Effect, Layer, Option, Result } from "effect";
+import { Context, Data, Effect, Layer, Option, Result, Schema } from "effect";
+import { dialog } from "electron";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { readFile as readFileAsync } from "fs/promises";
 import { tmpdir } from "os";
@@ -8,7 +9,17 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { m } from "@paraglide/messages";
-import type { GenerateJob, GenerateJobSummary, Recipient, Template } from "../../shared/ipc";
+import type { Recipient, Template } from "../../shared/ipc";
+import {
+  GenerateJob,
+  GenerateJobSummary,
+  GeneratePdfPayload,
+  GeneratePdfResponse,
+  GenerateSavePdfResponse,
+  GenerateStartPayload,
+} from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import { fillOutputName, resolveSlotValue } from "../../shared/generate";
 import {
   recipientTemplateValue,
@@ -959,3 +970,93 @@ export class GenerateJobService extends Context.Service<
       Settings.Live(db, defaults, DEFAULT_UI_LOCALE, credCrypto),
     );
 }
+
+/**
+ * The Generate Job domain's IPC operations: start (with the optional
+ * Template Assignment), run, status, the per-recipient PDF reads, the
+ * past-jobs list, and the native save-dialog re-download.
+ */
+export const generateOperations = {
+  startGenerate: makeOp(WIRE.generate.startGenerate, GenerateStartPayload, GenerateJob, (payload) =>
+    Effect.gen(function* () {
+      const { templateId, recipientIds, templateColumn, assignment, outputPattern } = payload;
+      const service = yield* GenerateJobService;
+      return yield* service.start(
+        templateId,
+        recipientIds,
+        templateColumn === null
+          ? undefined
+          : {
+              templateColumn,
+              assignment: assignment ?? {},
+              outputPattern: outputPattern ?? "",
+            },
+      );
+    }),
+  ),
+  runGenerate: makeOp(WIRE.generate.runGenerate, Schema.String, GenerateJob, (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* GenerateJobService;
+      return yield* service.run(jobId);
+    }),
+  ),
+  getGenerateStatus: makeOp(
+    WIRE.generate.getGenerateStatus,
+    Schema.String,
+    Schema.NullOr(GenerateJob),
+    (jobId) =>
+      Effect.gen(function* () {
+        const service = yield* GenerateJobService;
+        return Option.getOrNull(yield* service.getStatus(jobId));
+      }),
+  ),
+  getRecipientPdf: makeOp(
+    WIRE.generate.getRecipientPdf,
+    GeneratePdfPayload,
+    Schema.NullOr(GeneratePdfResponse),
+    (payload) =>
+      Effect.gen(function* () {
+        const { jobId, recipientId } = payload;
+        const service = yield* GenerateJobService;
+        return Option.getOrNull(yield* service.getRecipientPdf(jobId, recipientId));
+      }),
+  ),
+  list: makeOp(WIRE.generate.list, null, Schema.Array(GenerateJobSummary), () =>
+    Effect.gen(function* () {
+      const service = yield* GenerateJobService;
+      return yield* service.list();
+    }),
+  ),
+  saveRecipientPdf: makeOp(
+    WIRE.generate.saveRecipientPdf,
+    GeneratePdfPayload,
+    GenerateSavePdfResponse,
+    (payload) =>
+      Effect.gen(function* () {
+        const { jobId, recipientId } = payload;
+        const service = yield* GenerateJobService;
+        const pdf = yield* service.getRecipientPdf(jobId, recipientId);
+        if (Option.isNone(pdf)) return null;
+        // The workspace's PDF re-download: a native save dialog prefilled
+        // with the generated file's name, then the bytes written to the
+        // chosen path. Null when the dialog is cancelled or the PDF is
+        // gone; the renderer treats both as "no save", not as an error.
+        const result = yield* Effect.promise(() =>
+          dialog.showSaveDialog({
+            defaultPath: pdf.value.fileName,
+            filters: [{ name: m["dialogs.pdfFilter"](), extensions: ["pdf"] }],
+          }),
+        );
+        if (result.canceled || result.filePath === undefined || result.filePath === "") {
+          return null;
+        }
+        const write = yield* Effect.try({
+          try: () =>
+            writeFileSync(result.filePath as string, Buffer.from(pdf.value.dataBase64, "base64")),
+          catch: (error) => error,
+        }).pipe(Effect.result);
+        if (Result.isFailure(write)) return yield* Effect.fail(write.failure);
+        return result.filePath;
+      }),
+  ),
+};

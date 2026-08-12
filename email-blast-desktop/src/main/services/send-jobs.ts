@@ -1,15 +1,16 @@
-import { Context, Data, Effect, Latch, Layer, Option, Result } from "effect";
+import { Context, Data, Effect, Latch, Layer, Option, Result, Schema } from "effect";
 import { existsSync } from "fs";
 import { basename } from "path";
 import type Database from "better-sqlite3";
-import type {
-  Recipient,
+import type { Recipient, SendJobRecipient, SendJobStatus } from "../../shared/ipc";
+import {
+  LogsListPayload,
   SendJob,
-  SendJobRecipient,
-  SendJobStatus,
   SendJobSummary,
   SendStartPayload,
 } from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import {
   parseRateLimitMs,
   RATE_LIMIT_MAX_MS,
@@ -907,3 +908,76 @@ export class SendJobService extends Context.Service<SendJobService, SendJobServi
       SmtpService.Live(db, credCrypto),
     );
 }
+
+/**
+ * The Send Job domain's IPC operations: start, run, pause/resume/cancel,
+ * status, retry-failed, and the one-time launch banner (ticket 17).
+ */
+export const sendOperations = {
+  startSend: makeOp(WIRE.send.startSend, SendStartPayload, SendJob, (payload) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.start(payload);
+    }),
+  ),
+  runSend: makeOp(WIRE.send.runSend, Schema.String, SendJob, (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.run(jobId);
+    }),
+  ),
+  pauseSend: makeOp(WIRE.send.pauseSend, Schema.String, SendJob, (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.pause(jobId);
+    }),
+  ),
+  resumeSend: makeOp(WIRE.send.resumeSend, Schema.String, SendJob, (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.resume(jobId);
+    }),
+  ),
+  cancelSend: makeOp(WIRE.send.cancelSend, Schema.String, SendJob, (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.cancel(jobId);
+    }),
+  ),
+  getSendStatus: makeOp(WIRE.send.getSendStatus, Schema.String, Schema.NullOr(SendJob), (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return Option.getOrNull(yield* service.getStatus(jobId));
+    }),
+  ),
+  retryFailedSend: makeOp(WIRE.send.retryFailedSend, Schema.String, SendJob, (jobId) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.retryFailed(jobId);
+    }),
+  ),
+  getLaunchBanner: makeOp(
+    WIRE.send.getLaunchBanner,
+    null,
+    Schema.NullOr(SendJobSummary),
+    () =>
+      Effect.gen(function* () {
+        const service = yield* SendJobService;
+        return Option.getOrNull(yield* service.launchBannerJob());
+      }),
+  ),
+};
+
+/**
+ * The Logs domain's IPC operations: the send-job history table with the
+ * optional status/date filters. Colocated here because the rows ARE send
+ * jobs - the Logs screen and the Send workspace read the same service.
+ */
+export const logsOperations = {
+  list: makeOp(WIRE.logs.list, LogsListPayload, Schema.Array(SendJobSummary), (filter) =>
+    Effect.gen(function* () {
+      const service = yield* SendJobService;
+      return yield* service.list(filter);
+    }),
+  ),
+};

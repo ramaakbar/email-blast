@@ -1,12 +1,16 @@
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 import Database from "better-sqlite3";
-import type {
+import {
   ImportBatch,
   PaginatedRecipients,
   Recipient,
+  RecipientDeletePayload,
+  RecipientDeleteResponse,
   RecipientListAllPayload,
   RecipientListPayload,
 } from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 import type { CredentialCrypto } from "./credential-crypto";
 
@@ -68,3 +72,41 @@ export class RecipientsService extends Context.Service<RecipientsService, Recipi
       SqliteRepo.Live(db, credCrypto),
     );
 }
+
+/**
+ * The recipients domain's IPC operations: paged listing with
+ * search/filter, single reads, bulk delete, import-batch listing, and
+ * the unpaginated select-all the workspaces use.
+ */
+export const recipientsOperations = {
+  list: makeOp(WIRE.recipients.list, RecipientListPayload, PaginatedRecipients, (filter) =>
+    Effect.gen(function* () {
+      const service = yield* RecipientsService;
+      return yield* service.list(filter);
+    }),
+  ),
+  get: makeOp(WIRE.recipients.get, Schema.String, Schema.NullOr(Recipient), (id) =>
+    Effect.gen(function* () {
+      const service = yield* RecipientsService;
+      return Option.getOrNull(yield* service.get(id));
+    }),
+  ),
+  delete: makeOp(WIRE.recipients.delete, RecipientDeletePayload, RecipientDeleteResponse, (ids) =>
+    Effect.gen(function* () {
+      const service = yield* RecipientsService;
+      return { deleted: yield* service.delete(ids) };
+    }),
+  ),
+  listBatches: makeOp(WIRE.recipients.listBatches, null, Schema.Array(ImportBatch), () =>
+    Effect.gen(function* () {
+      const service = yield* RecipientsService;
+      return yield* service.listBatches();
+    }),
+  ),
+  listAll: makeOp(WIRE.recipients.listAll, RecipientListAllPayload, Schema.Array(Recipient), (filter) =>
+    Effect.gen(function* () {
+      const service = yield* RecipientsService;
+      return yield* service.listAll(filter);
+    }),
+  ),
+};

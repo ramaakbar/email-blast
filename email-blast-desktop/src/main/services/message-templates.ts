@@ -1,6 +1,13 @@
-import { Context, Data, Effect, Layer, Option } from "effect";
+import { Context, Data, Effect, Layer, Option, Schema } from "effect";
 import Database from "better-sqlite3";
-import type { MessageTemplate } from "../../shared/ipc";
+import {
+  MessageTemplate,
+  MessageTemplateCreatePayload,
+  MessageTemplateDeleteResponse,
+  MessageTemplateUpdatePayload,
+} from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import { validateMessageTemplate } from "../../shared/send";
 import {
   SqliteRepo,
@@ -112,3 +119,46 @@ export class MessageTemplatesService extends Context.Service<
       SqliteRepo.Live(db, credCrypto),
     );
 }
+
+/**
+ * The Message Template domain's IPC operations. Copy-on-pick (ADR 0005):
+ * Send Jobs never reference these rows, so the send domain stays out of
+ * this table entirely.
+ */
+export const messageTemplatesOperations = {
+  list: makeOp(WIRE.messageTemplates.list, null, Schema.Array(MessageTemplate), () =>
+    Effect.gen(function* () {
+      const service = yield* MessageTemplatesService;
+      return yield* service.list();
+    }),
+  ),
+  get: makeOp(WIRE.messageTemplates.get, Schema.String, Schema.NullOr(MessageTemplate), (id) =>
+    Effect.gen(function* () {
+      const service = yield* MessageTemplatesService;
+      return Option.getOrNull(yield* service.get(id));
+    }),
+  ),
+  create: makeOp(
+    WIRE.messageTemplates.create,
+    MessageTemplateCreatePayload,
+    MessageTemplate,
+    (draft) =>
+      Effect.gen(function* () {
+        const service = yield* MessageTemplatesService;
+        return yield* service.create(draft);
+      }),
+  ),
+  update: makeOp(WIRE.messageTemplates.update, MessageTemplateUpdatePayload, MessageTemplate, (payload) =>
+    Effect.gen(function* () {
+      const { id, name, subject, bodyHtml } = payload;
+      const service = yield* MessageTemplatesService;
+      return yield* service.update(id, { name, subject, bodyHtml });
+    }),
+  ),
+  delete: makeOp(WIRE.messageTemplates.delete, Schema.String, MessageTemplateDeleteResponse, (id) =>
+    Effect.gen(function* () {
+      const service = yield* MessageTemplatesService;
+      return { deleted: yield* service.delete(id) };
+    }),
+  ),
+};

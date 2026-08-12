@@ -1,75 +1,34 @@
-import { app, shell, BrowserWindow, ipcMain, dialog, safeStorage } from "electron";
+import { app, shell, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import { join } from "path";
 import { homedir } from "os";
-import { writeFileSync } from "fs";
 import assert from "node:assert";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
-import { Context, Effect, Exit, Layer, Option, Result, Schema, Scope } from "effect";
-import {
-  API_VERSION,
-  GenerateJob,
-  GenerateJobSummary,
-  GeneratePdfPayload,
-  GeneratePdfResponse,
-  GenerateSavePdfResponse,
-  GenerateStartPayload,
-  GetAppInfoResponse,
-  ImportBatch,
-  ImportCommitPayload,
-  ImportCommitResponse,
-  ImportPreview,
-  ImportReadPayload,
-  IPC,
-  LogsListPayload,
-  MessageTemplate,
-  MessageTemplateCreatePayload,
-  MessageTemplateDeleteResponse,
-  MessageTemplateUpdatePayload,
-  PaginatedRecipients,
-  PickPathResponse,
-  PingResponse,
-  Recipient,
-  RecipientDeletePayload,
-  RecipientDeleteResponse,
-  RecipientListAllPayload,
-  RecipientListPayload,
-  ScanSlotsResponse,
-  SendJob,
-  SendJobSummary,
-  SendStartPayload,
-  SettingsGetPayload,
-  SettingsSetPayload,
-  SmtpDeleteResponse,
-  SmtpProfile,
-  SmtpProfileCreatePayload,
-  SmtpProfileUpdatePayload,
-  SmtpTestPayload,
-  Template,
-  TemplateCreatePayload,
-  TemplateDeleteResponse,
-  TemplateImageResponse,
-  TemplateUpdatePayload,
-} from "../shared/ipc";
-import { TEMPLATE_EXTENSIONS } from "../shared/template-validation";
-import { normalizeUiLocale, SETTING_KEYS } from "../shared/settings";
+import { Context, Effect, Exit, Layer, Option, Scope } from "effect";
 import { m } from "@paraglide/messages";
 import { setLocale } from "@paraglide/runtime";
-import { decodePayload, registerWindowHandler } from "./ipc";
+import { API_VERSION, DEV_CHANNELS, WIRE } from "../shared/wire";
+import { registerHandlers } from "./ipc-core";
+import { electronRegistry, systemOperations } from "./ipc";
 import { rootLayer, type AppServices } from "./runtime";
 import { AppInfo } from "./services/app-info";
 import { defaultPathsForHome } from "./services/default-paths";
-import { GenerateJobService } from "./services/generate-jobs";
-import { ImportService } from "./services/import";
-import { LibreOfficeService } from "./services/libreoffice";
+import { importOperations } from "./services/import";
 import { ProgressHub } from "./services/progress-hub";
-import { RecipientsService } from "./services/recipients";
-import { SendEnvService, SendJobService, type SendEnv } from "./services/send-jobs";
-import { SmtpService } from "./services/smtp";
-import { migrateCredentialsAtRest, openDatabase, SqliteRepo } from "./db/repository";
+import { recipientsOperations } from "./services/recipients";
+import {
+  logsOperations,
+  sendOperations,
+  SendEnvService,
+  SendJobService,
+  type SendEnv,
+} from "./services/send-jobs";
+import { smtpOperations } from "./services/smtp";
+import { migrateCredentialsAtRest, openDatabase } from "./db/repository";
 import { makeCredentialCrypto } from "./services/credential-crypto";
-import { Settings } from "./services/settings";
-import { MessageTemplatesService } from "./services/message-templates";
-import { TemplatesService } from "./services/templates";
+import { settingsOperations, Settings } from "./services/settings";
+import { messageTemplatesOperations } from "./services/message-templates";
+import { templatesOperations } from "./services/templates";
+import { generateOperations } from "./services/generate-jobs";
 
 // Forge's Vite plugin defines these at build time (bare identifiers, from
 // its getBuildDefine): the dev-server URL in `electron-forge start`,
@@ -209,7 +168,7 @@ function createWindow(context: Context.Context<AppServices>, sendEnv: SendEnv): 
  * and re-registers its listener on every load, so main must re-check).
  */
 function registerApiVersionAssertion(): void {
-  ipcMain.on(IPC["dev:api-version-report"], (event, reported: unknown) => {
+  ipcMain.on(DEV_CHANNELS.apiVersionReport, (event, reported: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) return;
     assert.equal(
@@ -221,590 +180,37 @@ function registerApiVersionAssertion(): void {
   });
   app.on("web-contents-created", (_event, contents) => {
     contents.on("did-finish-load", () => {
-      contents.send(IPC["dev:api-version-check"]);
+      contents.send(DEV_CHANNELS.apiVersionCheck);
     });
   });
 }
 
 /**
- * The full IPC surface. Renderer-to-main payloads are decoded at the
- * boundary (malformed calls become typed ParseErrors); every handler that
- * needs a service runs an Effect program against the app context built
- * once at boot - the same service instances every other program shares.
+ * The full IPC surface, one operation table per domain, each colocated
+ * with its service module. Registering is a loop over this list - adding
+ * a domain is adding its table here and nothing else; the wire table and
+ * the domain module hold the rest of an operation's facts.
+ */
+const DOMAINS = [
+  systemOperations,
+  settingsOperations,
+  importOperations,
+  recipientsOperations,
+  templatesOperations,
+  messageTemplatesOperations,
+  generateOperations,
+  smtpOperations,
+  sendOperations,
+  logsOperations,
+] as const;
+
+/**
+ * Registers every operation against the Electron registry. The shared
+ * context built once at boot provides the same service instances every
+ * other program uses; per-call decode/run/encode is the machinery's job.
  */
 function registerIpcHandlers(context: Context.Context<AppServices>): void {
-  const run = <A, E>(program: Effect.Effect<A, E, AppServices>): Promise<A> =>
-    Effect.runPromise(program.pipe(Effect.provideContext(context)));
-
-  registerWindowHandler(IPC["system:ping"], () => {
-    return Schema.encodeSync(PingResponse)({ pong: true, apiVersion: API_VERSION });
-  });
-
-  registerWindowHandler(IPC["system:check-libreoffice"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* LibreOfficeService;
-        return Schema.encodeSync(PickPathResponse)(service.findLibreOffice());
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["system:pick-folder"], () => {
-    return dialog
-      .showOpenDialog({ properties: ["openDirectory"] })
-      .then((result) =>
-        Schema.encodeSync(PickPathResponse)(result.canceled ? null : (result.filePaths[0] ?? null)),
-      );
-  });
-
-  registerWindowHandler(IPC["system:pick-excel-file"], () => {
-    return dialog
-      .showOpenDialog({
-        properties: ["openFile"],
-        filters: [{ name: m["dialogs.excelFilter"](), extensions: ["xlsx", "xls"] }],
-      })
-      .then((result) =>
-        Schema.encodeSync(PickPathResponse)(result.canceled ? null : (result.filePaths[0] ?? null)),
-      );
-  });
-
-  registerWindowHandler(IPC["system:pick-template-file"], () => {
-    // The accepted extensions come from the shared template domain so the
-    // dialog filter and the renderer's type detection can never drift apart.
-    const extensions = Object.values(TEMPLATE_EXTENSIONS)
-      .flat()
-      .map((ext) => ext.slice(1));
-    return dialog
-      .showOpenDialog({
-        properties: ["openFile"],
-        filters: [{ name: m["dialogs.templateFilter"](), extensions }],
-      })
-      .then((result) =>
-        Schema.encodeSync(PickPathResponse)(result.canceled ? null : (result.filePaths[0] ?? null)),
-      );
-  });
-
-  registerWindowHandler(IPC["system:get-app-info"], () => {
-    return run(
-      Effect.gen(function* () {
-        // Schema-encoded at the boundary like every other response.
-        return Schema.encodeSync(GetAppInfoResponse)(yield* AppInfo);
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["settings:get"], (payload) => {
-    const key = decodePayload(SettingsGetPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const repo = yield* SqliteRepo;
-        return Option.getOrNull(yield* repo.getSetting(key));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["settings:set"], (payload) => {
-    const [key, value] = decodePayload(SettingsSetPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const repo = yield* SqliteRepo;
-        yield* repo.setSetting(key, value);
-        // The language row IS the main process's locale (ADR-0004): keep
-        // the runtime in sync so main-produced strings (service errors,
-        // dialog filter names) switch language live, not only at boot.
-        if (key === SETTING_KEYS.language) {
-          setLocale(normalizeUiLocale(value), { reload: false });
-        }
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["import:read"], (payload) => {
-    const excelPath = decodePayload(ImportReadPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* ImportService;
-        return Schema.encodeSync(ImportPreview)(yield* service.read(excelPath));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["import:commit"], (payload) => {
-    const { rows, columnMapping } = decodePayload(ImportCommitPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* ImportService;
-        return Schema.encodeSync(ImportCommitResponse)(yield* service.commit(rows, columnMapping));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["recipients:list"], (payload) => {
-    const filter = decodePayload(RecipientListPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* RecipientsService;
-        return Schema.encodeSync(PaginatedRecipients)(yield* service.list(filter));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["recipients:get"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* RecipientsService;
-        return Option.getOrNull(yield* service.get(id));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["recipients:delete"], (payload) => {
-    const ids = decodePayload(RecipientDeletePayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* RecipientsService;
-        return Schema.encodeSync(RecipientDeleteResponse)({ deleted: yield* service.delete(ids) });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["recipients:list-batches"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* RecipientsService;
-        return Schema.encodeSync(Schema.Array(ImportBatch))(yield* service.listBatches());
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["recipients:list-all"], (payload) => {
-    const filter = decodePayload(RecipientListAllPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* RecipientsService;
-        return Schema.encodeSync(Schema.Array(Recipient))(yield* service.listAll(filter));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:list"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        return Schema.encodeSync(Schema.Array(Template))(yield* service.list());
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:get"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        return Option.getOrNull(yield* service.get(id));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:create"], (payload) => {
-    const draft = decodePayload(TemplateCreatePayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        return Schema.encodeSync(Template)(yield* service.create(draft));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:update"], (payload) => {
-    const { id, name, slots, outputPattern, slotLayout } = decodePayload(
-      TemplateUpdatePayload,
-      payload,
-    );
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        return Schema.encodeSync(Template)(
-          yield* service.update(id, { name, slots, outputPattern, slotLayout }),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:delete"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        return Schema.encodeSync(TemplateDeleteResponse)({ deleted: yield* service.delete(id) });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:scan-slots"], (payload) => {
-    const docxPath = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        return Schema.encodeSync(ScanSlotsResponse)({ slots: yield* service.scanSlots(docxPath) });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["templates:get-image"], (payload) => {
-    const imagePath = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* TemplatesService;
-        const image = yield* service.getImageData(imagePath);
-        return Option.match(image, {
-          onNone: () => null,
-          onSome: (value) => Schema.encodeSync(TemplateImageResponse)(value),
-        });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["message-templates:list"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* MessageTemplatesService;
-        return Schema.encodeSync(Schema.Array(MessageTemplate))(yield* service.list());
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["message-templates:get"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* MessageTemplatesService;
-        return Option.getOrNull(
-          yield* service
-            .get(id)
-            .pipe(Effect.map(Option.map((t) => Schema.encodeSync(MessageTemplate)(t)))),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["message-templates:create"], (payload) => {
-    const draft = decodePayload(MessageTemplateCreatePayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* MessageTemplatesService;
-        return Schema.encodeSync(MessageTemplate)(yield* service.create(draft));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["message-templates:update"], (payload) => {
-    const { id, name, subject, bodyHtml } = decodePayload(MessageTemplateUpdatePayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* MessageTemplatesService;
-        return Schema.encodeSync(MessageTemplate)(
-          yield* service.update(id, { name, subject, bodyHtml }),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["message-templates:delete"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* MessageTemplatesService;
-        return Schema.encodeSync(MessageTemplateDeleteResponse)({
-          deleted: yield* service.delete(id),
-        });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["generate:start"], (payload) => {
-    const { templateId, recipientIds, templateColumn, assignment, outputPattern } = decodePayload(
-      GenerateStartPayload,
-      payload,
-    );
-    return run(
-      Effect.gen(function* () {
-        const service = yield* GenerateJobService;
-        return Schema.encodeSync(GenerateJob)(
-          yield* service.start(
-            templateId,
-            recipientIds,
-            templateColumn === null
-              ? undefined
-              : {
-                  templateColumn,
-                  assignment: assignment ?? {},
-                  outputPattern: outputPattern ?? "",
-                },
-          ),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["generate:run"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* GenerateJobService;
-        return Schema.encodeSync(GenerateJob)(yield* service.run(jobId));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["generate:get-status"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* GenerateJobService;
-        return Option.getOrNull(
-          yield* service
-            .getStatus(jobId)
-            .pipe(Effect.map(Option.map((job) => Schema.encodeSync(GenerateJob)(job)))),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["generate:get-recipient-pdf"], (payload) => {
-    const { jobId, recipientId } = decodePayload(GeneratePdfPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* GenerateJobService;
-        return Option.getOrNull(
-          yield* service
-            .getRecipientPdf(jobId, recipientId)
-            .pipe(Effect.map(Option.map((pdf) => Schema.encodeSync(GeneratePdfResponse)(pdf)))),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["generate:list"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* GenerateJobService;
-        return Schema.encodeSync(Schema.Array(GenerateJobSummary))(yield* service.list());
-      }),
-    );
-  });
-
-  // The workspace's PDF re-download: a native save dialog prefilled with
-  // the generated file's name, then the bytes written to the chosen path.
-  // Null when the dialog is cancelled or the PDF is gone; the renderer
-  // treats both as "no save", not as an error.
-  registerWindowHandler(IPC["generate:save-recipient-pdf"], (payload) => {
-    const { jobId, recipientId } = decodePayload(GeneratePdfPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* GenerateJobService;
-        const pdf = yield* service.getRecipientPdf(jobId, recipientId);
-        if (Option.isNone(pdf)) return null;
-        const result = yield* Effect.promise(() =>
-          dialog.showSaveDialog({
-            defaultPath: pdf.value.fileName,
-            filters: [{ name: m["dialogs.pdfFilter"](), extensions: ["pdf"] }],
-          }),
-        );
-        if (result.canceled || result.filePath === undefined || result.filePath === "") {
-          return null;
-        }
-        const write = yield* Effect.try({
-          try: () =>
-            writeFileSync(result.filePath as string, Buffer.from(pdf.value.dataBase64, "base64")),
-          catch: (error) => error,
-        }).pipe(Effect.result);
-        if (Result.isFailure(write)) return yield* Effect.fail(write.failure);
-        return Schema.encodeSync(GenerateSavePdfResponse)(result.filePath);
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:list"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        return Schema.encodeSync(Schema.Array(SmtpProfile))(yield* service.list());
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:get"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        return Option.getOrNull(
-          yield* service
-            .get(id)
-            .pipe(Effect.map(Option.map((profile) => Schema.encodeSync(SmtpProfile)(profile)))),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:create"], (payload) => {
-    const draft = decodePayload(SmtpProfileCreatePayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        return Schema.encodeSync(SmtpProfile)(yield* service.create(draft));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:update"], (payload) => {
-    const { id, name, host, port, username, password, senderName, senderAddress, replyTo } =
-      decodePayload(SmtpProfileUpdatePayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        return Schema.encodeSync(SmtpProfile)(
-          yield* service.update(id, {
-            name,
-            host,
-            port,
-            username,
-            password,
-            senderName,
-            senderAddress,
-            replyTo,
-          }),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:delete"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        return Schema.encodeSync(SmtpDeleteResponse)({ deleted: yield* service.delete(id) });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:test"], (payload) => {
-    const { host, port, username, password } = decodePayload(SmtpTestPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        yield* service.test({ host, port, username, password });
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["smtp:test-profile"], (payload) => {
-    const id = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SmtpService;
-        yield* service.testProfile(id);
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:start"], (payload) => {
-    const draft = decodePayload(SendStartPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(SendJob)(yield* service.start(draft));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:run"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(SendJob)(yield* service.run(jobId));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:pause"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(SendJob)(yield* service.pause(jobId));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:resume"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(SendJob)(yield* service.resume(jobId));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:cancel"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(SendJob)(yield* service.cancel(jobId));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:get-status"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Option.getOrNull(
-          yield* service
-            .getStatus(jobId)
-            .pipe(Effect.map(Option.map((job) => Schema.encodeSync(SendJob)(job)))),
-        );
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:retry-failed"], (payload) => {
-    const jobId = decodePayload(Schema.String, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(SendJob)(yield* service.retryFailed(jobId));
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["send:get-launch-banner"], () => {
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Option.getOrNull(yield* service.launchBannerJob());
-      }),
-    );
-  });
-
-  registerWindowHandler(IPC["logs:list"], (payload) => {
-    const { statusFilter, dateFrom, dateTo } = decodePayload(LogsListPayload, payload);
-    return run(
-      Effect.gen(function* () {
-        const service = yield* SendJobService;
-        return Schema.encodeSync(Schema.Array(SendJobSummary))(
-          yield* service.list({ statusFilter, dateFrom, dateTo }),
-        );
-      }),
-    );
-  });
+  registerHandlers(electronRegistry, context, DOMAINS);
 }
 
 /**
@@ -822,10 +228,10 @@ function forwardProgressToWindows(context: Context.Context<AppServices>): void {
       hub.subscribe((event) => {
         const channel =
           event.kind === "generate-progress"
-            ? IPC["generate-progress"]
+            ? WIRE.generate.onGenerateProgress.channel
             : event.kind === "send-progress"
-              ? IPC["send-progress"]
-              : IPC["job-paused"];
+              ? WIRE.send.onSendProgress.channel
+              : WIRE.send.onJobPaused.channel;
         for (const win of BrowserWindow.getAllWindows()) {
           win.webContents.send(channel, event);
         }

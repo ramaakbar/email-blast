@@ -1,6 +1,10 @@
 import { Context, Effect, Layer, Option, pipe } from "effect";
+import { setLocale } from "@paraglide/runtime";
 import { mkdirSync } from "fs";
 import Database from "better-sqlite3";
+import { SettingsGetPayload, SettingsSetPayload } from "../../shared/ipc";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import {
   DEFAULT_LIBREOFFICE_CHECKED,
   DEFAULT_RATE_LIMIT_DELAY_MS,
@@ -167,3 +171,31 @@ export class Settings extends Context.Service<Settings, SettingsShape>()("Settin
     );
   };
 }
+
+/**
+ * The settings domain's IPC operations. Settings read/write is the one
+ * surface that talks to SqliteRepo directly (not the Settings service) -
+ * the raw key/value rows, exactly as the handlers before the bridge
+ * collapse did.
+ */
+export const settingsOperations = {
+  get: makeOp(WIRE.settings.get, SettingsGetPayload, null, (key) =>
+    Effect.gen(function* () {
+      const repo = yield* SqliteRepo;
+      return Option.getOrNull(yield* repo.getSetting(key));
+    }),
+  ),
+  set: makeOp(WIRE.settings.set, SettingsSetPayload, null, (keyValue) =>
+    Effect.gen(function* () {
+      const [key, value] = keyValue;
+      const repo = yield* SqliteRepo;
+      yield* repo.setSetting(key, value);
+      // The language row IS the main process's locale (ADR-0004): keep
+      // the runtime in sync so main-produced strings (service errors,
+      // dialog filter names) switch language live, not only at boot.
+      if (key === SETTING_KEYS.language) {
+        setLocale(normalizeUiLocale(value), { reload: false });
+      }
+    }),
+  ),
+};

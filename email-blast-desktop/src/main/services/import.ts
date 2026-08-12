@@ -6,12 +6,18 @@ import type {
   ColumnMapping,
   ColumnRole,
   ExcelRow,
+  ImportRecipient,
+} from "../../shared/ipc";
+import {
+  ImportCommitPayload,
   ImportCommitResponse,
   ImportPreview,
-  ImportRecipient,
+  ImportReadPayload,
 } from "../../shared/ipc";
 import { suggestTemplateColumn } from "../../shared/template-assignment";
 import { m } from "@paraglide/messages";
+import { WIRE } from "../../shared/wire";
+import { makeOp } from "../ipc-core";
 import { SqliteRepo, type SqliteRepoShape } from "../db/repository";
 import type { CredentialCrypto } from "./credential-crypto";
 
@@ -326,3 +332,22 @@ export class ImportService extends Context.Service<ImportService, ImportServiceS
       SqliteRepo.Live(db, credCrypto),
     );
 }
+
+/**
+ * The import domain's IPC operations: preview the spreadsheet, then
+ * commit the user's final column mapping as one batch.
+ */
+export const importOperations = {
+  read: makeOp(WIRE.import.read, ImportReadPayload, ImportPreview, (excelPath) =>
+    Effect.gen(function* () {
+      const service = yield* ImportService;
+      return yield* service.read(excelPath);
+    }),
+  ),
+  commit: makeOp(WIRE.import.commit, ImportCommitPayload, ImportCommitResponse, (payload) =>
+    Effect.gen(function* () {
+      const service = yield* ImportService;
+      return yield* service.commit(payload.rows, payload.columnMapping);
+    }),
+  ),
+};
