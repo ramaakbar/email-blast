@@ -28,6 +28,7 @@ import { makeCredentialCrypto } from "./services/credential-crypto";
 import { settingsOperations, Settings } from "./services/settings";
 import { messageTemplatesOperations } from "./services/message-templates";
 import { templatesOperations } from "./services/templates";
+import { fontsOperations } from "./services/fonts";
 import { generateOperations } from "./services/generate-jobs";
 
 // Forge's Vite plugin defines these at build time (bare identifiers, from
@@ -197,6 +198,7 @@ const DOMAINS = [
   importOperations,
   recipientsOperations,
   templatesOperations,
+  fontsOperations,
   messageTemplatesOperations,
   generateOperations,
   smtpOperations,
@@ -263,8 +265,24 @@ app.whenReady().then(async () => {
   // degradation). The credential crypto rides the same seam into the repo.
   const credCrypto = makeCredentialCrypto(safeStorage, (message) => console.log(message));
   migrateCredentialsAtRest(db, credCrypto, (message) => console.log(message));
+  // Ticket 11: the bundled faces ship inside the packaged app
+  // (process.resourcesPath/fonts via the Forge extraResource entry); in
+  // dev they live in the project's resources/fonts. Uploads are copied
+  // into the app data dir next to the database.
+  const fontDirs = {
+    fontsDir: join(app.getPath("userData"), "fonts"),
+    bundledFontsDir: is.dev
+      ? join(app.getAppPath(), "resources", "fonts")
+      : join(process.resourcesPath, "fonts"),
+  };
   // The OS locale seeds the UI language setting on first run (ADR-0004).
-  const layer = rootLayer(db, defaultPathsForHome(homedir()), app.getLocale(), credCrypto);
+  const layer = rootLayer(
+    db,
+    defaultPathsForHome(homedir()),
+    app.getLocale(),
+    credCrypto,
+    fontDirs,
+  );
   app.on("will-quit", () => {
     db.close();
     // The service graph holds no scoped resources, but the scope is closed

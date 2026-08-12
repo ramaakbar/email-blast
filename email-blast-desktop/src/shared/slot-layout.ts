@@ -37,6 +37,34 @@ export const LEGACY_STACK_Y_FRACTION = 0.68;
 /** A template's whole configuration: slot name -> its layout. */
 export type SlotLayoutConfig = Record<string, SlotLayout>;
 
+/**
+ * The face id a slot without an explicit choice renders with - the
+ * legacy Helvetica Bold. One constant so the editor default, the legacy
+ * render branch, and the validation null-case can never drift apart.
+ */
+export const LEGACY_FONT_FACE = null;
+
+/**
+ * Normalizes a parsed slot-layout JSON blob (ticket 11): rows saved
+ * before `fontFace` existed carry no key, which must read as the legacy
+ * Helvetica Bold (null) so old templates keep rendering exactly as
+ * before. Every other field keeps its stored value; entries that are not
+ * objects are dropped (the validator rejects the template anyway).
+ */
+export function normalizeSlotLayout(raw: unknown): SlotLayoutConfig {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+  const layout: SlotLayoutConfig = {};
+  for (const [slot, config] of Object.entries(raw)) {
+    if (typeof config !== "object" || config === null) continue;
+    const stored = config as Record<string, unknown>;
+    layout[slot] = {
+      ...(config as SlotLayout),
+      fontFace: typeof stored.fontFace === "string" ? stored.fontFace : LEGACY_FONT_FACE,
+    };
+  }
+  return layout;
+}
+
 /** The smallest rendered size auto-shrink goes down to - a legibility floor. */
 export const MIN_SLOT_FONT_SIZE = 8;
 
@@ -127,7 +155,9 @@ export function validateSlotLayout(layout: SlotLayoutConfig): string | null {
       config.fontSize < MIN_SLOT_FONT_SIZE ||
       !SLOT_ALIGNMENTS.includes(config.align) ||
       parseHexColor(config.color) === null ||
-      (config.maxWidth !== null && (!isFiniteNumber(config.maxWidth) || config.maxWidth < 1))
+      (config.maxWidth !== null && (!isFiniteNumber(config.maxWidth) || config.maxWidth < 1)) ||
+      (config.fontFace !== null &&
+        (typeof config.fontFace !== "string" || config.fontFace === ""))
     ) {
       return m["validation.slotLayoutInvalid"]({ slot: `{${slot}}` });
     }

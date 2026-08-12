@@ -85,6 +85,16 @@ export const systemOperations = {
         .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null)));
     }),
   ),
+  pickFontFile: makeOp(WIRE.system.pickFontFile, null, PickPathResponse, () =>
+    Effect.promise(() =>
+      dialog
+        .showOpenDialog({
+          properties: ["openFile"],
+          filters: [{ name: m["dialogs.fontFilter"](), extensions: ["ttf", "otf"] }],
+        })
+        .then((result) => (result.canceled ? null : (result.filePaths[0] ?? null))),
+    ),
+  ),
   getAppInfo: makeOp(WIRE.system.getAppInfo, null, GetAppInfoResponse, () =>
     Effect.gen(function* () {
       return yield* AppInfo;

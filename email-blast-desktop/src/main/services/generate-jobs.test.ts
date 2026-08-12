@@ -3,6 +3,7 @@ import { Effect, Option } from "effect";
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { basename, join } from "path";
 import { PDFDocument, StandardFonts, type PDFFont } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import PizZip from "pizzip";
 import type Database from "better-sqlite3";
 import { openDatabase, makeSqliteRepo } from "../db/repository";
@@ -11,7 +12,14 @@ import { LibreOfficeFailed, makeGenerateJobService, type GenerateEnv } from "./g
 import { makeProgressHub } from "./progress-hub";
 import type { HubEvent } from "../../shared/ipc";
 import type { SlotLayout } from "../../shared/ipc";
-import { pageContentText, pageDrawOps, pngBytes, tempDir, writeFixture } from "./test-helpers";
+import {
+  pageContentText,
+  pageDrawOps,
+  pdfUsedFonts,
+  pngBytes,
+  tempDir,
+  writeFixture,
+} from "./test-helpers";
 
 /**
  * Seam A (spec Testing Decisions): the generate job lifecycle against the
@@ -65,10 +73,25 @@ function stubEnv(overrides: Partial<GenerateEnv> = {}): {
         }
       }),
     outputDir: () => Effect.succeed(outputDir),
+    findFontBytes: (faceId) => fontFixtures[faceId] ?? null,
     ...overrides,
   };
   return { env, calls, outputDir };
 }
+
+/**
+ * The font fixtures the image-with-face tests resolve: real font bytes
+ * keyed by face id. The bundled Poppins Regular ships in
+ * resources/fonts; the tests read it from there so the fixture bytes
+ * are exactly what a real install would resolve.
+ */
+const fontFixtures: Record<string, Uint8Array> = {
+  // The tests run from the app directory, so the bundled resource is
+  // reachable via cwd - the same file a dev install resolves.
+  "bundled:poppins-regular": readFileSync(
+    join(process.cwd(), "resources", "fonts", "Poppins-Regular.ttf"),
+  ),
+};
 
 const P_LOA = `<w:p><w:r><w:t>Dear {name}, no {no}</w:t></w:r></w:p>`;
 
@@ -488,8 +511,24 @@ describe("GenerateJobService run - image slot positioning (ticket 04, Seam A)", 
     const { db, repo, service } = makeSvc();
     const [budi] = seedRecipients(db);
     const templateId = seedPositionedTemplate(repo, {
-      name: { x: 0, y: 150, fontSize: 40, color: "#FF0000", align: "center", maxWidth: null },
-      instansi: { x: 20, y: 100, fontSize: 24, color: "#00FF00", align: "right", maxWidth: 120 },
+      name: {
+        x: 0,
+        y: 150,
+        fontSize: 40,
+        color: "#FF0000",
+        align: "center",
+        maxWidth: null,
+        fontFace: null,
+      },
+      instansi: {
+        x: 20,
+        y: 100,
+        fontSize: 24,
+        color: "#00FF00",
+        align: "right",
+        maxWidth: 120,
+        fontFace: null,
+      },
     });
 
     const job = await Effect.runPromise(service.start(templateId, [budi]));
@@ -523,7 +562,15 @@ describe("GenerateJobService run - image slot positioning (ticket 04, Seam A)", 
     const { db, repo, service } = makeSvc();
     const [budi] = seedRecipients(db);
     const templateId = seedPositionedTemplate(repo, {
-      name: { x: 10, y: 120, fontSize: 40, color: "#000000", align: "left", maxWidth: 60 },
+      name: {
+        x: 10,
+        y: 120,
+        fontSize: 40,
+        color: "#000000",
+        align: "left",
+        maxWidth: 60,
+        fontFace: null,
+      },
     });
 
     const job = await Effect.runPromise(service.start(templateId, [budi]));
@@ -545,7 +592,15 @@ describe("GenerateJobService run - image slot positioning (ticket 04, Seam A)", 
     // Only "name" is configured; "instansi" must fall back to the legacy
     // centered draw at two-thirds down the page, fitted to the page width.
     const templateId = seedPositionedTemplate(repo, {
-      name: { x: 0, y: 150, fontSize: 40, color: "#000000", align: "left", maxWidth: null },
+      name: {
+        x: 0,
+        y: 150,
+        fontSize: 40,
+        color: "#000000",
+        align: "left",
+        maxWidth: null,
+        fontFace: null,
+      },
     });
 
     const job = await Effect.runPromise(service.start(templateId, [budi]));
@@ -565,6 +620,130 @@ describe("GenerateJobService run - image slot positioning (ticket 04, Seam A)", 
     expect(nameOp!.y).toBeCloseTo(200 - 150 - 0.8 * nameOp!.size, 1);
   });
 });
+
+describe("GenerateJobService run - image slot font faces (ticket 11, Seam A)", () => {
+  it("embeds the chosen face and draws the slot with it, keeping Helvetica Bold elsewhere", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    const templateId = seedPositionedTemplate(repo, {
+      name: {
+        x: 0,
+        y: 150,
+        fontSize: 40,
+        color: "#FF0000",
+        align: "center",
+        maxWidth: null,
+        fontFace: "bundled:poppins-regular",
+      },
+      // No face: the legacy Helvetica Bold.
+      instansi: {
+        x: 20,
+        y: 100,
+        fontSize: 24,
+        color: "#00FF00",
+        align: "right",
+        maxWidth: 120,
+        fontFace: null,
+      },
+    });
+
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(service.run(job.id));
+    const draws = await pdfUsedFonts(readFileSync(done.recipients[0].outputPath as string));
+
+    // The embedded Poppins Regular rides next to the legacy font; both
+    // slots drew their text with their own face.
+    expect(draws.some((draw) => draw.font.includes("Poppins-Regular"))).toBe(true);
+    expect(draws.some((draw) => draw.font === "/Helvetica-Bold")).toBe(true);
+    expect(draws).toHaveLength(2);
+  });
+
+  it("fits the face slot with the face's own metrics", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    const templateId = seedPositionedTemplate(repo, {
+      name: {
+        x: 10,
+        y: 120,
+        fontSize: 40,
+        color: "#000000",
+        align: "left",
+        maxWidth: 120,
+        fontFace: "bundled:poppins-regular",
+      },
+    });
+
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(service.run(job.id));
+    const draws = await pdfUsedFonts(readFileSync(done.recipients[0].outputPath as string));
+    const nameDraw = draws.find((draw) => draw.font.includes("Poppins-Regular"));
+    expect(nameDraw).toBeDefined();
+    // Auto-shrunk to the 120px box - with Poppins metrics, not Helvetica.
+    expect(nameDraw!.size).toBeLessThan(40);
+    const poppins = await pdfEmbedFont(fontFixtures["bundled:poppins-regular"]!);
+    expect(poppins.widthOfTextAtSize("Budi Santoso", nameDraw!.size)).toBeLessThanOrEqual(120);
+  });
+
+  it("falls back to Helvetica Bold when the face's file is gone", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    const templateId = seedPositionedTemplate(repo, {
+      name: {
+        x: 10,
+        y: 120,
+        fontSize: 40,
+        color: "#000000",
+        align: "left",
+        maxWidth: null,
+        // Unknown id: the env resolves null, the legacy font must draw.
+        fontFace: "bundled:poppins-semibold",
+      },
+    });
+
+    // A stub whose every face id resolves to null - like a deleted upload.
+    const stub = stubEnv({ findFontBytes: () => null });
+    const serviceNoFonts = makeGenerateJobService(repo, makeProgressHub(), stub.env);
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(serviceNoFonts.run(job.id));
+    const pdfBytes = readFileSync(done.recipients[0].outputPath as string);
+    const draws = await pdfUsedFonts(pdfBytes);
+    expect(draws.every((draw) => draw.font === "/Helvetica-Bold")).toBe(true);
+    // The slot still drew at its configured position - with the legacy
+    // font, so the content-stream parser can read the text.
+    const nameOp = (await pageDrawOps(pdfBytes)).find((op) => op.text === "Budi Santoso");
+    expect(nameOp).toBeDefined();
+    expect(nameOp!.y).toBeCloseTo(200 - 120 - 0.8 * nameOp!.size, 1);
+  });
+
+  it("does not fail the recipient when the face file is corrupt", async () => {
+    const { db, repo, service } = makeSvc();
+    const [budi] = seedRecipients(db);
+    const templateId = seedPositionedTemplate(repo, {
+      name: {
+        x: 10,
+        y: 120,
+        fontSize: 40,
+        color: "#000000",
+        align: "left",
+        maxWidth: null,
+        fontFace: "bundled:poppins-regular",
+      },
+    });
+
+    const stub = stubEnv({ findFontBytes: () => new Uint8Array([1, 2, 3]) });
+    const serviceBadFont = makeGenerateJobService(repo, makeProgressHub(), stub.env);
+    const job = await Effect.runPromise(service.start(templateId, [budi]));
+    const done = await Effect.runPromise(serviceBadFont.run(job.id));
+    expect(done.recipients[0].status).toBe("generated");
+  });
+});
+
+/** Embeds a custom font for measuring drawn text (the face metrics check). */
+async function pdfEmbedFont(bytes: Uint8Array): Promise<PDFFont> {
+  const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
+  return pdf.embedFont(bytes);
+}
 
 /** The embedded bold font the renderer uses, for measuring drawn text. */
 let cachedFont: PDFFont | null = null;

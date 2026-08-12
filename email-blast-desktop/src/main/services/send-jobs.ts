@@ -21,6 +21,7 @@ import {
 import { normalizeIdentity } from "../../shared/sender-identity";
 import { interpolateMessageHtml, interpolateMessagePlain, messageValues } from "../../shared/send";
 import type { DefaultPaths } from "./default-paths";
+import { FontManagerService } from "./fonts";
 import {
   GenerateEnvService,
   GenerateJobService,
@@ -876,7 +877,11 @@ export class SendJobService extends Context.Service<SendJobService, SendJobServi
     | SmtpService
     | ProgressHub
     | Settings
-    | SqliteRepo
+    | SqliteRepo,
+    never,
+    // The generate env inside resolves font bytes through the font
+    // manager (ticket 11); the root layer provides it alongside.
+    FontManagerService
   > =>
     Layer.provideMerge(
       Layer.provideMerge(

@@ -33,6 +33,7 @@ export const WIRE = {
     pickFolder: { channel: "system:pick-folder", args: 0 },
     pickExcelFile: { channel: "system:pick-excel-file", args: 0 },
     pickTemplateFile: { channel: "system:pick-template-file", args: 0 },
+    pickFontFile: { channel: "system:pick-font-file", args: 0 },
     getAppInfo: { channel: "system:get-app-info", args: 0 },
   },
   settings: {
@@ -59,6 +60,11 @@ export const WIRE = {
     delete: { channel: "templates:delete", args: 1 },
     scanSlots: { channel: "templates:scan-slots", args: 1 },
     getImage: { channel: "templates:get-image", args: 1 },
+  },
+  fonts: {
+    list: { channel: "fonts:list", args: 0 },
+    getFile: { channel: "fonts:get-file", args: 1 },
+    add: { channel: "fonts:add", args: 1 },
   },
   messageTemplates: {
     list: { channel: "message-templates:list", args: 0 },

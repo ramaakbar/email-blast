@@ -311,7 +311,13 @@
     "slotAlign": "Perataan",
     "slotAlignLeft": "Rata kiri",
     "slotAlignCenter": "Rata tengah",
-    "slotAlignRight": "Rata kanan"
+    "slotAlignRight": "Rata kanan",
+    "slotFontFace": "Jenis huruf",
+    "slotFontFaceDefault": "Bawaan (Helvetica Bold)",
+    "addFont": "Tambah huruf…",
+    "fontAdded": "Huruf \"{family}\" ditambahkan.",
+    "fontAddFailed": "Gagal menambahkan file huruf.",
+    "fontListFailed": "Gagal memuat huruf yang tersedia."
   },
   "importPage": {
     "title": "Impor",
@@ -540,6 +546,10 @@
     "docxOnly": "Pemindaian slot hanya berfungsi untuk file .docx.",
     "couldNotRead": "Tidak dapat membaca \"{path}\": {detail}"
   },
+  "fontsService": {
+    "invalidFontFile": "Itu bukan file huruf TTF/OTF yang dapat dibaca.",
+    "couldNotRead": "Tidak dapat membaca \"{path}\"."
+  },
   "importService": {
     "noNameColumn": "Tidak ada kolom nama yang dikenali. Pilih kolomnya di pemetaan di bawah.",
     "noEmailColumn": "Tidak ada kolom email yang dikenali. Pilih kolomnya di pemetaan di bawah.",
@@ -566,7 +576,8 @@
   "dialogs": {
     "excelFilter": "Excel",
     "templateFilter": "Template",
-    "pdfFilter": "PDF"
+    "pdfFilter": "PDF",
+    "fontFilter": "Font"
   },
   "messages": {
     "documentsTab": "Dokumen",

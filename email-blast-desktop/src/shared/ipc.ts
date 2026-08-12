@@ -235,6 +235,11 @@ export type TemplateType = Schema.Schema.Type<typeof TemplateType>;
  * remaining page width). Single-line rendering with auto-shrink; a
  * template without any slot configuration falls back to the centered
  * stacked layout.
+ *
+ * `fontFace` (ticket 11) is the id of the face the slot renders with;
+ * null means the legacy Helvetica Bold. Rows saved before the field
+ * existed carry no key at all - the repository normalizes them to null
+ * on read, so old templates keep rendering exactly as before.
  */
 export const SlotLayout = Schema.Struct({
   x: Schema.Number,
@@ -243,6 +248,7 @@ export const SlotLayout = Schema.Struct({
   color: Schema.String,
   align: Schema.Literals(["left", "center", "right"]),
   maxWidth: Schema.Union([Schema.Null, Schema.Number]),
+  fontFace: Schema.Union([Schema.Null, Schema.String]),
 });
 export type SlotLayout = Schema.Schema.Type<typeof SlotLayout>;
 
@@ -326,6 +332,37 @@ export const TemplateImageResponse = Schema.Struct({
   dataBase64: Schema.String,
 });
 export type TemplateImageResponse = Schema.Schema.Type<typeof TemplateImageResponse>;
+
+// ---- Fonts domain (ticket 11) ----
+
+/**
+ * One font face a slot layout can pick (ticket 11): the stable id
+ * slot layouts persist (`bundled:<slug>` or `uploaded:<file name>`),
+ * the display family, and the weight when the family ships more than
+ * one cut (the CSS weight string plus a display label; null when the
+ * face is single-weight, like Great Vibes).
+ */
+export const FontFaceInfo = Schema.Struct({
+  id: Schema.String,
+  family: Schema.String,
+  weight: Schema.Union([Schema.Null, Schema.String]),
+  weightLabel: Schema.Union([Schema.Null, Schema.String]),
+  kind: Schema.Literals(["bundled", "uploaded"]),
+});
+export type FontFaceInfo = Schema.Schema.Type<typeof FontFaceInfo>;
+
+/**
+ * `fonts.getFile` response: the face's file bytes as a data-URL-ready
+ * payload - the renderer loads the SAME bytes the main process embeds at
+ * generate time, so preview measurement and the PDF can never drift.
+ * Null when the face id is unknown or its file is gone (the renderer
+ * falls back to the legacy Helvetica measurement).
+ */
+export const FontFileResponse = Schema.Struct({
+  mimeType: Schema.String,
+  dataBase64: Schema.String,
+});
+export type FontFileResponse = Schema.Schema.Type<typeof FontFileResponse>;
 
 // ---- Message Templates domain (ticket 03) ----
 
@@ -795,6 +832,8 @@ export interface Api {
      * the chosen path, or null when cancelled.
      */
     pickTemplateFile(): Promise<string | null>;
+    /** Opens a native font picker (`.ttf`, `.otf`); the chosen path, or null when cancelled. */
+    pickFontFile(): Promise<string | null>;
     /** The absolute path of a dropped File (the deprecated `File.path` is not available with the sandbox on). */
     getPathForFile(file: File): string;
     getAppInfo(): Promise<GetAppInfoResponse>;
@@ -859,6 +898,26 @@ export interface Api {
      * headers, and footers), in document order. Fails for non-DOCX files.
      */
     scanSlots(docxPath: string): Promise<ScanSlotsResponse>;
+  };
+  fonts: {
+    /**
+     * Every available face: the bundled set first (Great Vibes,
+     * Montserrat, Poppins), then the user-uploaded faces persisted in
+     * the app data dir.
+     */
+    list(): Promise<FontFaceInfo[]>;
+    /**
+     * The face's file bytes (the preview and the PDF embed the same
+     * file), or null when the id is unknown or the file is gone.
+     */
+    getFile(faceId: string): Promise<FontFileResponse | null>;
+    /**
+     * Registers an uploaded font file: validates it parses as a font,
+     * copies it into the app data dir, and returns the new face.
+     * Rejects with InvalidFontFile when the file is not a readable
+     * TTF/OTF.
+     */
+    add(filePath: string): Promise<FontFaceInfo>;
   };
   messageTemplates: {
     /** Every saved Message Template, most recently edited first. */

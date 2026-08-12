@@ -1,0 +1,3 @@
+# Certificate slot text uses per-slot font faces with full-TTF embedding
+
+Slot layouts gained a font face picker (family and weight where available), backed by a small bundled set (Great Vibes, Montserrat, Poppins - all SIL OFL, safe to redistribute) plus user-uploaded TTF/OTF files copied into the app data dir; unconfigured slots and the legacy render branch keep Helvetica Bold, so existing templates render identically. The preview canvas and the pdf-lib generator both load the same font file bytes, preserving the preview-equals-PDF invariant of the existing fit-to-width math. We accepted that pdf-lib embeds whole font files (no subsetting), growing certificate PDFs by the size of each used face, in exchange for exact rendering fidelity and no font-server dependency.

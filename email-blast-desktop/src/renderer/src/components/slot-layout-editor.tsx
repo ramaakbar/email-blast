@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { AlignCenter, AlignLeft, AlignRight, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AlignCenter, AlignLeft, AlignRight, Plus, X } from "lucide-react";
+import { toast } from "sonner";
 import { m } from "@paraglide/messages";
-import type { TemplateSlotLayout, SlotLayout } from "../../../shared/ipc";
+import type { FontFaceInfo, TemplateSlotLayout, SlotLayout } from "../../../shared/ipc";
 import {
   fitFontSize,
   LEGACY_STACK_Y_FRACTION,
@@ -11,6 +12,7 @@ import {
 } from "../../../shared/slot-layout";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
+import { useFontFaces } from "@/lib/font-faces";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,15 +39,25 @@ function defaultSlotLayout(pageHeight: number): SlotLayout {
     color: LEGACY_TEXT_COLOR,
     align: "center",
     maxWidth: null,
+    fontFace: null,
   };
 }
 
-/** Measures a bold Helvetica-ish string at a size, mirroring the PDF's Helvetica-Bold. */
-function measureText(text: string, size: number): number {
+/**
+ * Measures a string at a size with the given loaded face (ticket 11) -
+ * the same face generation embeds, so the fit-to-width math cannot
+ * drift. A null face (unconfigured, unknown id, or still loading)
+ * measures the legacy bold Helvetica approximation, exactly like the
+ * PDF's fallback.
+ */
+function measureText(text: string, size: number, face: FontFaceInfo | null): number {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
   if (ctx === null) return text.length * size * 0.6;
-  ctx.font = `bold ${size}px Helvetica, Arial, sans-serif`;
+  ctx.font =
+    face === null
+      ? `bold ${size}px Helvetica, Arial, sans-serif`
+      : `${face.weight === null ? "" : `${face.weight} `}${size}px "${face.family}"`;
   return ctx.measureText(text).width;
 }
 
@@ -69,12 +81,18 @@ export function SlotLayoutEditor({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(slots[0] ?? null);
   const [scale, setScale] = useState(1);
+  const [addingFont, setAddingFont] = useState(false);
   const stageRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     slot: string;
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  // The faces the face picker offers and the per-face loader behind the
+  // preview measurement (ticket 11). Destructured so the effect deps
+  // below are stable identities, not the fresh hook return object.
+  const { faces: availableFaces, refresh: refreshFaces, loadFace, loaded: loadedFace } =
+    useFontFaces();
 
   useEffect(() => {
     let cancelled = false;
@@ -146,14 +164,69 @@ export function SlotLayoutEditor({
     [layout, onChange, configFor],
   );
 
+  // Face id -> info, for the picker and the measurement resolution.
+  const facesById = useMemo(
+    () => new Map((availableFaces ?? []).map((face) => [face.id, face])),
+    [availableFaces],
+  );
+
+  /**
+   * The face a slot's configured fontFace resolves to for measurement
+   * and the preview box: null when unconfigured, unknown (upload
+   * deleted), still loading, or failed to load - all the
+   * legacy-Helvetica cases (a settled-null load means the file is
+   * missing, and the PDF falls back to Helvetica Bold too). When a
+   * pending load lands, the loader re-renders and the measurement
+   * switches to the real face.
+   */
+  const measureFaceFor = (fontFace: string | null): FontFaceInfo | null => {
+    if (fontFace === null) return null;
+    const face = facesById.get(fontFace);
+    const loaded = loadedFace(fontFace);
+    return face !== undefined && loaded !== undefined && loaded !== null ? face : null;
+  };
+
+  // Load the faces the layout references plus the selected slot's face,
+  // so their measurement and preview render use the real font.
+  useEffect(() => {
+    const wanted = new Set<string>();
+    for (const config of Object.values(layout)) {
+      if (config.fontFace !== null) wanted.add(config.fontFace);
+    }
+    if (selected !== null) {
+      const config = layout[selected];
+      if (config?.fontFace !== null && config?.fontFace !== undefined) wanted.add(config.fontFace);
+    }
+    for (const face of availableFaces ?? []) {
+      if (wanted.has(face.id)) loadFace(face);
+    }
+  }, [layout, selected, availableFaces, loadFace]);
+
   const fitted = (slot: string): number => {
     const config = configFor(slot);
     const maxWidth = config.maxWidth ?? pageWidth - config.x;
+    const face = measureFaceFor(config.fontFace);
     return fitFontSize({
       size: config.fontSize,
       maxWidth,
-      measureWidth: (size) => measureText(slot, size),
+      measureWidth: (size) => measureText(slot, size, face),
     });
+  };
+
+  /** The native font picker, the upload, and a list refresh - the add-font flow. */
+  const addFont = async (): Promise<void> => {
+    try {
+      const path = await window.api.system.pickFontFile();
+      if (path === null) return;
+      setAddingFont(true);
+      const face = await window.api.fonts.add(path);
+      refreshFaces();
+      toast.success(m["templates.fontAdded"]({ family: face.family }));
+    } catch (err) {
+      toast.error(errorMessage(err, m["templates.fontAddFailed"]()));
+    } finally {
+      setAddingFont(false);
+    }
   };
 
   if (loadError !== null) {
@@ -220,9 +293,10 @@ export function SlotLayoutEditor({
             />
             {slots.map((slot) => {
               const config = configFor(slot);
+              const face = measureFaceFor(config.fontFace);
               const size = fitted(slot);
               const maxWidth = config.maxWidth ?? pageWidth - config.x;
-              const textWidth = measureText(slot, size);
+              const textWidth = measureText(slot, size, face);
               // The same alignment math generation uses (shared/slot-layout).
               const left =
                 slotTextX({ x: config.x, maxWidth, textWidth, align: config.align }) * scale;
@@ -292,6 +366,10 @@ export function SlotLayoutEditor({
                     fontSize: size * scale,
                     lineHeight: 1,
                     color: config.color,
+                    // The box renders in the slot's chosen face; the
+                    // legacy look keeps the browser's default font.
+                    fontFamily: face === null ? undefined : `"${face.family}"`,
+                    fontWeight: face === null ? undefined : (face.weight ?? undefined),
                     whiteSpace: "nowrap",
                     padding: "0 2px",
                   }}
@@ -336,6 +414,9 @@ export function SlotLayoutEditor({
               config={configFor(selected)}
               pageWidth={pageWidth}
               pageHeight={pageHeight}
+              faces={availableFaces ?? null}
+              addingFont={addingFont}
+              onAddFont={() => void addFont()}
               onChange={(patch) => updateSlot(selected, patch)}
             />
           )}
@@ -386,18 +467,71 @@ function NumberField({
   );
 }
 
+/** The face picker plus the add-font flow of one slot (ticket 11). */
+function FontFaceField({
+  config,
+  faces,
+  addingFont,
+  onAddFont,
+  onChange,
+}: {
+  config: SlotLayout;
+  faces: readonly FontFaceInfo[] | null;
+  addingFont: boolean;
+  onAddFont: () => void;
+  onChange: (fontFace: string | null) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-muted-foreground">
+        {m["templates.slotFontFace"]()}
+      </span>
+      <div className="flex gap-2">
+        <select
+          value={config.fontFace ?? ""}
+          onChange={(event) => onChange(event.target.value === "" ? null : event.target.value)}
+          className="h-8 w-full min-w-0 rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
+        >
+          <option value="">{m["templates.slotFontFaceDefault"]()}</option>
+          {(faces ?? []).map((face) => (
+            <option key={face.id} value={face.id}>
+              {face.weightLabel === null ? face.family : `${face.family} ${face.weightLabel}`}
+            </option>
+          ))}
+        </select>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 shrink-0 px-2"
+          disabled={addingFont}
+          onClick={onAddFont}
+        >
+          <Plus className="size-4" /> {m["templates.addFont"]()}
+        </Button>
+      </div>
+    </label>
+  );
+}
+
 /** The numeric fields of one slot; every change flows through onChange. */
 function SlotControls({
   slot,
   config,
   pageWidth,
   pageHeight,
+  faces,
+  addingFont,
+  onAddFont,
   onChange,
 }: {
   slot: string;
   config: SlotLayout;
   pageWidth: number;
   pageHeight: number;
+  faces: readonly FontFaceInfo[] | null;
+  addingFont: boolean;
+  onAddFont: () => void;
   onChange: (patch: Partial<SlotLayout>) => void;
 }) {
   return (
@@ -430,6 +564,13 @@ function SlotControls({
         value={config.fontSize}
         min={MIN_SLOT_FONT_SIZE}
         onApply={(value) => onChange({ fontSize: value })}
+      />
+      <FontFaceField
+        config={config}
+        faces={faces}
+        addingFont={addingFont}
+        onAddFont={onAddFont}
+        onChange={(fontFace) => onChange({ fontFace })}
       />
       <label className="block">
         <span className="mb-1 block text-xs font-medium text-muted-foreground">

@@ -148,6 +148,7 @@ function stubGenerateEnv(): GenerateEnv {
     convertDocxToPdf: () =>
       Effect.fail(new LibreOfficeFailed({ message: "not used in send tests" })),
     outputDir: () => Effect.succeed(tempDir()),
+    findFontBytes: () => null,
   };
 }
 

@@ -4,7 +4,7 @@ import { join } from "path";
 import { deflateSync, inflateSync } from "zlib";
 import { afterEach } from "vitest";
 import PizZip from "pizzip";
-import { PDFDocument } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
 
 /**
  * Shared Seam A test scaffolding: temp directories that are auto-removed
@@ -184,6 +184,43 @@ export async function pageContentText(pdfBytes: Uint8Array): Promise<string> {
   return text.replace(/<([0-9A-Fa-f]+)>/g, (_match, hex: string) =>
     Buffer.from(hex, "hex").toString("utf8"),
   );
+}
+
+/**
+ * The fonts a page's text draws use, paired with the drawn size - read
+ * from the page's /Font resources and the content streams' Tf
+ * operators. The content-stream parser cannot decode embedded-font text
+ * (pdf-lib writes the font's own character codes), but the resource
+ * names line up on both sides: a Type0 font with a descendant CIDFont
+ * is an embedded custom face, a Type1 is one of the standard 14
+ * (Helvetica-Bold). Used by the ticket-11 render tests and the e2e.
+ */
+export async function pdfUsedFonts(
+  pdfBytes: Uint8Array,
+): Promise<readonly { font: string; size: number }[]> {
+  const pdf = await PDFDocument.load(pdfBytes);
+  const page = pdf.getPages()[0];
+  const resources = page.node.Resources();
+  const fontDict = resources?.lookup(PDFName.of("Font"));
+  const byResource = new Map<string, string>();
+  if (fontDict instanceof PDFDict) {
+    for (const [name, ref] of fontDict.entries()) {
+      const obj = fontDict.context.lookup(ref);
+      if (obj instanceof PDFDict) {
+        const baseFont = obj.get(PDFName.of("BaseFont"))?.toString() ?? "";
+        // The content streams write the name without its leading slash.
+        byResource.set(String(name).replace(/^\//, ""), baseFont);
+      }
+    }
+  }
+  const draws: { font: string; size: number }[] = [];
+  for (const stream of await pageStreams(pdfBytes)) {
+    for (const match of stream.matchAll(/\/([\w-]+) ([\d.]+) Tf/g)) {
+      const baseFont = byResource.get(match[1]);
+      if (baseFont !== undefined) draws.push({ font: baseFont, size: Number(match[2]) });
+    }
+  }
+  return draws;
 }
 
 /** One text draw inside the page content stream: size, baseline position, and text. */

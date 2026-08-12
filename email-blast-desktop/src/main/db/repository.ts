@@ -29,7 +29,7 @@ import {
   templates as t,
 } from "./schema";
 import { isCiphertext, type CredentialCrypto } from "../services/credential-crypto";
-import type { SlotLayoutConfig } from "../../shared/slot-layout";
+import { normalizeSlotLayout, type SlotLayoutConfig } from "../../shared/slot-layout";
 
 /**
  * The migrations folder applied on open (drizzle/): packaged builds get it
@@ -699,7 +699,10 @@ function toTemplate(row: TemplateRow): Template {
     type: row.type,
     slots: JSON.parse(row.slots) as string[],
     outputPattern: row.output_pattern,
-    slotLayout: row.slot_layout === null ? {} : (JSON.parse(row.slot_layout) as SlotLayoutConfig),
+    // Rows saved before fontFace existed carry no key; normalization reads
+    // them as the legacy Helvetica Bold (ticket 11).
+    slotLayout:
+      row.slot_layout === null ? {} : normalizeSlotLayout(JSON.parse(row.slot_layout)),
     createdAt: row.created_at,
   };
 }

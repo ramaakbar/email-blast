@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { SlotLayout } from "./ipc";
 import {
   BASELINE_OFFSET,
+  LEGACY_FONT_FACE,
   MIN_SLOT_FONT_SIZE,
   fitFontSize,
+  normalizeSlotLayout,
   parseHexColor,
   pdfBaselineY,
   slotTextX,
@@ -84,6 +86,7 @@ describe("validateSlotLayout", () => {
     color: "#1A2421",
     align: "center",
     maxWidth: null,
+    fontFace: LEGACY_FONT_FACE,
   };
 
   it("accepts an empty layout (no configuration)", () => {
@@ -93,6 +96,19 @@ describe("validateSlotLayout", () => {
   it("accepts a well-formed per-slot layout", () => {
     expect(validateSlotLayout({ name: good })).toBeNull();
     expect(validateSlotLayout({ name: { ...good, maxWidth: 120 } })).toBeNull();
+  });
+
+  it("accepts a face id and treats null as the legacy face", () => {
+    expect(validateSlotLayout({ name: { ...good, fontFace: "bundled:poppins-bold" } })).toBeNull();
+    expect(validateSlotLayout({ name: { ...good, fontFace: null } })).toBeNull();
+  });
+
+  it("rejects a non-string, non-null font face", () => {
+    // undefined reaches the validator when a layout was built by hand
+    // without the field - the shape check must not silently accept it.
+    expect(validateSlotLayout({ name: { ...good, fontFace: undefined as never } })).not.toBeNull();
+    expect(validateSlotLayout({ name: { ...good, fontFace: 7 as never } })).not.toBeNull();
+    expect(validateSlotLayout({ name: { ...good, fontFace: "" } })).not.toBeNull();
   });
 
   it("rejects a non-hex color", () => {
@@ -115,5 +131,35 @@ describe("validateSlotLayout", () => {
 
   it("rejects a non-finite number", () => {
     expect(validateSlotLayout({ name: { ...good, fontSize: Number.NaN } })).not.toBeNull();
+  });
+});
+
+describe("normalizeSlotLayout", () => {
+  it("reads a row saved before fontFace existed as the legacy face", () => {
+    const stored = {
+      name: { x: 10, y: 100, fontSize: 32, color: "#1A2421", align: "center", maxWidth: null },
+    };
+    expect(normalizeSlotLayout(stored)).toEqual({ name: { ...stored.name, fontFace: null } });
+  });
+
+  it("keeps a stored face id", () => {
+    const stored = {
+      name: {
+        x: 10,
+        y: 100,
+        fontSize: 32,
+        color: "#1A2421",
+        align: "center",
+        maxWidth: null,
+        fontFace: "bundled:great-vibes",
+      },
+    };
+    expect(normalizeSlotLayout(stored)).toEqual(stored);
+  });
+
+  it("treats a malformed blob as an empty configuration", () => {
+    expect(normalizeSlotLayout(null)).toEqual({});
+    expect(normalizeSlotLayout("nope")).toEqual({});
+    expect(normalizeSlotLayout([1, 2])).toEqual({});
   });
 });

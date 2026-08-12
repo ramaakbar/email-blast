@@ -17,7 +17,9 @@ const config: ForgeConfig = {
     // notarization with a real identity are deferred until distribution.
     // The Drizzle migrations folder ships as an extra resource; the app
     // resolves it next to the binary (openDatabase in db/repository.ts).
-    extraResource: ["drizzle"],
+    // The bundled font faces (ticket 11) ship the same way - copied next
+    // to the binary into process.resourcesPath/fonts.
+    extraResource: ["drizzle", "resources/fonts"],
     // The Vite plugin's default ignore packs ONLY the .vite build (every
     // runtime dependency is bundled into it). better-sqlite3 is the
     // exception: a native module the main bundle externalizes, so its

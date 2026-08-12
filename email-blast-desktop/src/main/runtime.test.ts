@@ -19,7 +19,13 @@ describe("Seam A: main-process Effect runtime", () => {
   it("composes the root layer and resolves the AppInfo service", async () => {
     const home = tempDir();
     const db = openDatabase(join(home, "test.db"));
-    const layer = rootLayer(db, defaultPathsForHome(home), undefined, makeCredentialCrypto(null, () => {}));
+    const layer = rootLayer(
+      db,
+      defaultPathsForHome(home),
+      undefined,
+      makeCredentialCrypto(null, () => {}),
+      { fontsDir: join(home, "fonts"), bundledFontsDir: join(home, "bundled-fonts") },
+    );
 
     const info = await Effect.runPromise(
       Effect.gen(function* () {

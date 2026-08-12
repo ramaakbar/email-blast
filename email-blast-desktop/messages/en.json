@@ -311,7 +311,13 @@
     "slotAlign": "Alignment",
     "slotAlignLeft": "Align left",
     "slotAlignCenter": "Align center",
-    "slotAlignRight": "Align right"
+    "slotAlignRight": "Align right",
+    "slotFontFace": "Font face",
+    "slotFontFaceDefault": "Default (Helvetica Bold)",
+    "addFont": "Add font…",
+    "fontAdded": "Font \"{family}\" added.",
+    "fontAddFailed": "Could not add the font file.",
+    "fontListFailed": "Could not load the available fonts."
   },
   "importPage": {
     "title": "Import",
@@ -540,6 +546,10 @@
     "docxOnly": "Slot scanning works on .docx files only.",
     "couldNotRead": "Could not read \"{path}\": {detail}"
   },
+  "fontsService": {
+    "invalidFontFile": "That is not a readable TTF/OTF font file.",
+    "couldNotRead": "Could not read \"{path}\"."
+  },
   "importService": {
     "noNameColumn": "No recognizable name column was found. Select it in the mapping below.",
     "noEmailColumn": "No recognizable email column was found. Select it in the mapping below.",
@@ -566,7 +576,8 @@
   "dialogs": {
     "excelFilter": "Excel",
     "templateFilter": "Template",
-    "pdfFilter": "PDF"
+    "pdfFilter": "PDF",
+    "fontFilter": "Font"
   },
   "messages": {
     "documentsTab": "Documents",

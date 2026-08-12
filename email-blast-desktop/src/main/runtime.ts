@@ -14,6 +14,7 @@ import { SmtpService } from "./services/smtp";
 import type { SqliteRepo } from "./db/repository";
 import { MessageTemplatesService } from "./services/message-templates";
 import { TemplatesService } from "./services/templates";
+import { FontManagerService, type FontDirs } from "./services/fonts";
 
 export type AppServices =
   | Settings
@@ -29,26 +30,36 @@ export type AppServices =
   | SendEnvService
   | SmtpService
   | ProgressHub
-  | AppInfo;
+  | AppInfo
+  | FontManagerService;
 
 /**
  * Root Layer of the main process - the composition root the Effect
  * runtime is built from. SendJobService brings the send pipeline
  * (ticket 15); its Live layer provides GenerateJob, Smtp, ProgressHub,
  * Settings, and SqliteRepo alongside, so the duplicates merge away.
+ * FontManagerService (ticket 11) is the fonts domain: the bundled
+ * faces plus the uploads persisted in the app data dir.
  */
 export const rootLayer = (
   db: Database.Database,
   defaults: DefaultPaths,
   systemLocale: string = "en",
   credCrypto: CredentialCrypto,
+  fontDirs: FontDirs,
 ): Layer.Layer<AppServices> =>
-  Layer.mergeAll(
-    Settings.Live(db, defaults, systemLocale, credCrypto),
-    ImportService.Live(db, credCrypto),
-    RecipientsService.Live(db, credCrypto),
-    TemplatesService.Live(db, credCrypto),
-    MessageTemplatesService.Live(db, credCrypto),
-    SendJobService.Live(db, defaults, credCrypto),
-    AppInfo.Live,
+  // The font manager satisfies the generate env's face resolution
+  // (ticket 11); provideMerge cancels that requirement where mergeAll
+  // leaves it dangling in the beta's type computation.
+  Layer.provideMerge(
+    Layer.mergeAll(
+      Settings.Live(db, defaults, systemLocale, credCrypto),
+      ImportService.Live(db, credCrypto),
+      RecipientsService.Live(db, credCrypto),
+      TemplatesService.Live(db, credCrypto),
+      MessageTemplatesService.Live(db, credCrypto),
+      SendJobService.Live(db, defaults, credCrypto),
+      AppInfo.Live,
+    ),
+    FontManagerService.Live(fontDirs),
   );

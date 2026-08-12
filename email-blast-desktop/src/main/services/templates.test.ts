@@ -231,7 +231,7 @@ describe("TemplatesService create (Seam A)", () => {
   it("persists a slot layout given at create time and rejects an invalid one", async () => {
     const layer = templateLayer();
     const layout = {
-      nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null },
+      nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null, fontFace: null },
     } as const;
     const created = await use(layer, (s) =>
       s.create({
@@ -253,7 +253,7 @@ describe("TemplatesService create (Seam A)", () => {
           slots: ["nama"],
           outputPattern: "SERTIFIKAT_{nama}.pdf",
           slotLayout: {
-            nama: { x: 0, y: 150, fontSize: 40, color: "red", align: "center", maxWidth: null },
+            nama: { x: 0, y: 150, fontSize: 40, color: "red", align: "center", maxWidth: null, fontFace: null },
           },
         }),
       ),
@@ -324,8 +324,8 @@ describe("TemplatesService update (Seam A)", () => {
     expect(created.slotLayout).toEqual({});
 
     const layout = {
-      nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null },
-      instansi: { x: 20, y: 100, fontSize: 24, color: "#00AA00", align: "right", maxWidth: 120 },
+      nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null, fontFace: null },
+      instansi: { x: 20, y: 100, fontSize: 24, color: "#00AA00", align: "right", maxWidth: 120, fontFace: null },
     } as const;
     const updated = await use(layer, (s) =>
       s.update(created.id, {
@@ -359,7 +359,7 @@ describe("TemplatesService update (Seam A)", () => {
         slots: ["nama"],
         outputPattern: "SERTIFIKAT_{nama}.pdf",
         slotLayout: {
-          nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null },
+          nama: { x: 0, y: 150, fontSize: 40, color: "#1A2421", align: "center", maxWidth: null, fontFace: null },
         },
       }),
     );
@@ -393,7 +393,7 @@ describe("TemplatesService update (Seam A)", () => {
           slots: ["nama"],
           outputPattern: "SERTIFIKAT_{nama}.pdf",
           slotLayout: {
-            nama: { x: 0, y: 150, fontSize: 40, color: "red", align: "center", maxWidth: null },
+            nama: { x: 0, y: 150, fontSize: 40, color: "red", align: "center", maxWidth: null, fontFace: null },
           },
         }),
       ),

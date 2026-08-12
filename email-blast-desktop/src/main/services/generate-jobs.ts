@@ -7,7 +7,8 @@ import { basename, dirname, extname, join } from "path";
 import type Database from "better-sqlite3";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import { m } from "@paraglide/messages";
 import type { Recipient, Template } from "../../shared/ipc";
 import {
@@ -37,6 +38,7 @@ import {
 } from "../../shared/slot-layout";
 import { DEFAULT_UI_LOCALE } from "../../shared/settings";
 import type { DefaultPaths } from "./default-paths";
+import { FontManagerService } from "./fonts";
 import { LibreOfficeService, LibreOfficeFailed } from "./libreoffice";
 import { ProgressHub, type ProgressHubShape } from "./progress-hub";
 import { Settings } from "./settings";
@@ -116,6 +118,13 @@ export interface GenerateEnv {
   ) => Effect.Effect<void, LibreOfficeFailed>;
   /** Where the generated PDFs land (the settings output directory). */
   readonly outputDir: () => Effect.Effect<string>;
+  /**
+   * The file bytes of a slot's chosen face, or null when the id is
+   * unknown or its file is gone - the caller falls back to the legacy
+   * Helvetica Bold (ticket 11). The renderer preview loads the very
+   * same bytes via fonts.getFile, so preview and PDF never drift.
+   */
+  readonly findFontBytes: (faceId: string) => Uint8Array | null;
 }
 
 /**
@@ -126,23 +135,31 @@ export interface GenerateEnv {
 export class GenerateEnvService extends Context.Service<GenerateEnvService, GenerateEnv>()(
   "GenerateEnvService",
 ) {
-  static readonly Live: Layer.Layer<GenerateEnvService | LibreOfficeService, never, Settings> =
-    Layer.provideMerge(
-      Layer.effect(
-        GenerateEnvService,
-        Effect.gen(function* () {
-          const libreOffice = yield* LibreOfficeService;
-          const settings = yield* Settings;
-          return {
-            findLibreOffice: () => libreOffice.findLibreOffice(),
-            convertDocxToPdf: (soffice, docxFiles, outDir) =>
-              libreOffice.convertDocxToPdf(soffice, docxFiles, outDir),
-            outputDir: () => settings.getOutputDir(),
-          };
-        }),
-      ),
-      LibreOfficeService.Live,
-    );
+  static readonly Live: Layer.Layer<
+    GenerateEnvService | LibreOfficeService,
+    never,
+    Settings | FontManagerService
+  > = Layer.provideMerge(
+    Layer.effect(
+      GenerateEnvService,
+      Effect.gen(function* () {
+        const libreOffice = yield* LibreOfficeService;
+        const settings = yield* Settings;
+        const fonts = yield* FontManagerService;
+        return {
+          findLibreOffice: () => libreOffice.findLibreOffice(),
+          convertDocxToPdf: (soffice, docxFiles, outDir) =>
+            libreOffice.convertDocxToPdf(soffice, docxFiles, outDir),
+          outputDir: () => settings.getOutputDir(),
+          // All font resolution is synchronous file work, so runSync is
+          // safe here - the same call the renderer preview makes over
+          // the wire, byte for byte.
+          findFontBytes: (faceId) => Option.getOrNull(Effect.runSync(fonts.resolveBytes(faceId))),
+        };
+      }),
+    ),
+    LibreOfficeService.Live,
+  );
 }
 
 // ---- The domain service ----
@@ -267,6 +284,11 @@ function ink(hex: string) {
  * layout and a newly declared slot never vanishes. Configured slots
  * render single-line at the configured size, color, and alignment,
  * auto-shrinking to fit the slot width.
+ *
+ * Fonts (ticket 11): a configured face is embedded whole (pdf-lib has
+ * no subsetting) and reused across the slots that pick it; a slot
+ * without a face, an unknown face id, or a face whose file is gone all
+ * render in the legacy Helvetica Bold, byte-identical to before.
  */
 async function renderImagePdf(
   templateBytes: Uint8Array,
@@ -274,15 +296,40 @@ async function renderImagePdf(
   slots: readonly string[],
   values: Record<string, string>,
   slotLayout: SlotLayoutConfig,
+  resolveFontBytes: (faceId: string) => Uint8Array | null,
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
+  pdf.registerFontkit(fontkit);
   const background =
     kind === "png" ? await pdf.embedPng(templateBytes) : await pdf.embedJpg(templateBytes);
   const width = background.width;
   const height = background.height;
   const page = pdf.addPage([width, height]);
   page.drawImage(background, { x: 0, y: 0, width, height });
-  const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const helveticaBold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  // One embedded PDFFont per used face, embedded before the draw loop
+  // (pdf-lib embeds whole files - no subsetting). An unknown face, a
+  // missing file, or an unreadable one falls back to the legacy font
+  // rather than failing the recipient.
+  const distinctFaces = new Set<string>();
+  for (const config of Object.values(slotLayout)) {
+    if (config.fontFace !== null) distinctFaces.add(config.fontFace);
+  }
+  const faceCache = new Map<string, PDFFont>();
+  await Promise.all(
+    [...distinctFaces].map(async (faceId) => {
+      const bytes = resolveFontBytes(faceId);
+      if (bytes === null) return;
+      try {
+        faceCache.set(faceId, await pdf.embedFont(bytes));
+      } catch {
+        // Unreadable bytes: keep the face out of the cache, the draw
+        // loop falls back to the legacy font.
+      }
+    }),
+  );
+  const fontFor = (faceId: string | null): PDFFont =>
+    faceId === null ? helveticaBold : (faceCache.get(faceId) ?? helveticaBold);
   const step = Math.max(60, height * 0.09);
   let y = height * 0.68;
   for (const slot of slots) {
@@ -293,12 +340,12 @@ async function renderImagePdf(
       // The legacy default: centered, stacked from two-thirds down the
       // page, fitted to the page width and never below a legible floor.
       const size = Math.max(18, Math.min(140, width / Math.max(1, value.length * 0.6)));
-      const textWidth = font.widthOfTextAtSize(value, size);
+      const textWidth = helveticaBold.widthOfTextAtSize(value, size);
       page.drawText(value, {
         x: (width - textWidth) / 2,
         y,
         size,
-        font,
+        font: helveticaBold,
         color: ink(LEGACY_TEXT_COLOR),
       });
       y -= step;
@@ -307,6 +354,7 @@ async function renderImagePdf(
     // The configured box: the top-left corner lives in image pixels
     // (CSS convention); the fitted size never grows past the configured
     // one and never falls below the legibility floor.
+    const font = fontFor(layout.fontFace);
     const maxWidth = layout.maxWidth ?? width - layout.x;
     const fitted = fitFontSize({
       size: layout.fontSize,
@@ -598,6 +646,7 @@ export function makeGenerateJobService(
               template.slots,
               resolved.values,
               template.slotLayout,
+              env.findFontBytes,
             ),
           catch: (error) => error,
         }).pipe(Effect.result);
@@ -949,7 +998,9 @@ export class GenerateJobService extends Context.Service<
     | Settings
     | SqliteRepo,
     never,
-    never
+    // The generate env resolves font bytes through the font manager
+    // (ticket 11); the root layer provides it alongside.
+    FontManagerService
   > =>
     Layer.provideMerge(
       Layer.provideMerge(

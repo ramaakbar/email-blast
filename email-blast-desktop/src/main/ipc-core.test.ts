@@ -13,6 +13,7 @@ import { settingsOperations } from "./services/settings";
 import { importOperations } from "./services/import";
 import { recipientsOperations } from "./services/recipients";
 import { templatesOperations } from "./services/templates";
+import { fontsOperations } from "./services/fonts";
 import { messageTemplatesOperations } from "./services/message-templates";
 import { generateOperations } from "./services/generate-jobs";
 import { smtpOperations } from "./services/smtp";
@@ -28,6 +29,7 @@ const DOMAINS: readonly (Readonly<Record<string, Operation>>)[] = [
   importOperations,
   recipientsOperations,
   templatesOperations,
+  fontsOperations,
   messageTemplatesOperations,
   generateOperations,
   smtpOperations,
