@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Clock, FileText, Loader2, X } from "lucide-react";
+import { Check, Clock, FileText, Info, Loader2, RotateCcw, X } from "lucide-react";
 import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { GenerateResults } from "@/components/generate-results";
@@ -11,6 +11,7 @@ import { TemplateStep } from "@/components/template-step";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { formatTimestamp } from "@/lib/format";
+import { plural } from "@/lib/plural";
 import { slotCoverage } from "../../../shared/generate";
 import type { GenerateJob, GenerateJobSummary, Recipient } from "../../../shared/ipc";
 
@@ -24,9 +25,28 @@ export const Route = createFileRoute("/generate")({
  * validation, and generate & review with live progress, failures, and
  * PDF re-download. No message, SMTP, or send step exists anywhere here;
  * the Send workspace (06) is the send side. Past Generate Jobs can be
- * reopened below with their PDFs re-downloaded, and "Send these" jumps
- * into the Send workspace pre-linked to the job.
+ * reopened below with their PDFs re-downloaded, retried into the
+ * workspace pre-filled with the job's recipients and template (ticket
+ * 07), and "Send these" jumps into the Send workspace pre-linked to the
+ * job.
  */
+
+/**
+ * Loads one job's snapshot plus its live recipients (deleted ones fall
+ * back to the job's names) - shared by the Reopen results view and the
+ * Retry pre-fill (ticket 07).
+ */
+async function loadJobSnapshot(
+  jobId: string,
+): Promise<{ job: GenerateJob; recipients: Recipient[] } | null> {
+  const job = await window.api.generate.getGenerateStatus(jobId);
+  if (job === null) return null;
+  const recipients = (
+    await Promise.all(job.recipients.map((r) => window.api.recipients.get(r.recipientId)))
+  ).filter((r): r is Recipient => r !== null);
+  return { job, recipients };
+}
+
 function GeneratePage() {
   const [selection, setSelection] = useState<Map<string, Recipient>>(new Map());
   const [templateId, setTemplateId] = useState<string | null>(null);
@@ -38,6 +58,9 @@ function GeneratePage() {
     recipients: Recipient[];
   } | null>(null);
   const [reopenError, setReopenError] = useState<string | null>(null);
+  // The Retry pre-fill's deleted-recipient notice (ticket 07), mirroring
+  // the Send workspace's Logs-retry banner.
+  const [retryNotice, setRetryNotice] = useState<string | null>(null);
 
   const templatesQuery = useQuery({
     queryKey: ["templates", "list"],
@@ -85,21 +108,52 @@ function GeneratePage() {
 
   /** The "Send these" pre-link (ticket 06): jump to the Send workspace with this job picked. */
   const sendThese = (jobId: string): void => {
-    void navigate({ to: "/send", state: { sendPrefill: { generateJobId: jobId } } });
+    void navigate({ to: "/send", state: { sendPrefill: { kind: "job", generateJobId: jobId } } });
   };
 
+  /** Loads one job's snapshot plus its live recipients (deleted ones fall back to the job's names). */
   const openJob = async (jobId: string): Promise<void> => {
     setReopenError(null);
     try {
-      const job = await window.api.generate.getGenerateStatus(jobId);
-      if (job === null) {
+      const snapshot = await loadJobSnapshot(jobId);
+      if (snapshot === null) {
         setReopenError(m["generate.jobNoLongerExists"]());
         return;
       }
-      const recipients = (
-        await Promise.all(job.recipients.map((r) => window.api.recipients.get(r.recipientId)))
-      ).filter((r): r is Recipient => r !== null);
-      setReopened({ job, recipients });
+      setReopened(snapshot);
+    } catch (error) {
+      setReopenError(errorMessage(error, m["generate.couldNotReopenJob"]()));
+    }
+  };
+
+  // The page's scroll container, so a retry can bring the pre-filled
+  // workspace inputs back into view.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  /** Retry (ticket 07): pre-fill the workspace with the job's recipients and template. */
+  const retryJob = async (jobId: string): Promise<void> => {
+    setReopenError(null);
+    try {
+      const snapshot = await loadJobSnapshot(jobId);
+      if (snapshot === null) {
+        setReopenError(m["generate.jobNoLongerExists"]());
+        return;
+      }
+      setReopened(null);
+      setTemplateId(snapshot.job.templateId);
+      setSelection(new Map(snapshot.recipients.map((r) => [r.id, r])));
+      // A done run bound to the same inputs would look stale next to the
+      // pre-filled state, so the workspace always starts fresh.
+      setGenerate({ kind: "idle" });
+      // Recipients deleted since the job ran are left out of the pre-fill
+      // - say so, exactly like the Send workspace's Logs-retry banner.
+      const missing = snapshot.job.recipients.length - snapshot.recipients.length;
+      setRetryNotice(
+        missing > 0
+          ? plural(missing, m["generate.prefillDeletedOne"], m["generate.prefillDeletedOther"])
+          : null,
+      );
+      scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       setReopenError(errorMessage(error, m["generate.couldNotReopenJob"]()));
     }
@@ -112,7 +166,14 @@ function GeneratePage() {
         <p className="text-sm text-muted-foreground">{m["generate.description"]()}</p>
       </header>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-6 pb-6">
+      {retryNotice !== null && (
+        <div className="mx-6 mb-4 flex items-start gap-2 rounded-lg border border-sky-600/40 bg-sky-600/10 px-4 py-2.5 text-sm text-sky-900">
+          <Info className="mt-0.5 size-4 shrink-0" />
+          <span>{retryNotice}</span>
+        </div>
+      )}
+
+      <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-6 pb-6">
         <section aria-labelledby="generate-recipients">
           <h2
             id="generate-recipients"
@@ -151,9 +212,9 @@ function GeneratePage() {
             template={template}
             state={generate}
             onStateChange={setGenerate}
-            // The wizard gates its own coverage check on the stepper; the
-            // workspace gates the start action directly, so generation
-            // never begins with recipients missing required slot data.
+            // The workspace gates the start action directly, so
+            // generation never begins with recipients missing required
+            // slot data.
             startDisabled={!coverage.ok}
             onSendThese={sendThese}
           />
@@ -193,7 +254,12 @@ function GeneratePage() {
                 </thead>
                 <tbody className="divide-y">
                   {pastJobs.map((job) => (
-                    <PastJobRow key={job.id} job={job} onOpen={() => void openJob(job.id)} />
+                    <PastJobRow
+                      key={job.id}
+                      job={job}
+                      onOpen={() => void openJob(job.id)}
+                      onRetry={() => void retryJob(job.id)}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -230,7 +296,15 @@ function GeneratePage() {
 }
 
 /** One row of the Past Generate Jobs table. */
-function PastJobRow({ job, onOpen }: { job: GenerateJobSummary; onOpen: () => void }) {
+function PastJobRow({
+  job,
+  onOpen,
+  onRetry,
+}: {
+  job: GenerateJobSummary;
+  onOpen: () => void;
+  onRetry: () => void;
+}) {
   const statusLabel = generateStatusLabel(job.status);
   return (
     <tr className="transition-colors hover:bg-muted/40">
@@ -251,9 +325,19 @@ function PastJobRow({ job, onOpen }: { job: GenerateJobSummary; onOpen: () => vo
         {formatTimestamp(job.createdAt)}
       </td>
       <td className="px-3 py-2 text-right">
-        <Button variant="outline" size="sm" onClick={onOpen}>
-          {m["generate.reopenJob"]()}
-        </Button>
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetry}
+            title={m["generate.retryJobHint"]()}
+          >
+            <RotateCcw className="size-3.5" /> {m["common.retry"]()}
+          </Button>
+          <Button variant="outline" size="sm" onClick={onOpen}>
+            {m["generate.reopenJob"]()}
+          </Button>
+        </div>
       </td>
     </tr>
   );

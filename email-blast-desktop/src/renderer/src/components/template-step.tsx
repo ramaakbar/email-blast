@@ -7,11 +7,10 @@ import type { Recipient, Template } from "../../../shared/ipc";
 import type { SlotCoverage } from "../../../shared/generate";
 
 /**
- * The Document Template picker shared by the compose wizard's step 2 and
- * the Generate workspace: one template with slot-coverage validation
- * against the selected recipients. The coverage report comes from the
- * parent (shared generate.ts logic), so both hosts gate their own next
- * actions on it.
+ * The Document Template picker of the Generate workspace: one template
+ * with slot-coverage validation against the selected recipients. The
+ * coverage report comes from the parent (shared generate.ts logic), so
+ * the host gates its own next action on it.
  */
 export function TemplateStep({
   templates,

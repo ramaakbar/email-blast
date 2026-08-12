@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   closeSession,
-  fillMessageStep,
+  fillWorkspaceMessage,
   firstLaunchCreatesSchema,
   freshUserDataDir,
   importFixtureSpreadsheet,
@@ -23,9 +23,10 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
  * stored with a past Send Job - is seeded directly into the database, and
  * the boot migration encrypts both in place. The app must keep working
  * afterwards: the migrated profile's stored credential passes Test
- * Connection and sends a campaign through the wizard, and the migrated
- * job's override resumes and delivers to the capture server. The second
- * scenario pins that newly created profiles are encrypted from the start.
+ * Connection and sends a campaign through the Generate and Send
+ * workspaces, and the migrated job's override resumes and delivers to the
+ * capture server. The second scenario pins that newly created profiles
+ * are encrypted from the start.
  * On this platform safeStorage is available, so the at-rest assertions
  * read the ciphertext marker `enc:v1:`; the unavailable-keychain
  * degradation is covered by the unit suite.
@@ -33,9 +34,9 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
 
 const LEGACY_PASSWORD = "secret";
 const LEGACY_SUBJECT = "Undangan Rapat - Batch Legasi";
-const WIZARD_SUBJECT = "Undangan Rapat - Profil Termigrasi";
+const PROFILE_SUBJECT = "Undangan Rapat - Profil Termigrasi";
 // The legacy job's recipients are three of the fixture campaign's people:
-// the later wizard import dedupes them (by email), so the compose picker
+// the later import dedupes them (by email), so the Generate workspace
 // ends up with exactly the four fixture recipients.
 const LEGACY_RECIPIENTS = [
   { id: "rec-1", name: "Budi Santoso", email: "budi@example.com", metadata: { instansi: "Yayasan X" } },
@@ -170,17 +171,23 @@ describe("Seam B: SMTP passwords encrypted at rest (ticket 02)", () => {
     );
     await row.getByText("Completed", { exact: true }).waitFor({ timeout: 20_000 });
 
-    // ---- Sending THROUGH the migrated profile: the wizard picks it and delivers ----
+    // ---- Sending THROUGH the migrated profile: the workspaces pick it and deliver ----
     await importFixtureSpreadsheet(app, page, xlsxPath);
+
+    // Generate workspace: recipients + template.
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
-    await page.waitForSelector("text=4 recipients selected");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    await page.waitForSelector("text=4 selected · 4 matching");
     await page.getByLabel("Letter or certificate template").selectOption({ label: "LOA" });
     await page.waitForSelector("text=All 4 selected recipients have data for every required slot.");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
-    await fillMessageStep(page, {
-      subject: WIZARD_SUBJECT,
+    await page.getByRole("button", { name: "Generate PDFs" }).click();
+    await page.waitForSelector("text=All 4 PDFs generated.", { timeout: 60_000 });
+
+    // Send workspace: "Send these" pre-links the generated job.
+    await page.getByRole("button", { name: "Send these" }).click();
+    await page.waitForSelector("text=4 selected · 4 matching", { timeout: 20_000 });
+    await fillWorkspaceMessage(page, {
+      subject: PROFILE_SUBJECT,
       bodyHtml: "<p>Dear {name}, from {instansi}, you are invited.</p>",
     });
     const captureOption = await page
@@ -198,13 +205,9 @@ describe("Seam B: SMTP passwords encrypted at rest (ticket 02)", () => {
     await page.waitForSelector("text=Connected - the server accepted these credentials.", {
       timeout: 20_000,
     });
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Generate PDFs" }).click();
-    await page.waitForSelector("text=All 4 PDFs generated.", { timeout: 60_000 });
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
     await page.getByRole("button", { name: "Send 4 emails" }).click();
     await page.waitForSelector("text=All 4 emails sent.", { timeout: 60_000 });
-    const profileMails = smtp.captured.filter((mail) => mail.raw.includes(WIZARD_SUBJECT));
+    const profileMails = smtp.captured.filter((mail) => mail.raw.includes(PROFILE_SUBJECT));
     expect(profileMails).toHaveLength(4);
     expect(profileMails.map((mail) => mail.to).toSorted()).toEqual(
       FIXTURE_RECIPIENTS.map((recipient) => recipient.email).toSorted(),

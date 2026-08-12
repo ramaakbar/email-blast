@@ -162,7 +162,7 @@ export interface SqliteRepoShape {
   readonly listImportBatches: () => Effect.Effect<ImportBatch[]>;
   /**
    * Every recipient matching the search text and import-batch filter,
-   * unpaginated - the compose wizard's select-all reads the full list so
+   * unpaginated - the workspaces' select-all reads the full list so
    * generation holds every selected row's metadata.
    */
   readonly listAllRecipients: (filter: {
@@ -480,7 +480,7 @@ export interface SmtpProfilePatch {
 }
 
 /**
- * A send job ready to be persisted: the compose wizard's channel config
+ * A send job ready to be persisted: the Send workspace's channel config
  * plus the per-job pacing snapshot. `smtpOverride` is the serialized
  * inline credential JSON (plaintext at rest, the ticket-14 posture);
  * `cursorIndex` starts at 0 and `totalCount` is the recipient count.

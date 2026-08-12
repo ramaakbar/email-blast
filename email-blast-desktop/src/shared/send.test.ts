@@ -12,10 +12,10 @@ import {
 /**
  * Seam A for the send-domain pure logic (ticket 15): slot interpolation in
  * subject and HTML body, the slot inventory of a message, and the
- * unknown/missing coverage report the wizard previews. Zero dependencies -
- * the renderer runs the same functions as the main process, so the preview
- * the wizard shows and the interpolation the pipeline enforces can never
- * drift apart.
+ * unknown/missing coverage report the message editor previews. Zero
+ * dependencies - the renderer runs the same functions as the main
+ * process, so the preview the workspace shows and the interpolation the
+ * pipeline enforces can never drift apart.
  */
 
 const BUDI = {

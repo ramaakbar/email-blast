@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, useRouterState } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Clock, FileOutput, Search, Users, X } from "lucide-react";
+import { Check, Clock, FileOutput, Info, Search, Users, X } from "lucide-react";
 import { m } from "@paraglide/messages";
 import { toast } from "sonner";
 import { ErrorBanner } from "@/components/error-banner";
@@ -13,6 +13,7 @@ import { INITIAL_SMTP, smtpFormValid, SmtpStep, type SmtpFormState } from "@/com
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/error-message";
 import { formatTimestamp } from "@/lib/format";
+import { plural } from "@/lib/plural";
 import { messageCoverage } from "../../../shared/send";
 import { parseRateLimitMs, SETTING_KEYS } from "../../../shared/settings";
 import type {
@@ -27,13 +28,35 @@ export const Route = createFileRoute("/send")({
 });
 
 /**
+ * The Logs-retry banner text (ticket 07): the retried recipient count,
+ * the re-entered-password note for inline connections, and the count of
+ * retried recipients that were deleted since the job ran.
+ */
+function buildRetryNotice(
+  count: number,
+  missing: number,
+  smtpMode: "profile" | "inline",
+): string {
+  const parts = [plural(count, m["send.prefillRetryOne"], m["send.prefillRetryOther"])];
+  if (smtpMode === "inline") {
+    parts.push(m["send.prefillReenterPassword"]());
+  }
+  if (missing > 0) {
+    parts.push(plural(missing, m["send.prefillDeletedOne"], m["send.prefillDeletedOther"]));
+  }
+  return parts.join(" ");
+}
+
+/**
  * The Send workspace (ticket 06): the wizard's online steps as a single
  * page - recipient source (a past Generate Job with per-recipient
  * generate status and attachment flags, or the imported list directly for
  * plain no-attachment sends), the message, SMTP with its Sender Identity,
  * and the send with pause/resume/cancel and per-recipient logs. The
  * "Send these" pre-link from Generate results opens here with the job
- * picked and its generated recipients pre-selected.
+ * picked and its generated recipients pre-selected; a Logs retry (ticket
+ * 07) opens here with the failed recipients, message, and SMTP identity
+ * of the finished job pre-filled.
  */
 function SendPage() {
   const [source, setSource] = useState<"generate" | "list">("generate");
@@ -46,31 +69,72 @@ function SendPage() {
   const [smtp, setSmtp] = useState<SmtpFormState>(INITIAL_SMTP);
   const [send, setSend] = useState<SendState>({ kind: "idle" });
 
-  // The "Send these" pre-link (ticket 06): the generate job to open
-  // pre-linked to. Applied once on mount; a plain sidebar visit has none
-  // and the workspace starts with an empty job picker. `preselectJobId`
-  // binds the pre-select to the exact job it belongs to: the job load
-  // pre-selects its generated recipients ("send THESE") and clears the
-  // binding - a manual pick made while the pre-link load is in flight,
-  // or a failed load, can never inherit the pre-selection.
+  // The "Send these" pre-link (ticket 06) and the Logs retry (ticket 07)
+  // arrive through the router's location state. Applied once on mount; a
+  // plain sidebar visit has none and the workspace starts empty.
+  // `preselectJobId` binds the pre-link's pre-select to the exact job it
+  // belongs to: the job load pre-selects its generated recipients ("send
+  // THESE") and clears the binding - a manual pick made while the
+  // pre-link load is in flight, or a failed load, can never inherit the
+  // pre-selection. `retryRecipientIds` binds a retry's recipient list to
+  // its job load the same way; `retrySmtpMode` is the retry's connection
+  // mode for the pre-fill notice (the inline password is re-entered).
   const routerState = useRouterState({ select: (state) => state.location.state });
   const prefill = routerState.sendPrefill ?? null;
   const prefillAppliedRef = useRef(false);
   const preselectJobIdRef = useRef<string | null>(null);
+  const retryRecipientIdsRef = useRef<string[] | null>(null);
+  const retrySmtpModeRef = useRef<"profile" | "inline" | null>(null);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (prefill === null || prefillAppliedRef.current) return;
+    prefillAppliedRef.current = true;
+    if (prefill.kind === "job") {
+      setSource("generate");
+      setJobId(prefill.generateJobId);
+      preselectJobIdRef.current = prefill.generateJobId;
+      return;
+    }
+    // Retry: the same recipients, message, and SMTP identity a finished
+    // job ran with, applied once. The workspace then runs its normal
+    // flow, and the send creates a NEW job scoped to those recipients -
+    // the original job's history stays untouched. The inline password is
+    // never carried (the bridge never echoes a stored credential), so the
+    // user re-enters it; the notice below says so.
+    const apply = async (): Promise<void> => {
+      retrySmtpModeRef.current = prefill.smtp.mode;
+      setMessage(prefill.message);
+      setSmtp({
+        ...INITIAL_SMTP,
+        ...prefill.smtp,
+        password: "",
+        delayMs: prefill.delayMs,
+      });
+      if (prefill.generateJobId !== null) {
+        // The job load selects the retry recipients once the job arrives.
+        setSource("generate");
+        setJobId(prefill.generateJobId);
+        retryRecipientIdsRef.current = prefill.recipientIds;
+      } else {
+        // Plain list send: select the retry recipients directly.
+        setSource("list");
+        const recipients = (
+          await Promise.all(prefill.recipientIds.map((id) => window.api.recipients.get(id)))
+        ).filter((recipient): recipient is Recipient => recipient !== null);
+        setSelection(new Map(recipients.map((recipient) => [recipient.id, recipient])));
+        const missing = prefill.recipientIds.length - recipients.length;
+        setPrefillNotice(buildRetryNotice(recipients.length, missing, prefill.smtp.mode));
+      }
+    };
+    void apply();
+  }, [prefill]);
 
   const pastJobsQuery = useQuery({
     queryKey: ["generate", "list"],
     queryFn: () => window.api.generate.list(),
   });
   const pastJobs = pastJobsQuery.data ?? [];
-
-  useEffect(() => {
-    if (prefill === null || prefillAppliedRef.current) return;
-    prefillAppliedRef.current = true;
-    setSource("generate");
-    setJobId(prefill.generateJobId);
-    preselectJobIdRef.current = prefill.generateJobId;
-  }, [prefill]);
 
   // Loading the picked job: its snapshot plus the live recipient rows for
   // the table (deleted recipients fall back to the job's names). A
@@ -91,6 +155,7 @@ function SendPage() {
         if (job === null) {
           // The pre-linked job is gone; there is nothing to pre-select.
           if (preselectJobIdRef.current === jobId) preselectJobIdRef.current = null;
+          retryRecipientIdsRef.current = null;
           setJobError(m["send.couldNotLoadJob"]());
           return;
         }
@@ -103,7 +168,27 @@ function SendPage() {
           setJobRecipients(live);
           const preselect = preselectJobIdRef.current === jobId;
           if (preselect) preselectJobIdRef.current = null;
-          if (preselect) {
+          const retryIds = retryRecipientIdsRef.current;
+          if (retryIds !== null) retryRecipientIdsRef.current = null;
+          if (retryIds !== null) {
+            // A Logs retry: select exactly the job's retried recipients
+            // (the failed ones), never the generated set.
+            const selected = new Map(
+              live.filter((recipient) => retryIds.includes(recipient.id)).map((recipient) => [
+                recipient.id,
+                recipient,
+              ]),
+            );
+            setSelection(selected);
+            const missing = retryIds.length - selected.size;
+            setPrefillNotice(
+              buildRetryNotice(
+                selected.size,
+                missing,
+                retrySmtpModeRef.current ?? "profile",
+              ),
+            );
+          } else if (preselect) {
             setSelection(
               new Map(
                 live
@@ -123,6 +208,7 @@ function SendPage() {
       .catch(() => {
         if (cancelled) return;
         if (preselectJobIdRef.current === jobId) preselectJobIdRef.current = null;
+        retryRecipientIdsRef.current = null;
         setJobError(m["send.couldNotLoadJob"]());
       });
     return () => {
@@ -131,8 +217,9 @@ function SendPage() {
   }, [jobId]);
 
   // Message Templates (ticket 03): the pick select on the message step
-  // and the "Save as template" action, same copy-on-pick semantics as
-  // the wizard.
+  // and the "Save as template" action. Copy-on-pick (ADR 0005): picking
+  // only seeds the job's own subject/body state - the job never
+  // references a template from here on.
   const queryClient = useQueryClient();
   const messageTemplatesQuery = useQuery({
     queryKey: ["messageTemplates", "list"],
@@ -163,8 +250,10 @@ function SendPage() {
   };
 
   // Load the stored rate limit once; the SMTP slider writes it back
-  // live, so the gate and every slider agree.
+  // live, so the gate and every slider agree. A Logs retry pre-fill
+  // carries the original job's pacing instead.
   useEffect(() => {
+    if (retrySmtpModeRef.current !== null) return;
     window.api.settings
       .get(SETTING_KEYS.rateLimitDelayMs)
       .then((raw) => setSmtp((prev) => ({ ...prev, delayMs: parseRateLimitMs(raw) })))
@@ -222,6 +311,13 @@ function SendPage() {
         <h1 className="text-2xl font-semibold">{m["send.title"]()}</h1>
         <p className="text-sm text-muted-foreground">{m["send.description"]()}</p>
       </header>
+
+      {prefillNotice !== null && (
+        <div className="mx-6 mb-4 flex items-start gap-2 rounded-lg border border-sky-600/40 bg-sky-600/10 px-4 py-2.5 text-sm text-sky-900">
+          <Info className="mt-0.5 size-4 shrink-0" />
+          <span>{prefillNotice}</span>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-6 pb-6">
         <section aria-labelledby="send-recipients">

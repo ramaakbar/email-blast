@@ -8,10 +8,10 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /**
- * Renders the first page of a PDF given as base64 bytes - the compose
- * wizard's spot-check preview. The canvas scales to fit its container
+ * Renders the first page of a PDF given as base64 bytes - the spot-check
+ * preview of generate results. The canvas scales to fit its container
  * width; a failed render leaves the area blank rather than crashing the
- * wizard (the spot-check is a convenience, not the source of truth).
+ * app (the spot-check is a convenience, not the source of truth).
  */
 export function PdfPreview({ dataBase64 }: { dataBase64: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);

@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  fillMessageStep,
+  fillWorkspaceMessage,
   firstLaunchCreatesSchema,
   freshUserDataDir,
   importFixtureSpreadsheet,
@@ -17,14 +17,14 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
 /**
  * Seam B for ticket 01: the SMTP Profile default Sender Identity. The
  * profile is created through the Settings dialog with a default identity,
- * the send step prefills it from the chosen profile, the per-job override
- * delivers on the wire (verified on the SMTP capture server), the soft
- * warning appears without blocking, and the profile itself is never
+ * the Send workspace prefills it from the chosen profile, the per-job
+ * override delivers on the wire (verified on the SMTP capture server), the
+ * soft warning appears without blocking, and the profile itself is never
  * mutated by the job. The second scenario pins the legacy behavior: a
  * profile without a default identity keeps the manually typed identity.
  */
 
-async function seedWizard(state: E2ECleanupState): Promise<string> {
+async function seedWorkspace(state: E2ECleanupState): Promise<string> {
   const fixturesDir = join(state.userDataDir, "fixtures");
   mkdirSync(fixturesDir, { recursive: true });
   const xlsxPath = join(fixturesDir, "recipients.xlsx");
@@ -46,21 +46,19 @@ async function seedWizard(state: E2ECleanupState): Promise<string> {
   return xlsxPath;
 }
 
-/** Walks the wizard from the fresh app shell to the SMTP step (step 4). */
+/** Walks the workspaces from the fresh app shell to the Send workspace's SMTP section. */
 async function walkToSmtpStep(
   app: import("playwright-core").ElectronApplication,
   page: import("playwright-core").Page,
   xlsxPath: string,
 ): Promise<void> {
   await importFixtureSpreadsheet(app, page, xlsxPath);
+  await page.click("aside a:has-text('Send')");
+  await page.getByRole("button", { name: "From the imported list" }).click();
   await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
   await page.getByRole("checkbox", { name: "Select all on this page" }).check();
-  await page.waitForSelector("text=4 recipients selected");
-  await page.locator("footer").getByRole("button", { name: "Next" }).click();
-  await page.getByLabel("Letter or certificate template").selectOption({ label: "LOA" });
-  await page.waitForSelector("text=All 4 selected recipients have data for every required slot.");
-  await page.locator("footer").getByRole("button", { name: "Next" }).click();
-  await fillMessageStep(page, {
+  await page.waitForSelector("text=4 selected · 4 matching");
+  await fillWorkspaceMessage(page, {
     subject: "Undangan Rapat Yayasan",
     bodyHtml: "<p>Dear {name}, from {instansi}, you are invited.</p>",
   });
@@ -75,7 +73,7 @@ describe("Seam B: SMTP profile default Sender Identity (ticket 01)", () => {
     state.smtp = await startSmtpCapture();
     const smtp = state.smtp;
     await firstLaunchCreatesSchema(state.userDataDir);
-    const xlsxPath = await seedWizard(state);
+    const xlsxPath = await seedWorkspace(state);
 
     state.session = await launchApp(state.userDataDir);
     const { app, page } = state.session;
@@ -99,7 +97,7 @@ describe("Seam B: SMTP profile default Sender Identity (ticket 01)", () => {
     // The profile row shows the stored default identity.
     await page.waitForSelector("text=sekretariat@example.org", { timeout: 20_000 });
 
-    // ---- Wizard to the SMTP step ----
+    // ---- Send workspace: SMTP section ----
     await walkToSmtpStep(app, page, xlsxPath);
 
     // ---- Choosing the profile prefills the identity ----
@@ -126,12 +124,8 @@ describe("Seam B: SMTP profile default Sender Identity (ticket 01)", () => {
     await page.waitForSelector("text=Connected - the server accepted these credentials.", {
       timeout: 20_000,
     });
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
 
-    // ---- Generate and send ----
-    await page.getByRole("button", { name: "Generate PDFs" }).click();
-    await page.waitForSelector("text=All 4 PDFs generated.", { timeout: 60_000 });
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    // ---- Send ----
     await page.getByRole("button", { name: "Send 4 emails" }).click();
     await page.waitForSelector("text=All 4 emails sent.", { timeout: 60_000 });
 
@@ -159,7 +153,7 @@ describe("Seam B: SMTP profile default Sender Identity (ticket 01)", () => {
     state.smtp = await startSmtpCapture();
     const smtp = state.smtp;
     await firstLaunchCreatesSchema(state.userDataDir);
-    const xlsxPath = await seedWizard(state);
+    const xlsxPath = await seedWorkspace(state);
 
     state.session = await launchApp(state.userDataDir);
     const { app, page } = state.session;
@@ -176,7 +170,7 @@ describe("Seam B: SMTP profile default Sender Identity (ticket 01)", () => {
     await page.getByRole("button", { name: "Save profile" }).click();
     await page.waitForSelector('text=Profile "Legacy" saved.', { timeout: 20_000 });
 
-    // ---- Wizard to the SMTP step, typed identity first ----
+    // ---- Send workspace: SMTP section, typed identity first ----
     await walkToSmtpStep(app, page, xlsxPath);
     await page.getByLabel("Sender name").fill("Yayasan X");
     await page.getByLabel("Sender address").fill("iym@example.org");
@@ -202,11 +196,7 @@ describe("Seam B: SMTP profile default Sender Identity (ticket 01)", () => {
       await page.locator("text=will likely be rejected").count(),
     ).toBe(0);
 
-    // ---- Generate and send with the typed identity ----
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
-    await page.getByRole("button", { name: "Generate PDFs" }).click();
-    await page.waitForSelector("text=All 4 PDFs generated.", { timeout: 60_000 });
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    // ---- Send with the typed identity ----
     await page.getByRole("button", { name: "Send 4 emails" }).click();
     await page.waitForSelector("text=All 4 emails sent.", { timeout: 60_000 });
 

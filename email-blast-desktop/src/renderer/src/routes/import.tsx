@@ -156,7 +156,7 @@ function ImportPage() {
           </p>
           <div className="flex gap-2">
             <Button asChild size="sm">
-              <Link to="/compose">{m["importPage.goToCompose"]()}</Link>
+              <Link to="/generate">{m["importPage.goToGenerate"]()}</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
               <Link to="/recipients">{m["importPage.goToRecipients"]()}</Link>
@@ -275,7 +275,7 @@ function ImportPage() {
           )}
           <div className="mt-2 flex gap-2">
             <Button asChild>
-              <Link to="/compose">{m["importPage.goToCompose"]()}</Link>
+              <Link to="/generate">{m["importPage.goToGenerate"]()}</Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/recipients">{m["importPage.goToRecipients"]()}</Link>

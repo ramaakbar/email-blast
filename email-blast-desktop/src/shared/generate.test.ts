@@ -8,7 +8,7 @@ import {
 
 /**
  * The pure slot-resolution, coverage, and output-naming logic shared by the
- * main-process generate pipeline and the compose wizard (ticket 13).
+ * main-process generate pipeline and the Generate workspace (ticket 13).
  * Expected values here are known-good literals, independent of the
  * implementation.
  */

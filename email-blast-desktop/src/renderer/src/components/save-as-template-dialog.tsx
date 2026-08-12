@@ -5,10 +5,9 @@ import { Button } from "@/components/ui/button";
 
 /**
  * The "Save as template" dialog (ticket 03): writes the job's current
- * message into the library as a new Message Template. Shared by the
- * compose wizard's step 3 and the Send workspace (ticket 06). The name
- * defaults to the subject, so the common "one template per campaign"
- * case needs only a confirm click.
+ * message into the library as a new Message Template, from the Send
+ * workspace (ticket 06). The name defaults to the subject, so the common
+ * "one template per campaign" case needs only a confirm click.
  */
 export function SaveAsTemplateDialog({
   defaultName,

@@ -19,12 +19,11 @@ import type { SendJob, SendStartPayload } from "../../../shared/ipc";
 import type { SmtpFormState } from "./smtp-step";
 
 /**
- * The send step shared by the compose wizard's step 6 and the Send
- * workspace (ticket 06): the pre-flight summary, the start action, and
- * the live run with pause/resume/cancel and the per-recipient log.
- * `attachments` is null on the wizard (every recipient has a generated
- * PDF); the workspace passes the per-recipient attachment counts so the
- * summary shows who gets attachments and who does not.
+ * The send step of the Send workspace (ticket 06): the pre-flight
+ * summary, the start action, and the live run with pause/resume/cancel
+ * and the per-recipient log. `attachments` carries the per-recipient
+ * attachment counts so the summary shows who gets attachments and who
+ * does not.
  */
 
 /** One per-recipient log row (names seeded from the job; `skipped` appears on cancel). */
@@ -84,14 +83,13 @@ export function SendStep({
   state: SendState;
   onStateChange: React.Dispatch<React.SetStateAction<SendState>>;
   /**
-   * The per-recipient attachment counts for the pre-flight summary; null
-   * on the wizard, where every recipient has a generated PDF.
+   * The per-recipient attachment counts for the pre-flight summary: who
+   * of the selection receives a PDF and who does not.
    */
-  attachments: { withAttachment: number; withoutAttachment: number } | null;
+  attachments: { withAttachment: number; withoutAttachment: number };
   /**
    * An extra gate on the start action, e.g. the Send workspace's message
-   * validity check. The wizard gates at its stepper instead, so it never
-   * sets this.
+   * validity check.
    */
   startDisabled?: boolean;
   /** The reason shown under the disabled button; null keeps the hint hidden. */
@@ -387,18 +385,14 @@ export function SendStep({
           <div>
             <dt className="text-muted-foreground">{m["compose.attachments"]()}</dt>
             <dd className="font-medium">
-              {attachments === null
-                ? m["compose.generatedPdfsCount"]({ count: recipientIds.length })
-                : m["send.attachmentsSummary"]({
-                    with: attachments.withAttachment,
-                    without: attachments.withoutAttachment,
-                  })}
+              {m["send.attachmentsSummary"]({
+                with: attachments.withAttachment,
+                without: attachments.withoutAttachment,
+              })}
             </dd>
           </div>
         </dl>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {attachments === null ? m["compose.preflightHint"]() : m["send.preflightHint"]()}
-        </p>
+        <p className="mt-2 text-xs text-muted-foreground">{m["send.preflightHint"]()}</p>
       </div>
 
       {state.kind === "idle" && (
@@ -413,11 +407,7 @@ export function SendStep({
               : m["compose.sendCountOther"]({ count: recipientIds.length })}
           </Button>
           {recipientIds.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              {attachments === null
-                ? m["compose.noGeneratedAttachments"]()
-                : m["sendJob.selectRecipients"]()}
-            </p>
+            <p className="text-xs text-muted-foreground">{m["sendJob.selectRecipients"]()}</p>
           ) : (
             startDisabled &&
             startDisabledHint !== null && (

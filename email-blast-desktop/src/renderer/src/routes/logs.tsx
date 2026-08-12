@@ -37,7 +37,7 @@ const columnHelper = createColumnHelper<SendJobSummary>();
  * status, subject, template, per-recipient counts, and timestamps -
  * filterable by status and creation date. Paused jobs show "Paused -
  * N of M sent" with a Resume button (resume + run, the same pair the
- * wizard's Resume uses). Row click opens `/logs/$jobId`.
+ * Send workspace's Resume uses). Row click opens `/logs/$jobId`.
  */
 function LogsPage() {
   const navigate = useNavigate();

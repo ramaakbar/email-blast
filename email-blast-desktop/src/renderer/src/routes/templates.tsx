@@ -785,11 +785,12 @@ function ConfirmDeleteDialog({
 /**
  * The Messages tab (ticket 03): the Message Template library. Copy-on-pick
  * (ADR 0005) lives in the send job - this tab only manages the library
- * rows; picking is the wizard's message step. The editor's `{slot}`
- * autocomplete and the live 3-recipient preview work against the imported
- * recipients (the stand-in for a selection, since a template must work
- * for anyone); with no recipients yet, an emptyHint explains why the
- * suggestions and preview are absent instead of flagging every slot.
+ * rows; picking happens in the Send workspace's message step. The
+ * editor's `{slot}` autocomplete and the live 3-recipient preview work
+ * against the imported recipients (the stand-in for a selection, since a
+ * template must work for anyone); with no recipients yet, an emptyHint
+ * explains why the suggestions and preview are absent instead of flagging
+ * every slot.
  */
 function MessagesTab() {
   const queryClient = useQueryClient();
@@ -1058,8 +1059,9 @@ function MessageTemplateDetailPanel({
 
 /**
  * The create/edit dialog for a Message Template: the name plus the same
- * message editor the wizard's message step uses (subject, body with
- * `{slot}` autocomplete, coverage warnings, live 3-recipient preview).
+ * message editor the Send workspace's message step uses (subject, body
+ * with `{slot}` autocomplete, coverage warnings, live 3-recipient
+ * preview).
  */
 function MessageTemplateFormDialog({
   form,

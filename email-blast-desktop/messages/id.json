@@ -27,7 +27,6 @@
     "import": "Impor",
     "recipients": "Penerima",
     "templates": "Template",
-    "compose": "Buat Email",
     "logs": "Log",
     "settings": "Pengaturan",
     "generate": "Generate",
@@ -127,23 +126,15 @@
     "passwordLabel": "kata sandi"
   },
   "compose": {
-    "title": "Buat Email",
-    "description": "Pilih siapa yang menerima dokumen, tulis pesan, dan kirim emailnya.",
     "stepRecipients": "Penerima",
     "stepTemplate": "Template",
     "stepMessage": "Pesan",
     "stepSmtp": "SMTP",
     "stepGenerate": "Generate & Tinjau",
     "stepSend": "Kirim",
-    "dataCoversAllSlots": "{count} penerima, data mencakup semua slot",
-    "unknownSlotFooter": "Slot tidak dikenal: {slot}",
     "writeSubjectToContinue": "Tulis subjek untuk melanjutkan",
     "writeBodyToContinue": "Tulis isi email untuk melanjutkan",
-    "messageLooksGood": "Pesan terlihat baik",
-    "connectionDetailsReady": "Detail koneksi siap",
     "completeSmtpDetails": "Lengkapi detail SMTP dan pengirim",
-    "generatedFailedFooter": "{generated} berhasil, {failed} gagal",
-    "prefillReenterPassword": "Masukkan ulang kata sandi aplikasi untuk mengirim lagi - kata sandi tidak pernah keluar dari aplikasi ini.",
     "searchRecipients": "Cari penerima",
     "searchPlaceholder": "Cari nama, email, atau bidang apa pun…",
     "filterByBatch": "Saring berdasarkan batch impor",
@@ -229,9 +220,6 @@
     "connection": "Koneksi",
     "pacing": "Kecepatan",
     "attachments": "Lampiran",
-    "generatedPdfsCount": "{count} PDF hasil generate",
-    "preflightHint": "Pemeriksaan awal menguji koneksi SMTP dan memastikan lampiran hasil generate tersedia sebelum email pertama terkirim.",
-    "noGeneratedAttachments": "Tidak ada penerima dengan lampiran hasil generate - kembali dan buat PDF dulu.",
     "preparingSend": "Menyiapkan pengiriman…",
     "sending": "Mengirim…",
     "sendCounts": "{sent} terkirim · {failed} gagal · {pending} menunggu",
@@ -252,12 +240,6 @@
     "couldNotRetryFailures": "Tidak dapat mengulang yang gagal.",
     "sendJobNoLongerExists": "Pekerjaan pengiriman sudah tidak ada.",
     "couldNotResumeSend": "Tidak dapat melanjutkan pengiriman.",
-    "recipientsSelectedOne": "{count} penerima dipilih",
-    "recipientsSelectedOther": "{count} penerima dipilih",
-    "prefillRetryOne": "{count} penerima gagal diisi ulang dari Log: template, pesan, dan SMTP yang sama.",
-    "prefillRetryOther": "{count} penerima gagal diisi ulang dari Log: template, pesan, dan SMTP yang sama.",
-    "prefillDeletedOne": "{count} penerima yang sebelumnya gagal telah dihapus.",
-    "prefillDeletedOther": "{count} penerima yang sebelumnya gagal telah dihapus.",
     "slotMissingCountOne": "{slot} - {count} penerima",
     "slotMissingCountOther": "{slot} - {count} penerima",
     "unknownSlotTitleOne": "Slot tidak dikenal: {list}",
@@ -339,7 +321,6 @@
     "fileFormatHint": ".xlsx atau .xls, dengan daftar penerima di sheet pertama",
     "parsing": "Membaca {fileName}…",
     "importComplete": "Impor selesai",
-    "goToCompose": "Buka Buat Email",
     "goToRecipients": "Buka Penerima",
     "couldNotRead": "Gagal membaca file. Mungkin bukan file Excel yang valid.",
     "notExcelFile": "\"{fileName}\" bukan file Excel. Pilih file .xlsx atau .xls.",
@@ -366,7 +347,8 @@
     "importedToastOne": "{imported} penerima diimpor. {duplicatesSkipped} duplikat dilewati.",
     "importedToastOther": "{imported} penerima diimpor. {duplicatesSkipped} duplikat dilewati.",
     "duplicatesSkippedParsingOne": "{count} duplikat sudah dilewati saat parsing.",
-    "duplicatesSkippedParsingOther": "{count} duplikat sudah dilewati saat parsing."
+    "duplicatesSkippedParsingOther": "{count} duplikat sudah dilewati saat parsing.",
+    "goToGenerate": "Buka Generate"
   },
   "recipients": {
     "title": "Penerima",
@@ -489,7 +471,12 @@
     "noRecipientsInJob": "Generate job ini tidak punya penerima.",
     "preflightHint": "Pre-flight memeriksa koneksi SMTP sebelum email pertama terkirim.",
     "attachmentsSummary": "{with} dengan PDF · {without} tanpa",
-    "sendThese": "Kirim ini"
+    "sendThese": "Kirim ini",
+    "prefillRetryOne": "{count} penerima gagal diisi ulang dari Log: pesan dan SMTP yang sama.",
+    "prefillRetryOther": "{count} penerima gagal diisi ulang dari Log: pesan dan SMTP yang sama.",
+    "prefillReenterPassword": "Masukkan ulang kata sandi aplikasi untuk mengirim lagi - kata sandi tidak pernah keluar dari aplikasi ini.",
+    "prefillDeletedOne": "{count} penerima yang sebelumnya gagal telah dihapus.",
+    "prefillDeletedOther": "{count} penerima yang sebelumnya gagal telah dihapus."
   },
   "sendJob": {
     "selectRecipients": "Pilih minimal satu penerima untuk dikirim.",
@@ -507,7 +494,7 @@
     "onlyFinishedCanRetry": "Hanya pekerjaan yang sudah selesai yang bisa diulang.",
     "noFailedRecipients": "Tidak ada penerima gagal untuk diulang.",
     "attachmentsMissingOnDisk": "File lampiran hasil generate sudah tidak ada di disk. Buat PDF-nya lagi.",
- "generateJobMissing": "Generate job yang dirujuk pengiriman ini sudah tidak ada.",
+    "generateJobMissing": "Generate job yang dirujuk pengiriman ini sudah tidak ada.",
     "recipientDeleted": "Penerima sudah tidak ada di database.",
     "recipientNoEmail": "Penerima ini tidak punya alamat email.",
     "noAttachmentForRecipient": "Tidak ada lampiran hasil generate yang terkonfirmasi untuk penerima ini.",
@@ -613,6 +600,9 @@
     "couldNotLoadJobs": "Tidak dapat memuat riwayat generate.",
     "couldNotReopenJob": "Tidak dapat membuka kembali pekerjaan generate.",
     "jobNoLongerExists": "Pekerjaan generate ini sudah tidak ada.",
-    "startDisabledCoverage": "Pilih penerima yang datanya lengkap untuk semua slot agar bisa generate."
+    "startDisabledCoverage": "Pilih penerima yang datanya lengkap untuk semua slot agar bisa generate.",
+    "retryJobHint": "Isi awal ruang kerja dengan penerima dan template pekerjaan ini",
+    "prefillDeletedOne": "{count} penerima pekerjaan telah dihapus dan tidak diisi ulang.",
+    "prefillDeletedOther": "{count} penerima pekerjaan telah dihapus dan tidak diisi ulang."
   }
 }

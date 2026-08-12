@@ -1519,11 +1519,11 @@ describe("SendJobService logs (ticket 16)", () => {
     expect(failed.map((r) => r.recipientId)).toEqual([andi]);
     expect(failed[0].errorMessage).toContain("no email address");
 
-    // The Logs retry re-sends the failures through the wizard pre-fill:
-    // the failed recipients, the same message, the same SMTP identity,
-    // and a fresh generate for the retried set (step 5 regenerates).
-    // The send then creates a NEW job scoped to exactly those recipients
-    // - the original job keeps its history untouched.
+    // The Logs retry re-sends the failures through the workspace
+    // pre-fill: the failed recipients, the same message, the same SMTP
+    // identity, and a fresh generate for the retried set. The send then
+    // creates a NEW job scoped to exactly those recipients - the
+    // original job keeps its history untouched.
     const { templateId } = svc.db
       .prepare("SELECT template_id AS templateId FROM generate_jobs WHERE id = ?")
       .get(svc.generateJobId) as { templateId: string };

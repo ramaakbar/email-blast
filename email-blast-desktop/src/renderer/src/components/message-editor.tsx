@@ -11,16 +11,16 @@ import {
 } from "../../../shared/send";
 
 /**
- * The message editor shared by the compose wizard's message step and the
+ * The message editor shared by the Send workspace's message step and the
  * Message Template dialog (ticket 03): the subject, the HTML body with
  * `{slot}` autocomplete, the coverage warnings (unknown slots block,
  * missing metadata warns), and the live 3-recipient preview - the same
  * editor in both places so the two halves can never drift apart. The
- * wizard passes its selected recipients; the template dialog passes the
- * imported recipients (the stand-in for a selection, since a template
- * must work for anyone). `emptyHint` replaces the coverage warnings and
- * preview when the recipient list is empty, so a fresh install does not
- * flag every slot of a first template as unknown.
+ * workspace passes its selected recipients; the template dialog passes
+ * the imported recipients (the stand-in for a selection, since a
+ * template must work for anyone). `emptyHint` replaces the coverage
+ * warnings and preview when the recipient list is empty, so a fresh
+ * install does not flag every slot of a first template as unknown.
  */
 export function MessageEditor({
   recipients,

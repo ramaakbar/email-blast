@@ -12,7 +12,7 @@ import { m } from "@paraglide/messages";
 import { ErrorBanner } from "@/components/error-banner";
 import { SendStatusBadge } from "@/components/send-status-badge";
 import { Button } from "@/components/ui/button";
-import { buildRetryPrefill } from "@/lib/compose-prefill";
+import { buildRetryPrefill } from "@/lib/send-prefill";
 import { errorMessage } from "@/lib/error-message";
 import { formatDuration, formatTimestamp } from "@/lib/format";
 import { useResumeSend } from "@/lib/use-resume-send";
@@ -43,9 +43,9 @@ const columnHelper = createColumnHelper<SendJobRecipient>();
  * The job detail screen (ticket 16): a summary header (subject, template,
  * SMTP identity, timestamps) over a per-recipient table with status,
  * error messages, and timestamps - searchable and filterable. Failed
- * recipients retry individually or all at once, re-opening the compose
- * wizard pre-filled with the same recipients, template, message, and
- * SMTP identity; the re-send creates a NEW job scoped to them.
+ * recipients retry individually or all at once, opening the Send
+ * workspace pre-filled with the same recipients, message, and SMTP
+ * identity; the re-send creates a NEW job scoped to them (ticket 07).
  */
 function JobDetailPage() {
   const navigate = useNavigate();
@@ -85,13 +85,13 @@ function JobDetailPage() {
     [job],
   );
 
-  /** Retry = re-open the wizard pre-filled with the failed recipients. */
+  /** Retry = open the Send workspace pre-filled with the failed recipients. */
   const retry = useCallback(
     (recipientIds: string[]): void => {
       if (job === null || job === undefined) return;
       void navigate({
-        to: "/compose",
-        state: { composePrefill: buildRetryPrefill(job, recipientIds) },
+        to: "/send",
+        state: { sendPrefill: buildRetryPrefill(job, recipientIds) },
       });
     },
     [job, navigate],

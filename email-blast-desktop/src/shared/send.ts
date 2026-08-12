@@ -1,7 +1,7 @@
 /**
  * Send-domain pure logic shared by both processes (ticket 15): how the
  * subject and HTML body interpolate `{slot}` placeholders per recipient,
- * and the coverage report the compose wizard's message step previews.
+ * and the coverage report the Send workspace's message step previews.
  * Zero dependencies by design - the renderer imports this module, so
  * nothing here may import from `effect` or any other package.
  *
@@ -32,7 +32,7 @@ export function escapeHtml(value: string): string {
  * The `{slot}` references of a message, unique and in document order.
  * The autocomplete and the coverage report both derive their inventory
  * from this - a slot the message uses but no recipient can fill is an
- * "unknown slot" the wizard blocks on.
+ * "unknown slot" the workspace blocks on.
  */
 export function extractMessageSlots(text: string): string[] {
   const seen = new Set<string>();
@@ -69,7 +69,7 @@ export function messageValues(recipient: SlotSource): Record<string, string> {
 }
 
 /**
- * The slots the wizard can suggest for a selection: the union of every
+ * The slots the message editor can suggest for a selection: the union of every
  * recipient's resolvable values. The address fields come first (name,
  * email, phone - the fields every message uses), then metadata keys in
  * first-seen order, so the suggestion list reads predictably.
@@ -100,9 +100,9 @@ export interface MissingMessageSlot {
  * The coverage report for a message against a set of recipients.
  * `unknownSlots` are referenced by the message but fillable by no one
  * (a typo, or a slot from another campaign) - sending would fail every
- * recipient, so the wizard blocks on them. `missing` are fillable by
+ * recipient, so the workspace blocks on them. `missing` are fillable by
  * some but absent for others - those recipients fail individually at
- * send time and the batch continues, so the wizard only warns.
+ * send time and the batch continues, so the workspace only warns.
  */
 export interface MessageCoverage {
   readonly ok: boolean;

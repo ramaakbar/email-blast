@@ -3,15 +3,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import {
-  fillInlineSmtpStep,
-  fillMessageStep,
   firstLaunchCreatesSchema,
   freshUserDataDir,
   importFixtureSpreadsheet,
   launchApp,
   registerE2ECleanup,
   seedDatabase,
-  startSmtpCapture,
   type E2ECleanupState,
 } from "./harness";
 import { FIXTURE_RECIPIENTS, writeFixtureImageTemplate, writeFixtureSpreadsheet } from "./fixtures";
@@ -22,9 +19,10 @@ import { pageDrawOps } from "../src/main/services/test-helpers";
  * registers an image template through the real Templates screen, opens
  * the position editor, sets coordinates, sizes, colors, and alignments
  * through the numeric controls, saves the template, generates certificates
- * through the wizard, and verifies the output PDF draws the slot text at
- * exactly the configured positions - the full editor -> persistence ->
- * rendering loop the layer seams cannot see.
+ * through the Generate workspace (ticket 07 re-routed it off the wizard),
+ * and verifies the output PDF draws the slot text at exactly the
+ * configured positions - the full editor -> persistence -> rendering loop
+ * the layer seams cannot see.
  */
 
 describe("Seam B: image slot positioning (ticket 04)", () => {
@@ -33,8 +31,6 @@ describe("Seam B: image slot positioning (ticket 04)", () => {
 
   it("positions slots in the editor, persists the layout, and renders the PDF at those coordinates", async () => {
     state.userDataDir = freshUserDataDir("eb-slot-positioning-");
-    state.smtp = await startSmtpCapture();
-    const smtp = state.smtp;
     await firstLaunchCreatesSchema(state.userDataDir);
 
     const fixturesDir = join(state.userDataDir, "fixtures");
@@ -90,24 +86,14 @@ describe("Seam B: image slot positioning (ticket 04)", () => {
     await page.getByRole("button", { name: "Register template" }).click();
     await page.waitForSelector('text=Template "Sertifikat" registered.', { timeout: 20_000 });
 
-    // ---- Compose: generate certificates for the imported recipients ----
-    // The sidebar Send now opens the Send workspace; the old wizard stays
-    // reachable at #/compose until ticket 07 retires it.
-    await page.evaluate(() => {
-      window.location.hash = "#/compose";
-    });
+    // ---- Generate workspace: generate certificates for the imported recipients ----
+    // No message, SMTP, or send step exists anywhere in this workspace.
+    await page.click("aside a:has-text('Generate')");
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
-    await page.waitForSelector("text=4 recipients selected");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    await page.waitForSelector("text=4 selected · 4 matching");
     await page.getByLabel("Letter or certificate template").selectOption({ label: "Sertifikat" });
     await page.waitForSelector("text=All 4 selected recipients have data for every required slot.");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
-    await fillMessageStep(page, {
-      subject: "Sertifikat {name}",
-      bodyHtml: "<p>Terlampir.</p>",
-    });
-    await fillInlineSmtpStep(page, smtp.port);
     await page.getByRole("button", { name: "Generate PDFs" }).click();
     await page.waitForSelector("text=All 4 PDFs generated.", { timeout: 60_000 });
 

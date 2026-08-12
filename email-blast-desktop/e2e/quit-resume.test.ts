@@ -2,8 +2,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  fillInlineSmtpStep,
-  fillMessageStep,
+  fillWorkspaceMessage,
+  fillWorkspaceSmtp,
   firstLaunchCreatesSchema,
   freshUserDataDir,
   importFixtureSpreadsheet,
@@ -18,12 +18,12 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
 
 /**
  * Seam B quit/resume (ticket 18, spec Testing Decisions "the quit dialog's
- * two branches"): send a real campaign through the wizard, then drive both
- * branches of the close guard - [Keep Sending] lets the send continue, and
- * [Quit & Pause] quits with the job paused at the persisted cursor.
- * Relaunching on the same userData dir recovers the job, and resuming from
- * Logs delivers exactly the remaining recipients - no skipped, and none
- * double-sent.
+ * two branches"): send a real campaign through the Generate and Send
+ * workspaces, then drive both branches of the close guard - [Keep
+ * Sending] lets the send continue, and [Quit & Pause] quits with the job
+ * paused at the persisted cursor. Relaunching on the same userData dir
+ * recovers the job, and resuming from Logs delivers exactly the remaining
+ * recipients - no skipped, and none double-sent.
  */
 
 const SUBJECT = "Undangan Rapat - Gelombang 1";
@@ -69,25 +69,26 @@ describe("Seam B: quit mid-send, relaunch, resume from Logs", () => {
     const { app, page } = state.session;
     await page.waitForSelector("aside a:has-text('Import')", { timeout: 20_000 });
 
-    // ---- Import + wizard through the send step ----
+    // ---- Import + Generate workspace through the generate step ----
     await importFixtureSpreadsheet(app, page, xlsxPath);
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
-    await page.waitForSelector("text=5 recipients selected");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    await page.waitForSelector("text=5 selected · 5 matching");
     await page.getByLabel("Letter or certificate template").selectOption({ label: "LOA" });
     await page.waitForSelector(
       "text=All 5 selected recipients have data for every required slot.",
     );
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
-    await fillMessageStep(page, {
+    await page.getByRole("button", { name: "Generate PDFs" }).click();
+    await page.waitForSelector("text=All 5 PDFs generated.", { timeout: 60_000 });
+
+    // ---- Send workspace: message + inline SMTP against the capture server ----
+    await page.getByRole("button", { name: "Send these" }).click();
+    await page.waitForSelector("text=5 selected · 5 matching", { timeout: 20_000 });
+    await fillWorkspaceMessage(page, {
       subject: SUBJECT,
       bodyHtml: "<p>Dear {name}, from {instansi}, you are invited.</p>",
     });
-    await fillInlineSmtpStep(page, smtp.port);
-    await page.getByRole("button", { name: "Generate PDFs" }).click();
-    await page.waitForSelector("text=All 5 PDFs generated.", { timeout: 60_000 });
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    await fillWorkspaceSmtp(page, smtp.port);
     await page.getByRole("button", { name: "Send 5 emails" }).click();
     // The progress event for the second recipient is emitted AFTER its
     // outcome + cursor persist, so each quit lands between recipients - a

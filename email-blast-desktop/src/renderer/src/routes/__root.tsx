@@ -22,10 +22,9 @@ import { WelcomeScreen } from "@/components/welcome-screen";
 import { SETTING_KEYS } from "../../../shared/settings";
 import type { SendJobSummary } from "../../../shared/ipc";
 
-// The workspace split (ticket 05): Generate and Send replace Compose.
-// Generate opens the offline workspace; Send opens the Send workspace
-// (ticket 06). The old composer route still exists behind the scenes
-// until ticket 07 retires it.
+// The workspace split (ticket 05): Generate and Send replace the old
+// Compose wizard (retired in ticket 07). Generate opens the offline
+// workspace; Send opens the Send workspace (ticket 06).
 const NAV_ITEMS = [
   { to: "/import", label: () => m["nav.import"](), icon: Upload },
   { to: "/recipients", label: () => m["nav.recipients"](), icon: Users },

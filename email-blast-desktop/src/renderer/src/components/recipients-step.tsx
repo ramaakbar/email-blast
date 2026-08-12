@@ -10,11 +10,11 @@ import { formatTimestamp } from "@/lib/format";
 import type { Recipient } from "../../../shared/ipc";
 
 /**
- * The filterable recipient picker shared by the compose wizard's step 1
- * and the Generate workspace: search (debounced like the Recipients
+ * The filterable recipient picker of the Generate workspace (and the
+ * Send workspace's list source): search (debounced like the Recipients
  * screen), import-batch filter, per-page selection, and "select all
  * matching". The selection lives in the parent (a Map of id -> recipient)
- * so both hosts own their stale-state guards around it.
+ * so the host owns its stale-state guards around it.
  */
 
 const PAGE_SIZE = 25;

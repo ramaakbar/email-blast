@@ -16,11 +16,11 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
  * Seam B for ticket 03 (ADR 0005): the Message Template library. The
  * scenario walks the whole copy-on-pick cycle: a template is created in
  * the Templates screen's Messages tab (with the live preview interpolating
- * against imported recipients), picked in the wizard's message step (the
- * subject and body are copied in), the job's copy is edited, the edited
- * message is saved back as a NEW template, and re-picking the original
- * proves the job's edits never touched the library - and the new template
- * shows up in the library.
+ * against imported recipients), picked in the Send workspace's message
+ * section (the subject and body are copied in), the job's copy is edited,
+ * the edited message is saved back as a NEW template, and re-picking the
+ * original proves the job's edits never touched the library - and the new
+ * template shows up in the library.
  */
 
 async function seedWizard(state: E2ECleanupState): Promise<string> {
@@ -93,19 +93,12 @@ describe("Seam B: Message Templates (ticket 03)", () => {
     // The list shows the template with its subject preview.
     await page.waitForSelector("text=Undangan Rapat {name}", { timeout: 20_000 });
 
-    // ---- Wizard: pick the template on the message step ----
-    // The sidebar Send now opens the Send workspace; the old wizard stays
-    // reachable at #/compose until ticket 07 retires it.
-    await page.evaluate(() => {
-      window.location.hash = "#/compose";
-    });
+    // ---- Send workspace: pick the template on the message section ----
+    await page.click("aside a:has-text('Send')");
+    await page.getByRole("button", { name: "From the imported list" }).click();
     await page.waitForSelector('input[aria-label="Select all on this page"]', { timeout: 20_000 });
     await page.getByRole("checkbox", { name: "Select all on this page" }).check();
-    await page.waitForSelector("text=4 recipients selected");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
-    await page.getByLabel("Letter or certificate template").selectOption({ label: "LOA" });
-    await page.waitForSelector("text=All 4 selected recipients have data for every required slot.");
-    await page.locator("footer").getByRole("button", { name: "Next" }).click();
+    await page.waitForSelector("text=4 selected · 4 matching");
 
     // Pick the template: subject and body are copied into the job.
     await page.getByLabel("Message template").selectOption({ label: "Undangan Rapat" });

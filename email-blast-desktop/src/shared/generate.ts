@@ -1,9 +1,9 @@
 /**
  * Generate-domain pure logic shared by both processes (ticket 13):
- * how a slot resolves against a recipient, the aggregate coverage check the
- * compose wizard shows, and how the output pattern becomes a file name.
- * Zero dependencies by design - the renderer imports this module, so
- * nothing here may import from `effect` or any other package.
+ * how a slot resolves against a recipient, the aggregate coverage check
+ * the Generate workspace shows, and how the output pattern becomes a
+ * file name. Zero dependencies by design - the renderer imports this
+ * module, so nothing here may import from `effect` or any other package.
  *
  * The main process resolves slots again at fill time (never trusts the
  * renderer's coverage result), so the two halves cannot drift apart.
@@ -49,8 +49,9 @@ export interface SlotCoverage {
 
 /**
  * Checks that every selected recipient can fill every declared template
- * slot. The wizard blocks Next while the report is not ok, so generation
- * fails fast instead of producing broken PDFs (user story 15).
+ * slot. The workspace blocks the start action while the report is not
+ * ok, so generation fails fast instead of producing broken PDFs (user
+ * story 15).
  */
 export function slotCoverage(
   recipients: readonly SlotSource[],

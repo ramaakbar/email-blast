@@ -27,7 +27,6 @@
     "import": "Import",
     "recipients": "Recipients",
     "templates": "Templates",
-    "compose": "Compose",
     "logs": "Logs",
     "settings": "Settings",
     "generate": "Generate",
@@ -127,23 +126,15 @@
     "passwordLabel": "password"
   },
   "compose": {
-    "title": "Compose",
-    "description": "Pick who receives the documents, write the message, and send the emails.",
     "stepRecipients": "Recipients",
     "stepTemplate": "Template",
     "stepMessage": "Message",
     "stepSmtp": "SMTP",
     "stepGenerate": "Generate & Review",
     "stepSend": "Send",
-    "dataCoversAllSlots": "{count} recipients, data covers all slots",
-    "unknownSlotFooter": "Unknown slot: {slot}",
     "writeSubjectToContinue": "Write a subject to continue",
     "writeBodyToContinue": "Write an email body to continue",
-    "messageLooksGood": "Message looks good",
-    "connectionDetailsReady": "Connection details ready",
     "completeSmtpDetails": "Complete the SMTP and sender details",
-    "generatedFailedFooter": "{generated} generated, {failed} failed",
-    "prefillReenterPassword": "Re-enter the app password to send again - passwords never leave this app.",
     "searchRecipients": "Search recipients",
     "searchPlaceholder": "Search name, email, or any field…",
     "filterByBatch": "Filter by import batch",
@@ -229,9 +220,6 @@
     "connection": "Connection",
     "pacing": "Pacing",
     "attachments": "Attachments",
-    "generatedPdfsCount": "{count} generated PDFs",
-    "preflightHint": "The pre-flight checks the SMTP connection and confirms the generated attachments before the first email goes out.",
-    "noGeneratedAttachments": "No recipients have a generated attachment - go back and generate the PDFs first.",
     "preparingSend": "Preparing the send…",
     "sending": "Sending…",
     "sendCounts": "{sent} sent · {failed} failed · {pending} pending",
@@ -252,12 +240,6 @@
     "couldNotRetryFailures": "Could not retry the failures.",
     "sendJobNoLongerExists": "The send job no longer exists.",
     "couldNotResumeSend": "Could not resume the send.",
-    "recipientsSelectedOne": "{count} recipient selected",
-    "recipientsSelectedOther": "{count} recipients selected",
-    "prefillRetryOne": "Retry pre-filled from Logs: {count} failed recipient, the same template, message, and SMTP.",
-    "prefillRetryOther": "Retry pre-filled from Logs: {count} failed recipients, the same template, message, and SMTP.",
-    "prefillDeletedOne": "{count} previously failed recipient was deleted.",
-    "prefillDeletedOther": "{count} previously failed recipients were deleted.",
     "slotMissingCountOne": "{slot} - {count} recipient",
     "slotMissingCountOther": "{slot} - {count} recipients",
     "unknownSlotTitleOne": "Unknown slot: {list}",
@@ -339,7 +321,6 @@
     "fileFormatHint": ".xlsx or .xls, with the recipient list in the first sheet",
     "parsing": "Parsing {fileName}…",
     "importComplete": "Import complete",
-    "goToCompose": "Go to Compose",
     "goToRecipients": "Go to Recipients",
     "couldNotRead": "Could not read the file. It may not be a valid Excel file.",
     "notExcelFile": "\"{fileName}\" is not an Excel file. Choose a .xlsx or .xls file.",
@@ -366,7 +347,8 @@
     "importedToastOne": "Imported {imported} recipients. {duplicatesSkipped} duplicate skipped.",
     "importedToastOther": "Imported {imported} recipients. {duplicatesSkipped} duplicates skipped.",
     "duplicatesSkippedParsingOne": "{count} duplicate already skipped during parsing.",
-    "duplicatesSkippedParsingOther": "{count} duplicates already skipped during parsing."
+    "duplicatesSkippedParsingOther": "{count} duplicates already skipped during parsing.",
+    "goToGenerate": "Go to Generate"
   },
   "recipients": {
     "title": "Recipients",
@@ -489,7 +471,12 @@
     "noRecipientsInJob": "This generate job has no recipients.",
     "preflightHint": "The pre-flight checks the SMTP connection before the first email goes out.",
     "attachmentsSummary": "{with} with PDF · {without} without",
-    "sendThese": "Send these"
+    "sendThese": "Send these",
+    "prefillRetryOne": "Retry pre-filled from Logs: {count} failed recipient, the same message and SMTP.",
+    "prefillRetryOther": "Retry pre-filled from Logs: {count} failed recipients, the same message and SMTP.",
+    "prefillReenterPassword": "Re-enter the app password to send again - passwords never leave this app.",
+    "prefillDeletedOne": "{count} previously failed recipient was deleted.",
+    "prefillDeletedOther": "{count} previously failed recipients were deleted."
   },
   "sendJob": {
     "selectRecipients": "Select at least one recipient to send to.",
@@ -613,6 +600,9 @@
     "couldNotLoadJobs": "Could not load past generate jobs.",
     "couldNotReopenJob": "Could not reopen the generate job.",
     "jobNoLongerExists": "This generate job no longer exists.",
-    "startDisabledCoverage": "Select recipients with data for every required slot to generate."
+    "startDisabledCoverage": "Select recipients with data for every required slot to generate.",
+    "retryJobHint": "Pre-fill the workspace with this job's recipients and template",
+    "prefillDeletedOne": "{count} job recipient was deleted and left out of the pre-fill.",
+    "prefillDeletedOther": "{count} job recipients were deleted and left out of the pre-fill."
   }
 }

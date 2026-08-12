@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ComposeRouteImport } from './routes/compose'
 import { Route as GenerateRouteImport } from './routes/generate'
 import { Route as ImportRouteImport } from './routes/import'
 import { Route as LogsRouteImport } from './routes/logs'
@@ -23,11 +22,6 @@ import { Route as LogsJobIdRouteImport } from './routes/logs.$jobId'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ComposeRoute = ComposeRouteImport.update({
-  id: '/compose',
-  path: '/compose',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GenerateRoute = GenerateRouteImport.update({
@@ -73,7 +67,6 @@ const LogsJobIdRoute = LogsJobIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/compose': typeof ComposeRoute
   '/generate': typeof GenerateRoute
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
@@ -85,7 +78,6 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/compose': typeof ComposeRoute
   '/generate': typeof GenerateRoute
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
@@ -98,7 +90,6 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/compose': typeof ComposeRoute
   '/generate': typeof GenerateRoute
   '/import': typeof ImportRoute
   '/logs': typeof LogsRouteWithChildren
@@ -112,7 +103,6 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/compose'
     | '/generate'
     | '/import'
     | '/logs'
@@ -124,7 +114,6 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/compose'
     | '/generate'
     | '/import'
     | '/logs'
@@ -136,7 +125,6 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
-    | '/compose'
     | '/generate'
     | '/import'
     | '/logs'
@@ -149,7 +137,6 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ComposeRoute: typeof ComposeRoute
   GenerateRoute: typeof GenerateRoute
   ImportRoute: typeof ImportRoute
   LogsRoute: typeof LogsRouteWithChildren
@@ -166,13 +153,6 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/compose': {
-      id: '/compose'
-      path: '/compose'
-      fullPath: '/compose'
-      preLoaderRoute: typeof ComposeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/generate': {
@@ -246,7 +226,6 @@ const LogsRouteWithChildren = LogsRoute._addFileChildren(LogsRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ComposeRoute: ComposeRoute,
   GenerateRoute: GenerateRoute,
   ImportRoute: ImportRoute,
   LogsRoute: LogsRouteWithChildren,

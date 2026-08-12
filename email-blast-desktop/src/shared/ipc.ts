@@ -517,9 +517,10 @@ export const SmtpDeleteResponse = Schema.Struct({
 export type SmtpDeleteResponse = Schema.Schema.Type<typeof SmtpDeleteResponse>;
 
 /**
- * `smtp.test` payload: the credentials of an inline profile (the compose
- * wizard's SMTP step tests before saving). For a saved profile the renderer
- * calls `testProfile(id)` instead - it does not hold the password.
+ * `smtp.test` payload: the credentials of an inline connection (the Send
+ * workspace's SMTP step tests before sending). For a saved profile the
+ * renderer calls `testProfile(id)` instead - it does not hold the
+ * password.
  */
 export const SmtpTestPayload = Schema.Struct({
   host: Schema.String,
@@ -557,7 +558,7 @@ export type SendRecipientStatus = Schema.Schema.Type<typeof SendRecipientStatus>
  * send delivers (null for a plain no-attachment send from the imported
  * list), the recipients, the SMTP identity (a saved profile id OR an
  * inline override, never both), the message, and the per-job rate limit -
- * the value the wizard's slider set, recorded on the job for history (the
+ * the value the workspace's slider set, recorded on the job for history (the
  * gate itself reads the live setting every iteration, so a later change
  * applies to a running job without restart). The inline password crosses
  * the bridge exactly once, at start - afterwards it lives only in the
@@ -705,8 +706,8 @@ export type SendProgressEvent = Schema.Schema.Type<typeof SendProgressEvent>;
 
 /**
  * `job-paused` event: the job stopped and is persisted as `paused` -
- * manually from the wizard, or automatically when a recipient exhausted
- * its retries. `lastIndex` is the cursor, i.e. how many recipients have a
+ * manually from the Send workspace, or automatically when a recipient
+ * exhausted its retries. `lastIndex` is the cursor, i.e. how many recipients have a
  * persisted outcome.
  */
 export const JobPausedEvent = Schema.Struct({
@@ -765,8 +766,8 @@ export interface Api {
     listBatches(): Promise<ImportBatch[]>;
     /**
      * Every recipient matching the search text and import-batch filter,
-     * unpaginated - the compose wizard's "select all matching" needs the
-     * full list so generation holds every selected row's metadata.
+     * unpaginated - the workspaces' "select all matching" needs the full
+     * list so generation holds every selected row's metadata.
      */
     listAll(filter: RecipientListAllPayload): Promise<Recipient[]>;
   };

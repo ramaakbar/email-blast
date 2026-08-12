@@ -3,10 +3,10 @@ import { senderIdentityWarning } from "./sender-identity";
 
 /**
  * Seam A for the sender-identity warning heuristic (ticket 01): pure
- * logic the renderer runs before every send, so the nudge the wizard
- * shows and the rejection the provider would give can never drift apart.
- * The heuristic is advisory - it never gates a send - so the tests pin
- * what it says, not what it blocks.
+ * logic the renderer runs before every send, so the nudge the Send
+ * workspace shows and the rejection the provider would give can never
+ * drift apart. The heuristic is advisory - it never gates a send - so
+ * the tests pin what it says, not what it blocks.
  */
 
 describe("senderIdentityWarning - known providers", () => {

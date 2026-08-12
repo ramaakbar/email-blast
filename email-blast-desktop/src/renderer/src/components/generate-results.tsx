@@ -17,15 +17,15 @@ import { errorMessage } from "@/lib/error-message";
 import type { GenerateJob, Recipient } from "../../../shared/ipc";
 
 /**
- * The results view of a finished generate job, shared by the compose
- * wizard's step 5 and the Generate workspace (both for a fresh run and a
- * reopened past job): the all-generated / with-failures banner, the
- * per-recipient failure list with errors, and the spot-check preview with
- * prev/next navigation. The Save PDF button re-downloads the previewed
- * recipient's PDF through a native save dialog - the workspace's
- * "re-download" action, available on any finished job. When a handler is
- * given, the banner's "Send these" action jumps into the Send workspace
- * pre-linked to this job (ticket 06).
+ * The results view of a finished generate job in the Generate workspace
+ * (both for a fresh run and a reopened past job): the all-generated /
+ * with-failures banner, the per-recipient failure list with errors, and
+ * the spot-check preview with prev/next navigation. The Save PDF button
+ * re-downloads the previewed recipient's PDF through a native save
+ * dialog - the workspace's "re-download" action, available on any
+ * finished job. When a handler is given, the banner's "Send these"
+ * action jumps into the Send workspace pre-linked to this job (ticket
+ * 06).
  */
 export function GenerateResults({
   job,
@@ -35,7 +35,7 @@ export function GenerateResults({
   job: GenerateJob;
   /** Live recipient rows for the spot-check details; deleted recipients fall back to the job's names. */
   recipients: Recipient[];
-  /** The Send workspace pre-link ("Send these"); optional in the wizard. */
+  /** The Send workspace pre-link ("Send these"). */
   onSendThese?: (jobId: string) => void;
 }) {
   const [spotIndex, setSpotIndex] = useState(0);

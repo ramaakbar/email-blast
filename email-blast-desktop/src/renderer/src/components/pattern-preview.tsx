@@ -1,8 +1,8 @@
 /**
  * The output pattern with every `{slot}` highlighted, so the user sees
  * exactly which slot fills which position. References to slots the
- * template does not declare render red. Shared by the Templates screen and
- * the compose wizard so the rendering can never drift apart.
+ * template does not declare render red. Shared by the Templates screen
+ * and the Generate workspace so the rendering can never drift apart.
  */
 export function PatternPreview({ pattern, slots }: { pattern: string; slots: readonly string[] }) {
   const parts: React.ReactNode[] = [];

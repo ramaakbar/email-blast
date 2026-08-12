@@ -191,14 +191,14 @@ export function registerE2ECleanup(state: E2ECleanupState): void {
   });
 }
 
-// ---- The wizard choreography the scenario tests share ----
+// ---- The workspace choreography the scenario tests share ----
 //
-// The selectors here are brittle by nature (they pin the wizard's
-// English strings and layout) and must stay in sync with compose.tsx -
-// one shared copy keeps a label change a single edit, not shotgun
-// surgery across files.
+// The selectors here are brittle by nature (they pin the app's English
+// strings and layout) and must stay in sync with the Generate/Send
+// workspaces - one shared copy keeps a label change a single edit, not
+// shotgun surgery across files.
 
-/** Drives the import page end to end: pick the fixture (patched picker), preview, commit, and land on the wizard. */
+/** Drives the import page end to end: pick the fixture (patched picker), preview, commit, and land on the Generate workspace (the done-screen CTA). */
 export async function importFixtureSpreadsheet(
   app: ElectronApplication,
   page: Page,
@@ -213,21 +213,20 @@ export async function importFixtureSpreadsheet(
   await page.getByRole("button", { name: "Import recipients" }).click();
   await page.waitForSelector("text=Import complete", { timeout: 20_000 });
   // The done-screen action is a Link (the toast also shows one).
-  await page.locator("text=Go to Compose").first().click();
+  await page.locator("text=Go to Generate").first().click();
 }
 
-/** The wizard's message step: subject plus the HTML body with `{slot}` placeholders. */
-export async function fillMessageStep(
+/** The Send workspace's message editor: subject plus the HTML body with `{slot}` placeholders. */
+export async function fillWorkspaceMessage(
   page: Page,
   message: { readonly subject: string; readonly bodyHtml: string },
 ): Promise<void> {
   await page.getByLabel("Subject").fill(message.subject);
   await page.getByLabel(/HTML body/).fill(message.bodyHtml);
-  await page.locator("footer").getByRole("button", { name: "Next" }).click();
 }
 
-/** The wizard's SMTP step in inline mode against the capture server, with a live Test Connection. */
-export async function fillInlineSmtpStep(page: Page, port: number): Promise<void> {
+/** The Send workspace's SMTP step in inline mode against the capture server, with a live Test Connection. */
+export async function fillWorkspaceSmtp(page: Page, port: number): Promise<void> {
   await page.getByRole("button", { name: "Enter details (this job only)" }).click();
   await page.getByLabel("Host").fill("127.0.0.1");
   await page.getByLabel("Port (465 = implicit TLS, else STARTTLS)").fill(String(port));
@@ -239,7 +238,6 @@ export async function fillInlineSmtpStep(page: Page, port: number): Promise<void
   await page.waitForSelector("text=Connected - the server accepted these credentials.", {
     timeout: 20_000,
   });
-  await page.locator("footer").getByRole("button", { name: "Next" }).click();
 }
 
 // ---- Database seeding (against the app-created schema) ----
@@ -391,7 +389,8 @@ export function seedDatabase(userDataDir: string, seed: DatabaseSeed): void {
         password: "secret",
       });
       // delay_ms is history on the row (the run loop reads the live
-      // setting); the pacing only matters for the wizard-created jobs.
+      // setting); it only matters for the Logs retry pre-fill, which
+      // carries the original job's pacing into the Send workspace.
       const insertJob = db.prepare(
         `INSERT INTO send_jobs (id, generate_job_id, status, smtp_override, subject, body_html,
                                 sender_name, sender_address, delay_ms, cursor_index, total_count, created_at, completed_at)

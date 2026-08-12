@@ -9,11 +9,11 @@ import { SETTING_KEYS } from "../../../shared/settings";
 import type { GenerateJob, Recipient, Template } from "../../../shared/ipc";
 
 /**
- * The live state of a generate job in the wizard and the Generate
- * workspace: idle → running (progress events streaming in) → done, or
- * error. `bound` snapshots the selection and template the job was started
- * from, so a later change can invalidate the done state (stale-state
- * guard, owned by the host page).
+ * The live state of a generate job in the Generate workspace: idle →
+ * running (progress events streaming in) → done, or error. `bound`
+ * snapshots the selection and template the job was started from, so a
+ * later change can invalidate the done state (stale-state guard, owned
+ * by the host page).
  */
 export type GenerateState =
   | { kind: "idle" }
@@ -35,19 +35,16 @@ export type GenerateState =
   | { kind: "error"; message: string };
 
 /**
- * The generate & review panel shared by the compose wizard's step 5 and
- * the Generate workspace: a campaign summary, the start action, live
- * per-recipient progress, and - once finished - the results view
- * (banner, failures, spot-check with re-download). The workspace passes
- * no `onGenerated`; the wizard uses it to hand the generated recipient
- * ids to its send step.
+ * The generate & review panel of the Generate workspace: a campaign
+ * summary, the start action, live per-recipient progress, and - once
+ * finished - the results view (banner, failures, spot-check with
+ * re-download).
  */
 export function GenerateStep({
   recipients,
   template,
   state,
   onStateChange,
-  onGenerated,
   startDisabled = false,
   onSendThese,
 }: {
@@ -55,15 +52,13 @@ export function GenerateStep({
   template: Template | null;
   state: GenerateState;
   onStateChange: React.Dispatch<React.SetStateAction<GenerateState>>;
-  /** The generated recipient ids, for the wizard's send handoff (optional in the workspace). */
-  onGenerated?: (ids: string[]) => void;
   /**
-   * Gates the start action, e.g. the workspace's slot-coverage check.
-   * The wizard reaches step 5 only after its own coverage gate, so it
-   * never needs this.
+   * Gates the start action, e.g. the workspace's slot-coverage check,
+   * so generation never begins with recipients missing required slot
+   * data.
    */
   startDisabled?: boolean;
-  /** The Send workspace pre-link ("Send these"); optional in the wizard. */
+  /** The Send workspace pre-link ("Send these"). */
   onSendThese?: (jobId: string) => void;
 }) {
   const [outputDir, setOutputDir] = useState<string | null>(null);
@@ -130,9 +125,6 @@ export function GenerateStep({
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;
       onStateChange({ kind: "done", jobId: started.id, job: done, bound });
-      onGenerated?.(
-        done.recipients.filter((r) => r.status === "generated").map((r) => r.recipientId),
-      );
     } catch (error) {
       unsubscribeRef.current?.();
       unsubscribeRef.current = null;

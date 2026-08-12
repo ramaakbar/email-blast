@@ -18,7 +18,7 @@ import type { Api, SendJob } from "../src/shared/ipc";
  * a second job's Resume is rejected in the UI with the explanatory
  * message. The rule is symmetric - a paused job blocks every other run -
  * so the only way out of the two-paused stalemate is finishing one job;
- * cancelling it (the wizard Cancel's IPC) frees the other to resume and
+ * cancelling it (the Send workspace Cancel button's IPC) frees the other to resume and
  * deliver. The in-memory control and the DB status guard both surface
  * through the bridge - this test watches the rendered Logs screen do it.
  */
@@ -35,7 +35,7 @@ function runSendThroughBridge(page: Page, jobId: string): Promise<{ ok: boolean;
   );
 }
 
-/** Cancels a job through the bridge (the wizard Cancel button's IPC). */
+/** Cancels a job through the bridge (the Send workspace Cancel button's IPC). */
 function cancelSendThroughBridge(page: Page, jobId: string): Promise<SendJob> {
   return page.evaluate(
     (id) => (window as unknown as { api: Api }).api.send.cancelSend(id) as Promise<SendJob>,
@@ -135,7 +135,7 @@ describe("Seam B: one active send at a time", () => {
 
     // The rule is symmetric: while B is paused, A cannot run either. The
     // only way out of the two-paused stalemate is to finish one job, so
-    // cancel A (the same IPC the wizard's Cancel button uses) - terminal
+    // cancel A (the same IPC the Send workspace's Cancel button uses) - terminal
     // jobs stop counting as active.
     const cancelled = await cancelSendThroughBridge(page, "job-a");
     expect(cancelled.status).toBe("cancelled");

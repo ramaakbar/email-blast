@@ -1,8 +1,8 @@
 import type { TemplateType } from "../../../shared/ipc";
 
 /**
- * The DOCX / Image type badge shown on template cards and in the compose
- * wizard's template preview. Shared so both screens render it identically.
+ * The DOCX / Image type badge shown on template cards and in the
+ * template previews. Shared so every screen renders it identically.
  */
 export function TemplateBadge({ type }: { type: TemplateType }) {
   return type === "docx" ? (

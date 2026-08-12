@@ -15,11 +15,10 @@ import {
 } from "../../../shared/settings";
 
 /**
- * The SMTP step shared by the compose wizard's step 4 and the Send
- * workspace (ticket 06): the saved-profile / inline connection pick with
- * a live Test Connection, the Sender Identity (prefilled from the chosen
- * profile's defaults, ticket 01, still editable per job), and the sending
- * rate slider.
+ * The SMTP step of the Send workspace (ticket 06): the saved-profile /
+ * inline connection pick with a live Test Connection, the Sender
+ * Identity (prefilled from the chosen profile's defaults, ticket 01,
+ * still editable per job), and the sending rate slider.
  */
 
 /** The SMTP identity + sender fields the step carries. */

@@ -27,7 +27,7 @@ export interface RecipientsServiceShape {
   readonly listBatches: () => Effect.Effect<ImportBatch[]>;
   /**
    * Every recipient matching the search text and import-batch filter,
-   * unpaginated - the compose wizard's select-all (ticket 13).
+   * unpaginated - the workspaces' select-all (ticket 13).
    */
   readonly listAll: (filter: RecipientListAllPayload) => Effect.Effect<Recipient[]>;
 }

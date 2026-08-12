@@ -2,6 +2,8 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  fillWorkspaceMessage,
+  fillWorkspaceSmtp,
   firstLaunchCreatesSchema,
   freshUserDataDir,
   importFixtureSpreadsheet,
@@ -23,33 +25,6 @@ import { FIXTURE_RECIPIENTS, writeFixtureSpreadsheet, writeFixtureTemplate } fro
  * out without the attachment while the generated recipients keep theirs.
  * Scenario 3 covers the plain no-attachment send from the imported list.
  */
-
-/** Fills the workspace's message editor (no wizard footer involved). */
-async function fillWorkspaceMessage(
-  page: import("playwright-core").Page,
-  message: { readonly subject: string; readonly bodyHtml: string },
-): Promise<void> {
-  await page.getByLabel("Subject").fill(message.subject);
-  await page.getByLabel(/HTML body/).fill(message.bodyHtml);
-}
-
-/** Fills the workspace's SMTP step in inline mode against the capture server. */
-async function fillWorkspaceSmtp(
-  page: import("playwright-core").Page,
-  port: number,
-): Promise<void> {
-  await page.getByRole("button", { name: "Enter details (this job only)" }).click();
-  await page.getByLabel("Host").fill("127.0.0.1");
-  await page.getByLabel("Port (465 = implicit TLS, else STARTTLS)").fill(String(port));
-  await page.getByLabel("Username (email address)").fill("me");
-  await page.getByLabel("App password").fill("secret");
-  await page.getByLabel("Sender name").fill("Yayasan X");
-  await page.getByLabel("Sender address").fill("iym@example.org");
-  await page.getByRole("button", { name: "Test Connection" }).click();
-  await page.waitForSelector("text=Connected - the server accepted these credentials.", {
-    timeout: 20_000,
-  });
-}
 
 /** Seeds the workspace state shared by the job-send scenarios. */
 async function seedJobSend(state: E2ECleanupState): Promise<{ outputDir: string }> {
@@ -317,8 +292,8 @@ describe("Seam B: Send workspace (ticket 06)", () => {
     const { app, page } = state.session;
     await page.waitForSelector("aside a:has-text('Import')", { timeout: 20_000 });
 
-    // Import the fixture spreadsheet (the helper lands on the old wizard,
-    // which still exists until ticket 07 - then go to the Send workspace).
+    // Import the fixture spreadsheet (the helper lands on the Generate
+    // workspace) - then go to the Send workspace for the plain send.
     await importFixtureSpreadsheet(app, page, xlsxPath);
     await page.click("aside a:has-text('Send')");
 

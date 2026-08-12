@@ -289,7 +289,7 @@ export function toSendJobSummary(row: SendJobSummaryRow): SendJobSummary {
  * the wind-down or one-active checks. Without the revert, the Logs
  * Resume button (resume + run as two calls) could leave such a job
  * `pending` with no path to ever run it again; a fresh job (cursor 0,
- * created by the wizard's send) legitimately stays pending for its
+ * created by the workspace's send) legitimately stays pending for its
  * "Try again".
  */
 function revertResumedJob(
@@ -706,7 +706,7 @@ export function makeSendJobService(
         if (anyActive) {
           // A just-resumed job falls back to paused instead of being
           // orphaned as pending (the Logs Resume button has no other way
-          // to re-trigger it); a fresh wizard job stays pending for its
+          // to re-trigger it); a fresh job stays pending for its
           // "Try again".
           yield* revertResumedJob(repo, loaded);
           return yield* Effect.fail(
@@ -736,7 +736,7 @@ export function makeSendJobService(
         // reverts the job; a failed run must never strand a resumed job
         // as `pending` with a persisted cursor - the UI (Logs row and
         // launch banner) can only resume `paused` jobs, so that state has
-        // no path forward. A fresh wizard job (cursor 0, prior `pending`)
+        // no path forward. A fresh job (cursor 0, prior `pending`)
         // legitimately stays `pending` for its "Try again"; a job run
         // directly from `paused` goes back to `paused`.
         const revertTo: SendJobStatus =

@@ -4,13 +4,13 @@ import { m } from "@paraglide/messages";
 import { errorMessage } from "./error-message";
 
 /**
- * Resume = mark the job pending, then run it - the same pair the wizard's
- * Resume uses. Shared by the Logs list and the job detail so the flow and
- * its failure handling can never drift. `resumingId` names the job whose
- * resume is in flight (at most one at a time, matching the one-active
- * send rule); a rejection surfaces through `resumeError`. The service
- * reverts a rejected resume back to `paused`, so the Resume button stays
- * available for a retry.
+ * Resume = mark the job pending, then run it - the same pair the Send
+ * workspace's Resume uses. Shared by the Logs list and the job detail so
+ * the flow and its failure handling can never drift. `resumingId` names
+ * the job whose resume is in flight (at most one at a time, matching the
+ * one-active send rule); a rejection surfaces through `resumeError`. The
+ * service reverts a rejected resume back to `paused`, so the Resume
+ * button stays available for a retry.
  */
 export function useResumeSend(): {
   readonly resumingId: string | null;

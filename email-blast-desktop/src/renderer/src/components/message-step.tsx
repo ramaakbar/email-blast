@@ -5,10 +5,10 @@ import { Save } from "lucide-react";
 import type { MessageTemplate, Recipient } from "../../../shared/ipc";
 
 /**
- * The message step shared by the compose wizard's step 3 and the Send
- * workspace (ticket 06): the Message Template pick (copy-on-pick, ADR
- * 0005) plus the "Save as template" action, over the shared
- * MessageEditor with `{slot}` autocomplete and the live preview.
+ * The message step of the Send workspace (ticket 06): the Message
+ * Template pick (copy-on-pick, ADR 0005) plus the "Save as template"
+ * action, over the shared MessageEditor with `{slot}` autocomplete and
+ * the live preview.
  */
 export function MessageStep({
   recipients,
