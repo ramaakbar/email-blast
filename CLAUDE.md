@@ -11,3 +11,13 @@ Uses the five canonical triage labels with their default names (`needs-triage`, 
 ### Domain docs
 
 Single-context layout — one `CONTEXT.md` at the repo root plus `docs/adr/`. See `docs/agents/domain.md`.
+
+## Learning more about the Effect
+
+This repository uses the Effect Typescript library (pinned `4.0.0-beta.102` in `email-blast-desktop/package.json`).
+
+Before writing any Effect code, read the usage documentation in `.repos/effect/LLMS.md` (generated from `.repos/effect/ai-docs/`) for the APIs and best practices you need. The docs track the latest `main`, so confirm anything that seems new or different against the installed source.
+
+If you need to learn more about particular Effect apis and concepts that the guide doesn't cover, search through the source code in `email-blast-desktop/node_modules/effect/src` (the installed version) or `.repos/effect/src` (the vendored repo).
+
+`.repos/effect/.agents/AGENTS.md` is the library's contributor guide for editing Effect itself, not for app code - its commands and patterns do not apply here.
