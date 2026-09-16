@@ -93,7 +93,7 @@ describe("Seam B: per-slot font faces (ticket 11)", () => {
     await editor.locator("aside").getByText("{instansi}", { exact: true }).click();
     await editor
       .getByRole("combobox", { name: "Font face" })
-      .selectOption({ label: "The Seasons Bold" });
+      .selectOption({ label: "Carlito Bold" });
     await editor.getByRole("spinbutton", { name: "X", exact: true }).fill("10");
     await editor.getByRole("spinbutton", { name: "Y", exact: true }).fill("80");
     await editor.getByRole("button", { name: "Done" }).click();
