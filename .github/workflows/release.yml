@@ -1,19 +1,25 @@
 # Cuts a GitHub Release from a `v*` tag (ADR-0003, ADR-0011).
 #
-# One job for both platforms: GitHub's standard runners are free for public
-# repositories, and electron-builder's NSIS target needs neither wine nor
-# Rosetta on Apple Silicon (ticket 26), so this single macOS runner produces
-# the dmg/zip and the Setup.exe. A separate Windows job would add a second
-# cache, a second Electron download and a second uploader racing on the same
-# draft release, for nothing.
+# One job for both platforms: GitHub's macOS runners are free for public
+# repositories (Windows runners are billed), and electron-builder's NSIS
+# target needs neither wine nor Rosetta on Apple Silicon (ticket 26), so the
+# same runner produces the dmg/zip and the Setup.exe.
+#
+# The release is assembled by `gh release create` instead of electron-builder's
+# own uploader, because that uploader creates a release per artifact it
+# uploads, concurrently: the first publish of v1.0.0 produced TWO drafts with
+# the assets split between them (the mac zip and the Windows setup in one, the
+# dmg and `latest-mac.yml` in the other), so neither download link was a
+# complete release. Building with `--publish never` and creating the release
+# once makes that split impossible.
 name: Release
 
 on:
   push:
     tags: ["v*"]
 
-# electron-builder uploads the installers and the `latest*.yml` feed with the
-# workflow token; the default token is read-only and the upload would 403.
+# gh creates the release and uploads its assets with the workflow token; the
+# default token is read-only and the upload would 403.
 permissions:
   contents: write
 
@@ -22,6 +28,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # `gh release create --generate-notes` builds the notes from the
+          # commit history, which the default single-commit fetch does not have.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
         with:
@@ -40,10 +50,8 @@ jobs:
       # vite/esbuild resolve their binaries from optional dependencies.
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # The publisher derives the release tag as `v` + package.json version
-      # (electron-publish's GitHubPublisher), and only reuses an existing
-      # draft with that tag - so a stale tag would attach the artifacts to the
-      # wrong release, or to no release at all.
+      # The tag is the version the release claims to be; a stale tag would
+      # publish artifacts that update clients can never install.
       - name: Tag matches package.json version
         run: |
           expected="v$(node -p 'require("./package.json").version')"
@@ -52,17 +60,49 @@ jobs:
             exit 1
           fi
 
-      # Both runs publish into the same draft release: the publisher reuses a
-      # draft whose tag matches, so the Windows run adds its assets to the one
-      # the macOS run created. Review the draft at
-      # https://github.com/ramaakbar/email-blast/releases and publish it by
-      # hand - colleagues see nothing before that.
-      - name: Package and upload macOS
-        run: pnpm make:mac:publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Package macOS
+        run: pnpm make:mac
 
-      - name: Package and upload Windows
-        run: pnpm make:win:publish
+      - name: Package Windows
+        run: pnpm make:win
+
+      # A partial release is worse than a failed run: `gh release create`
+      # would upload whatever it finds and leave the rest missing (exactly how
+      # the two-draft v1.0.0 happened). Every artifact and both update feeds
+      # must be on disk first.
+      - name: Check the artifact set
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./package.json").version')
+          for file in \
+            "Email-Blast-$version-arm64.dmg" \
+            "Email-Blast-$version-arm64.zip" \
+            "Email-Blast-Setup-$version.exe" \
+            latest-mac.yml \
+            latest.yml
+          do
+            test -f "dist/$file" || { echo "::error::missing dist/$file"; exit 1; }
+          done
+
+      # Draft by design: colleagues see nothing until the maintainer reviews
+      # and publishes it. Tick "pre-release" on a test build - shipped apps
+      # ignore pre-releases (`allowPrerelease = false`), so only whoever
+      # downloads it by hand ends up on it. The patterns are extension-explicit
+      # because the Windows build also drops an intermediate `.7z` payload in
+      # `dist/`, which must not become a release asset.
+      - name: Create the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./package.json").version')
+          gh release create "v$version" \
+            --draft \
+            --title "Email Blast $version" \
+            --generate-notes \
+            dist/Email-Blast-*.dmg \
+            dist/Email-Blast-*.zip \
+            dist/Email-Blast-Setup-*.exe \
+            dist/*.blockmap \
+            dist/latest.yml \
+            dist/latest-mac.yml

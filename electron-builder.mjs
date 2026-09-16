@@ -58,9 +58,17 @@ export default {
   // buildResources directory (build/), which held a stale 512px set from the
   // pre-Forge scaffold: auto-discovery would silently package that instead of
   // the current 1024px icon in resources/ (ticket 26).
+  // The published artifact names must equal the URLs inside `latest*.yml`,
+  // because the release is assembled with `gh release create` from the files
+  // in `dist/` (the workflow) rather than by electron-builder's own uploader.
+  // electron-builder's defaults carry spaces (`Email Blast-1.0.0-arm64.dmg`)
+  // and its uploader silently renames them to dashes, which is exactly the
+  // mismatch that would leave a feed pointing at a file that does not exist.
+  // Explicit names on both platforms keep disk, feed and release in step.
   mac: {
     icon: "resources/icon.icns",
     target: ["dmg", "zip"],
+    artifactName: "Email-Blast-${version}-${arch}.${ext}",
     // Unsigned builds still need a signature to launch at all on Apple
     // Silicon: "-" is the ad-hoc identity. electron-builder does not ad-hoc
     // sign by default (unlike @electron/packager). This is the shipped
@@ -86,6 +94,8 @@ export default {
     // (%APPDATA%) alone.
     oneClick: true,
     perMachine: false,
-    artifactName: "${productName} Setup ${version}.${ext}",
+    // Same contract as the mac names above: this is the name `latest.yml`
+    // publishes and the name the release carries.
+    artifactName: "Email-Blast-Setup-${version}.${ext}",
   },
 };

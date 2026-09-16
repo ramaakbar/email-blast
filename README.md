@@ -50,17 +50,28 @@ macOS (Apple Silicon) and Windows (x64) only. Nothing is code-signed
    the wrong version.
 3. That tag push runs the workflow: one macOS runner (free for public
    repositories, and it can build the Windows installer too) packages the
-   macOS dmg/zip and the Windows `Setup.exe`, and uploads them plus the
-   `latest*.yml` update feed into a **draft** GitHub release.
+   macOS dmg/zip and the Windows `Setup.exe`, checks that every artifact and
+   both `latest*.yml` feeds are on disk, then creates **one draft release**
+   with `gh release create`.
 4. Review the draft under _Releases_ and press **Publish release** -
    colleagues see nothing before that, and installed apps ignore drafts.
 5. **Test channel.** To give a build to one person ahead of a real release,
-   publish the draft as a **pre-release** (the checkbox on the draft, or
-   `EP_PRE_RELEASE=true` on the publishing run): shipped builds ignore
+   tick **pre-release** on the draft before publishing: shipped builds ignore
    pre-releases, so only someone who downloads it by hand ends up on it.
 
-Publishing from a workstation needs `GH_TOKEN` with `contents: write` on the
-repository: `pnpm make:mac:publish` / `pnpm make:win:publish`.
+The same release can be cut from a workstation - `pnpm make:mac && pnpm make:win`,
+then
+
+```bash
+$ gh release create v1.1.0 --draft --generate-notes \
+    dist/Email-Blast-*.dmg dist/Email-Blast-*.zip dist/Email-Blast-Setup-*.exe \
+    dist/*.blockmap dist/latest.yml dist/latest-mac.yml
+```
+
+Artifact names are declared in `electron-builder.mjs` on purpose: the
+`latest*.yml` feeds reference the files by name, and GitHub rewrites spaces on
+upload, so a default name would leave the feed pointing at a file that does not
+exist.
 
 ## Project Setup
 

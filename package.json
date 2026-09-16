@@ -17,8 +17,6 @@
     "make": "npm run build && electron-builder --config electron-builder.mjs --publish never",
     "make:mac": "npm run build && electron-builder --config electron-builder.mjs --mac --publish never",
     "make:win": "npm run build && electron-builder --config electron-builder.mjs --win --publish never",
-    "make:mac:publish": "npm run build && electron-builder --config electron-builder.mjs --mac --publish always",
-    "make:win:publish": "npm run build && electron-builder --config electron-builder.mjs --win --publish always",
     "compile": "npm run typecheck && npm run make",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
