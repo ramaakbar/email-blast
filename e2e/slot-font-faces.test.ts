@@ -38,12 +38,10 @@ describe("Seam B: per-slot font faces (ticket 11)", () => {
     const xlsxPath = join(fixturesDir, "recipients.xlsx");
     writeFixtureSpreadsheet(xlsxPath, FIXTURE_RECIPIENTS);
     // A font the bundled set does NOT contain: the add-font flow uploads
-    // it and the picker must show it under its own family name.
-    const uploadFontPath = join(fixturesDir, "The Seasons.ttf");
-    copyFileSync(
-      join(process.cwd(), "..", "fonts", "TheSeasons", "The Seasons.ttf"),
-      uploadFontPath,
-    );
+    // it and the picker must show it under its own family name. Carlito
+    // (OFL) ships as a repository fixture, so this needs no local fonts.
+    const uploadFontPath = join(fixturesDir, "Carlito-Bold.ttf");
+    copyFileSync(join(process.cwd(), "e2e", "assets", "Carlito-Bold.ttf"), uploadFontPath);
     const templatesDir = join(state.userDataDir, "templates");
     const outputDir = join(state.userDataDir, "output");
     mkdirSync(templatesDir, { recursive: true });
@@ -80,7 +78,7 @@ describe("Seam B: per-slot font faces (ticket 11)", () => {
     await editor.getByRole("button", { name: "Add font…" }).click();
     await editor
       .getByRole("combobox", { name: "Font face" })
-      .locator("option", { hasText: "The Seasons Bold" })
+      .locator("option", { hasText: "Carlito Bold" })
       .waitFor({ state: "attached", timeout: 20_000 });
 
     // Slot 1 (selected by default): the bundled Great Vibes - the face
@@ -116,7 +114,7 @@ describe("Seam B: per-slot font faces (ticket 11)", () => {
     const pdfBytes = readFileSync(join(outputDir, "SERTIFIKAT_budi_santoso.pdf"));
     const draws = await pdfUsedFonts(pdfBytes);
     expect(draws.some((draw) => draw.font.includes("GreatVibes-Regular"))).toBe(true);
-    expect(draws.some((draw) => draw.font.includes("TheSeasons-Bd"))).toBe(true);
+    expect(draws.some((draw) => draw.font.includes("Carlito-Bold"))).toBe(true);
     // Both slots drew: one draw per slot, each in its own face.
     expect(draws).toHaveLength(2);
 
