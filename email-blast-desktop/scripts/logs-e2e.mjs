@@ -7,20 +7,18 @@
 // against a local SMTP capture server. Zero renderer console errors.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron } from "playwright-core";
 import { SMTPServer } from "smtp-server";
 
-const appDir = resolve(import.meta.dirname, "..", "out");
-const executablePath = join(
-  appDir,
-  "Email Blast-darwin-arm64",
-  "Email Blast.app",
-  "Contents",
-  "MacOS",
-  "Email Blast",
-);
+import { findPackagedExecutable } from "./packaged-app.mjs";
+
+const executablePath = findPackagedExecutable();
+if (executablePath === null) {
+  console.error("packaged app not found under dist/ - run `pnpm package` first");
+  process.exit(1);
+}
 
 /** An SMTP capture server; the seeded jobs send through it. */
 async function startCapturingServer() {

@@ -49,7 +49,8 @@ interface BundledFace {
  * The bundled set (ticket 11): Great Vibes (single weight), Montserrat
  * and Poppins (static weights where available), all SIL OFL so shipping
  * them inside the app is redistribution-safe. The file names live in
- * resources/fonts/ and ship via the Forge extraResource entry.
+ * resources/fonts/ and ship via electron-builder's extraResources entry
+ * (ADR-0010).
  */
 const BUNDLED_FACES: readonly BundledFace[] = [
   {

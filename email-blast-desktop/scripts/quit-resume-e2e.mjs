@@ -10,20 +10,18 @@
 // errors.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron } from "playwright-core";
 import { SMTPServer } from "smtp-server";
 
-const appDir = resolve(import.meta.dirname, "..", "out");
-const executablePath = join(
-  appDir,
-  "Email Blast-darwin-arm64",
-  "Email Blast.app",
-  "Contents",
-  "MacOS",
-  "Email Blast",
-);
+import { findPackagedExecutable } from "./packaged-app.mjs";
+
+const executablePath = findPackagedExecutable();
+if (executablePath === null) {
+  console.error("packaged app not found under dist/ - run `pnpm package` first");
+  process.exit(1);
+}
 
 /** An SMTP capture server; the resumed job sends through it. */
 async function startCapturingServer() {
@@ -242,7 +240,9 @@ try {
 
   await page.screenshot({ path: join(import.meta.dirname, "quit-resume-e2e.png") });
   if (errors.length) throw new Error(`renderer console errors:\n${errors.join("\n")}`);
-  console.log("SMOKE PASS: boot recovery, launch banner, one-active block, and banner resume all green");
+  console.log(
+    "SMOKE PASS: boot recovery, launch banner, one-active block, and banner resume all green",
+  );
 } finally {
   if (app) await app.close().catch(() => {});
   if (smtp) await new Promise((resolveClose) => smtp.server.close(() => resolveClose()));

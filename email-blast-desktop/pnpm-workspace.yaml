@@ -1,19 +1,9 @@
-# Electron Forge requires a hoisted node_modules layout (its packager walks
-# the app's node_modules for runtime dependencies).
-nodeLinker: hoisted
-# @electron/rebuild (pulled by the Forge CLI for native-module rebuilds)
-# depends on @electron/node-gyp from a git repository; pnpm 10.26+ blocks
-# exotic subdependencies by default, so allow it (trusted: the Electron
-# org's own node-gyp fork).
-blockExoticSubdeps: false
 allowBuilds:
   electron: true
   esbuild: true
   msgpackr-extract: false
-  # Required by the declared Windows maker (maker-squirrel): its install
-  # script copies the host-arch 7z binary.
-  electron-winstaller: true
-  # macOS packaging deps (Forge's packager / dmg maker)
-  fs-xattr: true
-  macos-alias: true
+  # Pulled in by electron-builder for its Squirrel.Windows target, which this
+  # app does not build (the Windows target is NSIS): its install script only
+  # copies a 7z binary nothing here runs.
+  electron-winstaller: false
   better-sqlite3: true

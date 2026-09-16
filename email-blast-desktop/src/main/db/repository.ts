@@ -33,8 +33,8 @@ import { normalizeSlotLayout, type SlotLayoutConfig } from "../../shared/slot-la
 
 /**
  * The migrations folder applied on open (drizzle/): packaged builds get it
- * via forge's extraResource (resources/drizzle), dev and tests run from the
- * package root where it lives next to package.json.
+ * via electron-builder's extraResources entry (resources/drizzle, ADR-0010),
+ * dev and tests run from the package root where it lives next to package.json.
  */
 function resolveMigrationsFolder(): string {
   const packagedPath =

@@ -9,25 +9,17 @@
 // 4. zero renderer console errors.
 // The first launch's own seed is checked too: the OS-locale default it
 // writes must be one of the two shipped locales (en fallback included).
-import { accessSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron } from "playwright-core";
 
-const appDir = resolve(import.meta.dirname, "..", "out");
-const executablePath = join(
-  appDir,
-  "Email Blast-darwin-arm64",
-  "Email Blast.app",
-  "Contents",
-  "MacOS",
-  "Email Blast",
-);
-try {
-  accessSync(executablePath);
-} catch {
-  console.error("packaged app not found under out/ - run `pnpm package` first");
+import { findPackagedExecutable } from "./packaged-app.mjs";
+
+const executablePath = findPackagedExecutable();
+if (executablePath === null) {
+  console.error("packaged app not found under dist/ - run `pnpm package` first");
   process.exit(1);
 }
 
@@ -125,7 +117,9 @@ try {
   app = null;
 
   if (errors.length) throw new Error(`renderer console errors:\n${errors.join("\n")}`);
-  console.log("SMOKE PASS: both locales render, switcher flips instantly, choice persists, zero console errors");
+  console.log(
+    "SMOKE PASS: both locales render, switcher flips instantly, choice persists, zero console errors",
+  );
 } finally {
   if (app) await app.close().catch(() => {});
   rmSync(userDataDir, { recursive: true, force: true });

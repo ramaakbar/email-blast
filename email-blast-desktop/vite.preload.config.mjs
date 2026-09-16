@@ -1,18 +1,23 @@
+import { builtinModules } from "node:module";
 import { defineConfig } from "vite";
 
-// The Forge Vite plugin merges this over its preload defaults (externalized
-// electron + node builtins, single-file CJS output - the sandboxed preload
-// contract: no split chunks, no ESM). The lib entry is an object so the
-// bundle is named preload.js, not index.js.
+// Preload build: one CJS file, no chunks - the sandboxed-preload contract
+// (`sandbox: true` in the main process window options). electron and the node
+// builtins stay external; the preload imports nothing else that is not
+// bundled. Output: out/preload/index.js.
 export default defineConfig({
   build: {
+    outDir: "out/preload",
+    emptyOutDir: true,
+    target: "esnext",
     lib: {
-      entry: { preload: "src/preload/index.ts" },
+      entry: { index: "src/preload/index.ts" },
       formats: ["cjs"],
     },
     rollupOptions: {
+      external: ["electron", ...builtinModules, ...builtinModules.map((m) => `node:${m}`)],
       output: {
-        entryFileNames: "preload.js",
+        entryFileNames: "[name].js",
       },
     },
   },

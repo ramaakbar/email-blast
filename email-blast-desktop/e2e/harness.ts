@@ -1,10 +1,12 @@
-import { accessSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron, type ElectronApplication, type Page } from "playwright-core";
 import { SMTPServer } from "smtp-server";
 import { afterEach } from "vitest";
+
+import { findPackagedExecutable } from "../scripts/packaged-app.mjs";
 
 /**
  * Seam B harness (spec Testing Decisions): launching the packaged app with
@@ -18,22 +20,10 @@ import { afterEach } from "vitest";
 
 /** The packaged app binary, or a clear error telling the user to package. */
 export function packagedExecutablePath(): string {
-  const appDir = resolve(import.meta.dirname, "..", "out");
-  const candidates = [
-    process.env.APP_PATH,
-    join(appDir, "Email Blast-darwin-arm64", "Email Blast.app", "Contents", "MacOS", "Email Blast"),
-  ].filter((p): p is string => typeof p === "string" && p !== "");
-  const found = candidates.find((p) => {
-    try {
-      accessSync(p);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  if (found === undefined) {
+  const found = findPackagedExecutable();
+  if (found === null) {
     throw new Error(
-      "packaged app not found under out/ - run `pnpm package` before `pnpm test:e2e`",
+      "packaged app not found under dist/ - run `pnpm package` before `pnpm test:e2e`",
     );
   }
   return found;

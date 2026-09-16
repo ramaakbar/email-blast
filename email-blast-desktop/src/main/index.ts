@@ -31,19 +31,14 @@ import { templatesOperations } from "./services/templates";
 import { fontsOperations } from "./services/fonts";
 import { generateOperations } from "./services/generate-jobs";
 
-// Forge's Vite plugin defines these at build time (bare identifiers, from
-// its getBuildDefine): the dev-server URL in `electron-forge start`,
-// `undefined` in packaged builds, plus the renderer's output name.
-declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
-declare const MAIN_WINDOW_VITE_NAME: string;
+// Set by scripts/dev.mjs before Electron starts; absent in every packaged
+// run, where the renderer loads from out/renderer/index.html (ADR-0010).
+const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
 // The only origins the app may ever display: the Vite dev server in dev,
 // the local packaged file in production. Everything else is a navigation
 // away from the app and gets blocked.
-const expectedOrigin =
-  is.dev && MAIN_WINDOW_VITE_DEV_SERVER_URL
-    ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).origin
-    : "file://";
+const expectedOrigin = is.dev && devServerUrl ? new URL(devServerUrl).origin : "file://";
 
 function createWindow(context: Context.Context<AppServices>, sendEnv: SendEnv): BrowserWindow {
   const mainWindow = new BrowserWindow({
@@ -55,7 +50,7 @@ function createWindow(context: Context.Context<AppServices>, sendEnv: SendEnv): 
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, "preload.js"),
+      preload: join(__dirname, "../preload/index.js"),
       // Security baseline: sandbox on, contextIsolation on, nodeIntegration off,
       // preload as the only bridge, no remote content ever loaded.
       sandbox: true,
@@ -152,11 +147,11 @@ function createWindow(context: Context.Context<AppServices>, sendEnv: SendEnv): 
     if (origin !== expectedOrigin) event.preventDefault();
   });
 
-  // Load the remote URL for development or the local html file for production.
-  if (is.dev && MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    void mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  // Load the dev server in development, the packaged html file otherwise.
+  if (is.dev && devServerUrl) {
+    void mainWindow.loadURL(devServerUrl);
   } else {
-    void mainWindow.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
+    void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
   }
 
   return mainWindow;
@@ -266,7 +261,8 @@ app.whenReady().then(async () => {
   const credCrypto = makeCredentialCrypto(safeStorage, (message) => console.log(message));
   migrateCredentialsAtRest(db, credCrypto, (message) => console.log(message));
   // Ticket 11: the bundled faces ship inside the packaged app
-  // (process.resourcesPath/fonts via the Forge extraResource entry); in
+  // (process.resourcesPath/fonts via electron-builder's extraResources
+  // entry, ADR-0010); in
   // dev they live in the project's resources/fonts. Uploads are copied
   // into the app data dir next to the database.
   const fontDirs = {

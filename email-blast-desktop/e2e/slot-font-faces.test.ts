@@ -21,8 +21,8 @@ import { pdfUsedFonts } from "../src/main/services/test-helpers";
  * saves, generates certificates, and verifies the output PDF embeds
  * BOTH faces - the full editor -> persistence -> upload -> rendering
  * loop, including the packaged app's bundled resources (the fonts ship
- * via the Forge extraResource entry, so a packaging regression fails
- * this test).
+ * via electron-builder's extraResources entry, ADR-0010, so a packaging
+ * regression fails this test).
  */
 
 describe("Seam B: per-slot font faces (ticket 11)", () => {

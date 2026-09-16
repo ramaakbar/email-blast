@@ -1,4 +1,5 @@
-// Packaged-app smoke E2E for the Forge/Vite toolchain (tickets 19-20).
+// Packaged-app smoke E2E for the Vite + electron-builder chain (ADR-0010,
+// tickets 19-20, 26).
 // Launches the packaged app with an isolated userData dir, waits for the
 // window, verifies the renderer loaded, the preload bridge answers, and
 // there are zero renderer console errors, then quits. A first launch lets
@@ -6,28 +7,17 @@
 // (ticket 24 - the script drives the UI by its English strings, so the OS
 // locale cannot flip the assertions) and marks setup done, and the second
 // launch verifies the app shell.
-import { accessSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { _electron } from "playwright-core";
 
-// APP_PATH overrides the packaged app to smoke (e.g. a zip-extracted copy).
-const appDir = resolve(import.meta.dirname, "..", "out");
-const candidates = [
-  process.env.APP_PATH,
-  join(appDir, "Email Blast-darwin-arm64", "Email Blast.app", "Contents", "MacOS", "Email Blast"),
-].filter(Boolean);
-const executablePath = candidates.find((p) => {
-  try {
-    accessSync(p);
-    return true;
-  } catch {
-    return false;
-  }
-});
-if (!executablePath) {
-  console.error("packaged app not found under out/ - run `pnpm package` first");
+import { findPackagedExecutable } from "./packaged-app.mjs";
+
+const executablePath = findPackagedExecutable();
+if (executablePath === null) {
+  console.error("packaged app not found under dist/ - run `pnpm package` first");
   process.exit(1);
 }
 

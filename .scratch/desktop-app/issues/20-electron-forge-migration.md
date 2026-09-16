@@ -38,4 +38,6 @@ Completed in one pass with ticket 19 (the Vite 8 upgrade) - the user's call afte
 
 **Supersedes:** ticket 01's scaffold verdict (electron-vite 5.0.0 + electron-builder 26.15.3, "Forge is not the right fit here") - overtaken by the user's call during 19/20 (Forge Vite plugin + Vite 8). ADR-0001 now records the actual decision.
 
+**Superseded by:** ticket 26 / ADR-0010 (2026-09-15) - Forge's Squirrel.Windows maker needs mono+wine, so the Windows installer could not be built on Apple Silicon; electron-builder replaced the whole Forge chain. This file records the Forge era.
+
 Code review (five-axis, parallel agents over the working-tree diff): findings shared with ticket 19 (pdf-lib declaration, app icon, productName, electron-winstaller, stale docs); the ticket-specific outcomes were the maker-squirrel note staying accurate and the .npmrc/workspace-yaml nodeLinker duplication being documented (Forge's system check reads .npmrc; pnpm 11 links from pnpm-workspace.yaml - both kept). No ticket-specific defects remained.

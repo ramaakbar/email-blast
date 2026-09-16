@@ -26,5 +26,5 @@ Replace the custom repository with Drizzle ORM over SQLite (better-sqlite3 diale
   better-sqlite3 v13 turns FK enforcement ON by default; `openDatabase` turns it off explicitly (historical job rows must survive recipient/template deletion, ticket 11).
 - Layout: `src/main/db/schema.ts` (tables, with the CHECK constraints declared explicitly - drizzle's sqlite enum mode is TypeScript-only) and `src/main/db/repository.ts` (the `SqliteRepo` service, unchanged shape).
   `drizzle/` holds migrations, applied by `migrate()` on open; the bootstrap migration is idempotent (`IF NOT EXISTS`) so existing databases open unmodified.
-  The packaged app ships the folder as a forge extra resource.
+  The packaged app ships the folder as an electron-builder `extraResources` entry (ADR-0010); Forge's `extraResource` was the earlier mechanism.
 - The `node:sqlite` `DatabaseSync` handle is gone everywhere; the layers take a better-sqlite3 `Database`.

@@ -5,10 +5,12 @@ import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 
-// The Forge Vite plugin forces the renderer root to the project directory
-// (index.html lives at the project root, the plugin's convention), so no
+// The renderer root is the project directory (index.html lives there), so no
 // root is set here - the aliases point at the renderer source tree.
 export default defineConfig({
+  // The packaged renderer loads over file://, so its asset URLs must be
+  // relative (the Forge Vite plugin used to set this for us).
+  base: "./",
   resolve: {
     alias: {
       "@renderer": resolve("src/renderer/src"),
@@ -37,8 +39,19 @@ export default defineConfig({
       project: "./project.inlang",
       outdir: "./src/paraglide",
       strategy: ["globalVariable", "baseLocale"],
+      // The compiler default (message-modules) re-emits one module per
+      // message - 1200+ files - and drops the per-locale bundles the repo
+      // commits (c8d7091). The dev-recommended locale-modules shape is the
+      // committed one; keep the two Vite configs in step.
+      outputStructure: "locale-modules",
       emitTsDeclarations: true,
       emitGitIgnore: false,
     }),
   ],
+  build: {
+    // Its own directory: electron-builder packs out/ (ADR-0010) and the
+    // three builds must not empty each other's output.
+    outDir: "out/renderer",
+    emptyOutDir: true,
+  },
 });

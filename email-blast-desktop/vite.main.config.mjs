@@ -1,11 +1,14 @@
+import { builtinModules } from "node:module";
 import { resolve } from "path";
 import { defineConfig } from "vite";
 import { paraglideVitePlugin } from "@inlang/paraglide-js";
 
-// The Forge Vite plugin merges this over its main-process defaults
-// (externalized electron + node builtins, CJS output to .vite/build).
-// The lib entry is an object so the bundle is named main.js - the entry
-// file's own base name (index.ts) would collide with the preload build.
+// Main-process build. electron-builder packages `out/` (ADR-0010); the dev
+// loop is scripts/dev.mjs.
+// electron and the node builtins stay external - only the Electron runtime
+// provides them. Each build owns its output directory so the three builds
+// cannot clobber each other, and the lib entry is an object so the bundles
+// are named index.js wherever they land.
 // better-sqlite3 stays external (not bundled): its binding.js resolves the
 // native binary relative to its own package directory, which only works
 // when the module is required from node_modules (packaged with the app).
@@ -24,17 +27,35 @@ export default defineConfig({
       project: "./project.inlang",
       outdir: "./src/paraglide",
       strategy: ["globalVariable", "baseLocale"],
+      // The compiler default (message-modules) re-emits one module per
+      // message - 1200+ files - and drops the per-locale bundles the repo
+      // commits (c8d7091). The dev-recommended locale-modules shape is the
+      // committed one; keep the two Vite configs in step.
+      outputStructure: "locale-modules",
       emitTsDeclarations: true,
       emitGitIgnore: false,
     }),
   ],
   build: {
+    outDir: "out/main",
+    emptyOutDir: true,
+    // Electron 43 runs Node 24: nothing needs downleveling, and a pinned
+    // node version string here would silently age with every Electron bump.
+    target: "esnext",
     lib: {
-      entry: { main: "src/main/index.ts" },
+      entry: { index: "src/main/index.ts" },
       formats: ["cjs"],
     },
     rollupOptions: {
-      external: ["better-sqlite3"],
+      external: [
+        "electron",
+        "better-sqlite3",
+        ...builtinModules,
+        ...builtinModules.map((m) => `node:${m}`),
+      ],
+      output: {
+        entryFileNames: "[name].js",
+      },
     },
   },
 });
