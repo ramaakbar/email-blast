@@ -47,10 +47,10 @@ Completed 2026-09-16. ADR-0011 amends ADR-0003: the app ships **unsigned on purp
 **Findings worth keeping.**
 
 - A `--dir` package is updater-blind: electron-builder writes `app-update.yml` only when the target list contains dmg/zip (mac) or a suitable Windows target, so `pnpm package` cannot exercise the updater.
-- An empty-but-reachable feed is not a 404: electron-updater 6.8.9's GitHub provider throws a **plain** `Error("No published versions on GitHub")` from its XML feed reader (the coded `ERR_UPDATER_NO_PUBLISHED_VERSIONS` variant is a different path). Both map to `up-to-date`; a real 404 stays an error, because that means the feed itself is gone.
+- electron-builder's GitHub uploader cannot assemble a release: it creates one release per artifact it uploads, **concurrently**, so the first v1.0.0 publish produced two drafts with the assets split between them (mac zip + Windows setup in one, dmg + `latest-mac.yml` in the other). The workflow now builds with `--publish never`, guards that every artifact and both feeds exist, and creates the release once with `gh release create`. Artifact names are declared explicitly on both platforms because GitHub rewrites spaces on upload, which would leave the feeds pointing at files that do not exist.
+- An empty feed, a draft-only feed, and a pre-release-only feed all look the same to a client: electron-updater answers `No published versions on GitHub`, or `releases/latest` answers 406 wrapped as "please ensure a production release exists". All of them mean "nothing to install yet" and map to `up-to-date`; a 404 stays an error, because that is the feed itself being gone. The messages also carry the raw HTTP response (headers, cookies, CSP), so the user-facing text is trimmed to its first line.
 
 **Accepted gaps.**
 
 - The Windows half — background download → Restart & install — is unverified end to end: it needs a published newer version and a Windows host. The macOS half is notify-only by design (ADR-0011).
-- The release workflow has never run; it was validated locally (YAML parse, the tag/version guard, the pnpm flags, and the config against electron-builder's schema).
-- `electron-forge-maker-nsis`-style leftovers: none — nothing about the Forge-era chain returns.
+- The release workflow has run twice on tag `v1.0.0` (both green). The first run produced the split drafts above, which were deleted; the second produced **one draft release with all eight assets** (`Email-Blast-1.0.0-arm64.dmg`/`.zip` + blockmaps, `Email-Blast-Setup-1.0.0.exe` + blockmap, `latest-mac.yml`, `latest.yml`). Publishing that draft is the maintainer's click.

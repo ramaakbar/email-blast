@@ -238,6 +238,35 @@ describe("UpdateService (ticket 21)", () => {
     expect(state.error).toBe(m["update.errorCheck"]({ message: "getaddrinfo ENOTFOUND" }));
   });
 
+  it("treats a feed of drafts and pre-releases as nothing published", async () => {
+    // What `releases/latest` answers while the only release is a draft: 406,
+    // wrapped into this sentence. Pre-releases land here too, which is the
+    // behaviour shipped builds want - they ignore pre-releases by design.
+    const h = harness({ platform: "darwin" });
+    h.updater.check = () =>
+      Promise.reject(
+        new Error(
+          "Unable to find latest version on GitHub (https://github.com/ramaakbar/email-blast/releases/latest), please ensure a production release exists: HttpError: 406",
+        ),
+      );
+
+    expect((await run(h.service.check())).status).toBe("up-to-date");
+  });
+
+  it("keeps the raw HTTP dump out of the user-facing failure", async () => {
+    // electron-updater appends the whole response - headers, cookies, CSP -
+    // to its message; a banner has room for one readable line.
+    const h = harness({ platform: "darwin" });
+    h.updater.check = () =>
+      Promise.reject(
+        new Error('connect ETIMEDOUT\nHeaders: {\n  "set-cookie": ["_gh_sess=..."]\n}'),
+      );
+
+    const state = await run(h.service.check());
+    expect(state.status).toBe("error");
+    expect(state.error).toBe(m["update.errorCheck"]({ message: "connect ETIMEDOUT" }));
+  });
+
   it("downloads in the background on Windows and reports progress until it is ready", async () => {
     const h = harness();
     h.updater.check = () => Promise.resolve(found("1.2.0"));

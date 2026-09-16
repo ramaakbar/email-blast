@@ -154,18 +154,26 @@ function availableVersionOf(result: unknown): string | null {
   return "isUpdateAvailable" in result && result.isUpdateAvailable === false ? null : version;
 }
 
-/** The failure detail a localized message interpolates. */
+/**
+ * The failure detail a localized message interpolates: the first line only.
+ * electron-updater appends the raw HTTP response - headers, set-cookie, CSP -
+ * to its messages, which must never reach a banner or the Settings row.
+ */
 function describeCause(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+  const message = cause instanceof Error ? cause.message : String(cause);
+  const firstLine = message.split("\n", 1)[0]!.trim();
+  return firstLine.length > 200 ? `${firstLine.slice(0, 197)}...` : firstLine;
 }
 
 /**
- * The one electron-updater failure this domain treats as a state rather
- * than an error: the feed answered with no release in it. The string is
- * electron-updater's own contract (its GitHub provider throws
- * `newError(..., "ERR_UPDATER_NO_PUBLISHED_VERSIONS")`).
+ * The failure texts that mean "the feed carries nothing to install yet".
+ * electron-updater 6.8.9 says `No published versions on GitHub` for an empty
+ * releases feed, and `please ensure a production release exists` when
+ * `releases/latest` cannot resolve a tag - which is what a feed holding only
+ * drafts or pre-releases looks like from a client. Both are states rather
+ * than failures: there is nothing newer to get.
  */
-const NO_PUBLISHED_VERSIONS = "ERR_UPDATER_NO_PUBLISHED_VERSIONS";
+const NOTHING_PUBLISHED = [/no published versions/i, /please ensure a production release exists/i];
 
 /** The `percent` a download-progress payload carries, or null when it is not one. */
 function progressPercent(payload: unknown): number | null {
@@ -284,8 +292,11 @@ export function makeUpdateService(repo: SqliteRepoShape, env: UpdateEnv): Update
       // No state change: every failure this service can observe also
       // rejects the promise it is awaiting, and that path owns the
       // transition. The listener exists because an EventEmitter with no
-      // `error` listener throws instead of reporting.
-      console.log(`[update] updater error: ${describeCause(cause)}`);
+      // `error` listener throws instead of reporting. The raw text goes to
+      // the log in full; only the user-facing state trims it.
+      console.log(
+        `[update] updater error: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
     });
     return adapter;
   };
@@ -391,27 +402,22 @@ export function makeUpdateService(repo: SqliteRepoShape, env: UpdateEnv): Update
         if (!outcome.ok) {
           const { cause } = outcome;
           const causeMessage = describeCause(cause);
-          // The feed answered but carries no release yet. electron-updater
-          // 6.8.9's GitHub provider signals that two ways: its XML feed
-          // reader throws a plain Error("No published versions on GitHub")
-          // when the feed has no entry (the path an empty feed actually
-          // takes), and the tag path throws the same text under the
-          // ERR_UPDATER_NO_PUBLISHED_VERSIONS code. Either way there is
-          // nothing newer to get, so this is "up to date", not a failure the
-          // user could act on.
+          // Nothing published yet (an empty feed, or one holding only drafts
+          // and pre-releases): there is nothing newer to get, so this is
+          // "up to date" rather than a failure the user could act on.
           // A 404 stays an ERROR on purpose: that is the feed itself being
           // gone (repository renamed, made private), which is exactly what
           // the maintainer must hear about.
-          const noReleasePublished =
-            /no published versions/i.test(causeMessage) ||
+          const nothingPublished =
+            NOTHING_PUBLISHED.some((pattern) => pattern.test(causeMessage)) ||
             (typeof cause === "object" &&
               cause !== null &&
               "code" in cause &&
-              cause.code === NO_PUBLISHED_VERSIONS);
-          if (noReleasePublished) {
+              cause.code === "ERR_UPDATER_NO_PUBLISHED_VERSIONS");
+          if (nothingPublished) {
             foundVersion = null;
             status = "up-to-date";
-            console.log("[update] feed carries no published release yet");
+            console.log(`[update] nothing published yet: ${causeMessage}`);
           } else {
             status = "error";
             error = m["update.errorCheck"]({ message: causeMessage });
