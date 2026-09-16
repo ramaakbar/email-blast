@@ -15,7 +15,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `66de256`):
+Implemented in `email-blast-desktop/` (commit `c7d0131`):
 
 - Sidebar splits into Generate and Send; `routes/generate.tsx` is the Generate workspace: RecipientsStep (search/filter/batch select, unchanged from the wizard), TemplateStep with slot-coverage validation (missing metadata per slot listed), GenerateStep with live per-recipient progress, per-recipient failure list with errors, and results with the spot-check PDF preview and per-file re-download
 - No message, SMTP, or send step exists anywhere in the workspace; a certificate batch generates with zero email configuration

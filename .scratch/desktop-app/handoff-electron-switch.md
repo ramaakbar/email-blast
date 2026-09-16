@@ -42,7 +42,7 @@ These are framework-agnostic. Do NOT re-litigate them.
 
 ## Repo state
 
-- `main` at `6fda254`, clean tree, everything committed.
+- `main` at `fbf7781`, clean tree, everything committed.
 - `.scratch/desktop-app/` contains: `map.md`, `spec.md` (Tauri-era, to be replaced), `handoff-electron-switch.md`, `issues/01-26` (01-06 decisions, 07-26 Tauri implementation tickets to be replaced).
 - `CONTEXT.md` (domain glossary) at repo root — transfers as-is.
 - Existing Bun CLI in `src/` — reference for behavior AND code patterns now.

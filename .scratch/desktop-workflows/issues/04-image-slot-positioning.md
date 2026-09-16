@@ -15,7 +15,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `a91d5bb`):
+Implemented in `email-blast-desktop/` (commit `7c92ee5`):
 
 - `templates.slot_layout` JSON column stores per-slot config `{ x, y, fontSize, color, align, maxWidth }`; the file path and type stay immutable, past Generate Jobs reference their own rows and generated PDFs on disk, so nothing existing changes
 - `shared/slot-layout.ts` owns the pure math both sides share: `fitFontSize` (single-line auto-shrink to the box width, legibility floor), `slotTextX` (alignment), `pdfBaselineY` (CSS top-left to pdf-lib baseline), `validateSlotLayout` — the renderer preview and the main-process generator call the same functions, so preview and PDF cannot drift

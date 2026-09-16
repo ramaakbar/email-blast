@@ -14,7 +14,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `37043bc`):
+Implemented in `email-blast-desktop/` (commit `376acd9`):
 
 - The 6-step Compose route is deleted; the sidebar's Compose entry is gone and `routes/` holds only the workspaces (Import, Generate, Send, Logs, Recipients, Templates, Settings) — no dead imports or redirects remain (the `compose.*` i18n keys live on, reused by the workspaces' shared copy)
 - Logs retry flows open the workspaces pre-filled: a Send Job retry seeds the Send workspace with the job's recipients (the failed ones), message, sender identity, and profile — the inline password is re-entered as before; a Generate Job retry opens the Generate workspace with its recipients pre-selected

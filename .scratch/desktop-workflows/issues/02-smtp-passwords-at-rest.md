@@ -15,7 +15,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `281d9de`):
+Implemented in `email-blast-desktop/` (commit `deeeceb`):
 
 - `main/services/credential-crypto.ts` wraps Electron safeStorage with a ciphertext marker (`enc:v1:` prefix, `isCiphertext`), so stored values are recognizable and never double-encrypted; legacy plaintext passes through reads unchanged
 - Profile passwords and inline Send Job SMTP overrides are stored encrypted (columns `password`, `smtp_override_json`); reads decrypt through the same seam

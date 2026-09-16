@@ -16,7 +16,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `03e3f5c`):
+Implemented in `email-blast-desktop/` (commit `f8412b4`):
 
 - `smtp_profiles` gains `default_sender_name`, `default_sender_address`, `default_reply_to`; profile CRUD + `getCredentials` return the default identity
 - Send step: picking a profile seeds the job's sender name/address/reply-to from it; job edits never write back to the profile (per-job columns on the send job, ADR 0008's shape)

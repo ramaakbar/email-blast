@@ -18,7 +18,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `10593da`):
+Implemented in `email-blast-desktop/` (commit `6148961`):
 
 - `routes/send.tsx` is the Send workspace: recipient source picker (a past Generate Job with its recipient table, or the imported recipient list directly for plain sends), the shared MessageStep, SmtpStep (profile or inline, sender identity), and SendStep with pause/resume/cancel and the per-recipient log
 - `JobRecipientTable` shows each job recipient's generate status with a flagged failed badge, search + batch select, and the has-attachment / no-attachment / all filter; the pre-flight summary counts who of the selection receives a PDF and who does not

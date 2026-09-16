@@ -34,7 +34,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commits `d1e0f54` refactor + `cc0eba2`, ADR docs in `0abe5ed`):
+Implemented in `email-blast-desktop/` (commits `73c4701` refactor + `981a36a`, ADR docs in `41bd07f`):
 
 - `SmtpCredentials` is now a named `Schema.Struct` in `shared/ipc.ts` (`{ host, port: Schema.Number, username, password }`); `SendStartPayload.smtpOverride` and `SmtpTestPayload` reference it; `SendSmtpOverrideInfo` stays as the password-stripped projection for read-back contracts
 - `main/services/smtp.ts` deleted its local `SmtpCredentials` interface and imports the shared type; `send-jobs.ts` imports the same type

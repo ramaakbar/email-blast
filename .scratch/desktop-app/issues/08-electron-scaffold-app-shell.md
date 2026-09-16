@@ -15,7 +15,7 @@
 
 ## Answer
 
-Implemented in `email-blast-desktop/` (commit `b4369e5`), scaffolded with the ticket 01 recipe: `@quick-start/electron` react-ts template, Electron 43.2.0, electron-vite 5.0.0, electron-builder 26.15.3, React 19 + TanStack Router/Query/Table + Tailwind v4 + shadcn (zinc) + lucide, oxlint/oxfmt/vitest, `effect@4.0.0-beta.102` pinned exactly.
+Implemented in `email-blast-desktop/` (commit `d254d51`), scaffolded with the ticket 01 recipe: `@quick-start/electron` react-ts template, Electron 43.2.0, electron-vite 5.0.0, electron-builder 26.15.3, React 19 + TanStack Router/Query/Table + Tailwind v4 + shadcn (zinc) + lucide, oxlint/oxfmt/vitest, `effect@4.0.0-beta.102` pinned exactly.
 
 Verified end to end on 2026-08-02:
 - `pnpm dev` and the packaged app both launch; sidebar + all seven routes render, `/` redirects to `#/recipients` (hash history is required for `file://` loads in packaged builds), one nav item highlighted per route
