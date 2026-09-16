@@ -30,6 +30,7 @@ import { messageTemplatesOperations } from "./services/message-templates";
 import { templatesOperations } from "./services/templates";
 import { fontsOperations } from "./services/fonts";
 import { generateOperations } from "./services/generate-jobs";
+import { updateOperations, UpdateService } from "./services/update";
 
 // Set by scripts/dev.mjs before Electron starts; absent in every packaged
 // run, where the renderer loads from out/renderer/index.html (ADR-0010).
@@ -199,6 +200,7 @@ const DOMAINS = [
   smtpOperations,
   sendOperations,
   logsOperations,
+  updateOperations,
 ] as const;
 
 /**
@@ -231,6 +233,26 @@ function forwardProgressToWindows(context: Context.Context<AppServices>): void {
               : WIRE.send.onJobPaused.channel;
         for (const win of BrowserWindow.getAllWindows()) {
           win.webContents.send(channel, event);
+        }
+      });
+    }).pipe(Effect.provideContext(context)),
+  );
+}
+
+/**
+ * Forwards every update-state change to every open window. Subscribed once
+ * at boot against the shared app context, before the first window exists -
+ * the service's subscription set is what carries a transition, so a window
+ * that appears later picks the stream up from its next state and reads the
+ * current one through `getState` when it mounts.
+ */
+function forwardUpdateToWindows(context: Context.Context<AppServices>): void {
+  void Effect.runPromise(
+    Effect.gen(function* () {
+      const update = yield* UpdateService;
+      update.subscribe((state) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send(WIRE.update.onState.channel, state);
         }
       });
     }).pipe(Effect.provideContext(context)),
@@ -331,6 +353,13 @@ app.whenReady().then(async () => {
       if (recovered > 0) {
         console.log(`[boot] recovered ${recovered} interrupted send job(s) to paused`);
       }
+      // Ticket 21: the launch bookkeeping. A version change since the last
+      // launch raises the one-time "updated to version X" notice; a first
+      // run only records the baseline, and an unchanged one leaves a notice
+      // the user never dismissed in place - all before the first paint, so
+      // the renderer's mount snapshot already carries it.
+      const update = yield* UpdateService;
+      yield* update.recordLaunch();
       return yield* SendEnvService;
     }).pipe(Effect.provideContext(context)),
   );
@@ -339,10 +368,23 @@ app.whenReady().then(async () => {
   // Job progress events flow hub -> every window; subscribed before the
   // first window exists so no event is ever missed after windows appear.
   forwardProgressToWindows(context);
+  // Update-state changes flow service -> every window, subscribed here for
+  // the same reason (the service holds the subscription set).
+  forwardUpdateToWindows(context);
   // Dev-only: assert the preload's API_VERSION matches ours (stale-bundle guard).
   // Registered before window creation so it catches the first webContents too.
   if (is.dev) registerApiVersionAssertion();
   createWindow(context, sendEnv);
+  // Ticket 21: one launch check, fired behind the window - the first paint
+  // never waits on a network round-trip, and the banner for a found version
+  // arrives over the pushed state when the check lands (a packaged run only;
+  // an unpackaged one reports `unsupported` without touching the network).
+  void Effect.runPromise(
+    Effect.gen(function* () {
+      const update = yield* UpdateService;
+      yield* update.check();
+    }).pipe(Effect.provideContext(context)),
+  );
 
   app.on("activate", function () {
     // On macOS it's common to re-create a window in the app when the

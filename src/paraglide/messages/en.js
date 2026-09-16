@@ -614,6 +614,23 @@
 /** @typedef {{}} Generate_Startdisabledpattern2Inputs */
 /** @typedef {{ column: NonNullable<unknown> }} Generate_Allblankvalues2Inputs */
 /** @typedef {{ count: NonNullable<unknown> }} Generate_Unassignedsummaryone2Inputs */
+/** @typedef {{}} Update_TitleInputs */
+/** @typedef {{}} Update_Checknow1Inputs */
+/** @typedef {{}} Update_CheckingInputs */
+/** @typedef {{}} Update_Checkfailed1Inputs */
+/** @typedef {{}} Update_Uptodate2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_AvailableInputs */
+/** @typedef {{ version: NonNullable<unknown>, progress: NonNullable<unknown> }} Update_DownloadingInputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_ReadyInputs */
+/** @typedef {{}} Update_DownloadInputs */
+/** @typedef {{}} Update_Openreleasepage2Inputs */
+/** @typedef {{}} Update_Replacemanually1Inputs */
+/** @typedef {{}} Update_Restartandinstall2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_Updatedto1Inputs */
+/** @typedef {{}} Update_UnsupportedInputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errorcheck1Inputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errordownload1Inputs */
+/** @typedef {{}} Update_Erroractivejob2Inputs */
 
 
 export const common_back = /** @type {(inputs: Common_BackInputs) => LocalizedString} */ () => {
@@ -3071,4 +3088,72 @@ export const generate_allblankvalues2 = /** @type {(inputs: Generate_Allblankval
 
 export const generate_unassignedsummaryone2 = /** @type {(inputs: Generate_Unassignedsummaryone2Inputs) => LocalizedString} */ (i) => {
 	return /** @type {LocalizedString} */ (`${i?.count} recipient has a template-column value that is not assigned to any template.`)
+};
+
+export const update_title = /** @type {(inputs: Update_TitleInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Updates`)
+};
+
+export const update_checknow1 = /** @type {(inputs: Update_Checknow1Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Check for updates`)
+};
+
+export const update_checking = /** @type {(inputs: Update_CheckingInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Checking for updates…`)
+};
+
+export const update_checkfailed1 = /** @type {(inputs: Update_Checkfailed1Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Could not check for updates.`)
+};
+
+export const update_uptodate2 = /** @type {(inputs: Update_Uptodate2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`You're on the latest version.`)
+};
+
+export const update_available = /** @type {(inputs: Update_AvailableInputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Version ${i?.version} is available.`)
+};
+
+export const update_downloading = /** @type {(inputs: Update_DownloadingInputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Downloading version ${i?.version}… ${i?.progress}%`)
+};
+
+export const update_ready = /** @type {(inputs: Update_ReadyInputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Version ${i?.version} is ready to install.`)
+};
+
+export const update_download = /** @type {(inputs: Update_DownloadInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Download`)
+};
+
+export const update_openreleasepage2 = /** @type {(inputs: Update_Openreleasepage2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Open download page`)
+};
+
+export const update_replacemanually1 = /** @type {(inputs: Update_Replacemanually1Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Download the build and replace the app in Applications.`)
+};
+
+export const update_restartandinstall2 = /** @type {(inputs: Update_Restartandinstall2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Restart & install`)
+};
+
+export const update_updatedto1 = /** @type {(inputs: Update_Updatedto1Inputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Updated to version ${i?.version}.`)
+};
+
+export const update_unsupported = /** @type {(inputs: Update_UnsupportedInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`This build cannot update itself. Updates work in an installed release build.`)
+};
+
+export const update_errorcheck1 = /** @type {(inputs: Update_Errorcheck1Inputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Could not check for updates: ${i?.message}`)
+};
+
+export const update_errordownload1 = /** @type {(inputs: Update_Errordownload1Inputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Could not download the update: ${i?.message}`)
+};
+
+export const update_erroractivejob2 = /** @type {(inputs: Update_Erroractivejob2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Cannot restart while a send job is running. Finish or pause it, then install the update.`)
 };

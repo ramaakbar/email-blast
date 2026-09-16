@@ -15,6 +15,7 @@ import type { SqliteRepo } from "./db/repository";
 import { MessageTemplatesService } from "./services/message-templates";
 import { TemplatesService } from "./services/templates";
 import { FontManagerService, type FontDirs } from "./services/fonts";
+import { UpdateEnvService, UpdateService } from "./services/update";
 
 export type AppServices =
   | Settings
@@ -31,7 +32,9 @@ export type AppServices =
   | SmtpService
   | ProgressHub
   | AppInfo
-  | FontManagerService;
+  | FontManagerService
+  | UpdateService
+  | UpdateEnvService;
 
 /**
  * Root Layer of the main process - the composition root the Effect
@@ -40,6 +43,15 @@ export type AppServices =
  * Settings, and SqliteRepo alongside, so the duplicates merge away.
  * FontManagerService (ticket 11) is the fonts domain: the bundled
  * faces plus the uploads persisted in the app data dir.
+ *
+ * The two sides of the provideMerge are the requirement split, not the
+ * domains: the send pipeline (and the font manager its generate env
+ * resolves faces through) is built on the providing side, the surface
+ * domains on the other. UpdateService (ticket 21) sits there because its
+ * Live env queries the send service's active job; that way both the
+ * update domain and the send pipeline run on the ONE SendJobService
+ * instance the app coordinates through, instead of a second copy with
+ * its own progress hub and quit latch.
  */
 export const rootLayer = (
   db: Database.Database,
@@ -58,8 +70,11 @@ export const rootLayer = (
       RecipientsService.Live(db, credCrypto),
       TemplatesService.Live(db, credCrypto),
       MessageTemplatesService.Live(db, credCrypto),
-      SendJobService.Live(db, defaults, credCrypto),
+      UpdateService.Live(db, credCrypto),
       AppInfo.Live,
     ),
-    FontManagerService.Live(fontDirs),
+    Layer.provideMerge(
+      SendJobService.Live(db, defaults, credCrypto),
+      FontManagerService.Live(fontDirs),
+    ),
   );

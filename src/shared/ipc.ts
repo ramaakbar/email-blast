@@ -814,6 +814,56 @@ export type JobPausedEvent = Schema.Schema.Type<typeof JobPausedEvent>;
 export const HubEvent = Schema.Union([GenerateProgressEvent, SendProgressEvent, JobPausedEvent]);
 export type HubEvent = Schema.Schema.Type<typeof HubEvent>;
 
+// ---- Update domain (ticket 21, ADR-0011) ----
+
+/**
+ * Where an update check stands. `unsupported` is every unpackaged run
+ * (dev): electron-updater only runs in a packaged app, so a dev build
+ * reports that honestly instead of failing a check.
+ */
+export const UpdateStatus = Schema.Literals([
+  "idle",
+  "checking",
+  "up-to-date",
+  "available",
+  "downloading",
+  "ready",
+  "error",
+  "unsupported",
+]);
+export type UpdateStatus = Schema.Schema.Type<typeof UpdateStatus>;
+
+/**
+ * The whole update state: what the app shell's banner and the Settings
+ * About section render. `canSelfInstall` is the platform split
+ * (ADR-0011) - Windows downloads and installs the update itself, macOS
+ * cannot (an unsigned bundle never satisfies Squirrel.Mac's signature
+ * check), so it points at the release page instead.
+ */
+export const UpdateState = Schema.Struct({
+  status: UpdateStatus,
+  currentVersion: Schema.String,
+  availableVersion: Schema.Union([Schema.Null, Schema.String]),
+  /** 0-100 while `downloading`, null otherwise. */
+  progress: Schema.Union([Schema.Null, Schema.Number]),
+  canSelfInstall: Schema.Boolean,
+  /** The release page of the available version - macOS's download link. */
+  releaseUrl: Schema.Union([Schema.Null, Schema.String]),
+  /** The last failure (check or download), already localized. */
+  error: Schema.Union([Schema.Null, Schema.String]),
+  /**
+   * The version this profile has just moved to, for the one-time
+   * "what's new" notice; null once dismissed or when the version did not
+   * change since the previous launch.
+   */
+  whatsNew: Schema.Union([Schema.Null, Schema.String]),
+});
+export type UpdateState = Schema.Schema.Type<typeof UpdateState>;
+
+/** What `update.dismiss` silences: this available version, or the what's-new notice. */
+export const UpdateDismissPayload = Schema.Literals(["available", "whatsNew"]);
+export type UpdateDismissPayload = Schema.Schema.Type<typeof UpdateDismissPayload>;
+
 /**
  * The contextBridge-exposed API (`window.api`). Domains and methods are
  * added additively as later tickets land.
@@ -1057,5 +1107,32 @@ export interface Api {
      * Resume action for this job.
      */
     getLaunchBanner(): Promise<SendJobSummary | null>;
+  };
+  update: {
+    /** The current update state - the banner's and Settings' snapshot. */
+    getState(): Promise<UpdateState>;
+    /** Runs a check now and resolves with the state the check produced. */
+    check(): Promise<UpdateState>;
+    /**
+     * Downloads the available update. Only meaningful where the app can
+     * install it (Windows); elsewhere it resolves with the unchanged
+     * state, and the UI offers `openRelease` instead.
+     */
+    download(): Promise<UpdateState>;
+    /** Quits and installs the downloaded update (Windows only). */
+    install(): Promise<void>;
+    /** Opens the available release's page in the OS browser - macOS's download path. */
+    openRelease(): Promise<void>;
+    /**
+     * Silences the available-update banner for that version, or the
+     * one-time what's-new notice. A newer version re-nags.
+     */
+    dismiss(what: UpdateDismissPayload): Promise<UpdateState>;
+    /**
+     * Subscribes to update-state changes (a check finding a version,
+     * download progress, an install becoming ready). Returns an
+     * unsubscribe function; `getState` stays the source of truth.
+     */
+    onState(cb: (state: UpdateState) => void): () => void;
   };
 }

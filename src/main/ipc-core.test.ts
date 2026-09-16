@@ -18,12 +18,13 @@ import { messageTemplatesOperations } from "./services/message-templates";
 import { generateOperations } from "./services/generate-jobs";
 import { smtpOperations } from "./services/smtp";
 import { sendOperations, logsOperations } from "./services/send-jobs";
+import { updateOperations } from "./services/update";
 
 /**
  * The same table list the composition root registers. A domain added
  * here keeps the wire/handler consistency guard honest.
  */
-const DOMAINS: readonly (Readonly<Record<string, Operation>>)[] = [
+const DOMAINS: readonly Readonly<Record<string, Operation>>[] = [
   systemOperations,
   settingsOperations,
   importOperations,
@@ -35,6 +36,7 @@ const DOMAINS: readonly (Readonly<Record<string, Operation>>)[] = [
   smtpOperations,
   sendOperations,
   logsOperations,
+  updateOperations,
 ];
 
 function allHandlers(): Map<string, Operation> {
@@ -97,9 +99,10 @@ describe("wire/handler consistency", () => {
 });
 
 describe("makeHandler", () => {
-  class Greeter extends Context.Service<Greeter, { greet: (name: string) => Effect.Effect<string> }>()(
-    "Greeter",
-  ) {}
+  class Greeter extends Context.Service<
+    Greeter,
+    { greet: (name: string) => Effect.Effect<string> }
+  >()("Greeter") {}
 
   const context = Context.make(Greeter, { greet: (name) => Effect.succeed(`hello ${name}`) });
 

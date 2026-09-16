@@ -106,4 +106,13 @@ export const WIRE = {
   logs: {
     list: { channel: "logs:list", args: 1 },
   },
+  update: {
+    getState: { channel: "update:get-state", args: 0 },
+    check: { channel: "update:check", args: 0 },
+    download: { channel: "update:download", args: 0 },
+    install: { channel: "update:install", args: 0 },
+    openRelease: { channel: "update:open-release", args: 0 },
+    dismiss: { channel: "update:dismiss", args: 1 },
+    onState: { channel: "update-state", event: true },
+  },
 } as const;

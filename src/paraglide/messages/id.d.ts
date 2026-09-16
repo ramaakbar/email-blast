@@ -613,6 +613,23 @@
 /** @typedef {{}} Generate_Startdisabledpattern2Inputs */
 /** @typedef {{ column: NonNullable<unknown> }} Generate_Allblankvalues2Inputs */
 /** @typedef {{ count: NonNullable<unknown> }} Generate_Unassignedsummaryone2Inputs */
+/** @typedef {{}} Update_TitleInputs */
+/** @typedef {{}} Update_Checknow1Inputs */
+/** @typedef {{}} Update_CheckingInputs */
+/** @typedef {{}} Update_Checkfailed1Inputs */
+/** @typedef {{}} Update_Uptodate2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_AvailableInputs */
+/** @typedef {{ version: NonNullable<unknown>, progress: NonNullable<unknown> }} Update_DownloadingInputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_ReadyInputs */
+/** @typedef {{}} Update_DownloadInputs */
+/** @typedef {{}} Update_Openreleasepage2Inputs */
+/** @typedef {{}} Update_Replacemanually1Inputs */
+/** @typedef {{}} Update_Restartandinstall2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_Updatedto1Inputs */
+/** @typedef {{}} Update_UnsupportedInputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errorcheck1Inputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errordownload1Inputs */
+/** @typedef {{}} Update_Erroractivejob2Inputs */
 export const common_back: (inputs: Common_BackInputs) => LocalizedString;
 export const common_next: (inputs: Common_NextInputs) => LocalizedString;
 export const common_cancel: (inputs: Common_CancelInputs) => LocalizedString;
@@ -1227,6 +1244,23 @@ export const generate_startdisabledrouting2: (inputs: Generate_Startdisabledrout
 export const generate_startdisabledpattern2: (inputs: Generate_Startdisabledpattern2Inputs) => LocalizedString;
 export const generate_allblankvalues2: (inputs: Generate_Allblankvalues2Inputs) => LocalizedString;
 export const generate_unassignedsummaryone2: (inputs: Generate_Unassignedsummaryone2Inputs) => LocalizedString;
+export { update_title } from "./en.js";
+export const update_checknow1: (inputs: Update_Checknow1Inputs) => LocalizedString;
+export const update_checking: (inputs: Update_CheckingInputs) => LocalizedString;
+export const update_checkfailed1: (inputs: Update_Checkfailed1Inputs) => LocalizedString;
+export const update_uptodate2: (inputs: Update_Uptodate2Inputs) => LocalizedString;
+export const update_available: (inputs: Update_AvailableInputs) => LocalizedString;
+export const update_downloading: (inputs: Update_DownloadingInputs) => LocalizedString;
+export const update_ready: (inputs: Update_ReadyInputs) => LocalizedString;
+export const update_download: (inputs: Update_DownloadInputs) => LocalizedString;
+export const update_openreleasepage2: (inputs: Update_Openreleasepage2Inputs) => LocalizedString;
+export const update_replacemanually1: (inputs: Update_Replacemanually1Inputs) => LocalizedString;
+export const update_restartandinstall2: (inputs: Update_Restartandinstall2Inputs) => LocalizedString;
+export const update_updatedto1: (inputs: Update_Updatedto1Inputs) => LocalizedString;
+export const update_unsupported: (inputs: Update_UnsupportedInputs) => LocalizedString;
+export const update_errorcheck1: (inputs: Update_Errorcheck1Inputs) => LocalizedString;
+export const update_errordownload1: (inputs: Update_Errordownload1Inputs) => LocalizedString;
+export const update_erroractivejob2: (inputs: Update_Erroractivejob2Inputs) => LocalizedString;
 export type LocalizedString = import("../runtime.js").LocalizedString;
 export type Common_BackInputs = {};
 export type Common_NextInputs = {};
@@ -2149,3 +2183,33 @@ export type Generate_Allblankvalues2Inputs = {
 export type Generate_Unassignedsummaryone2Inputs = {
     count: NonNullable<unknown>;
 };
+export type Update_TitleInputs = {};
+export type Update_Checknow1Inputs = {};
+export type Update_CheckingInputs = {};
+export type Update_Checkfailed1Inputs = {};
+export type Update_Uptodate2Inputs = {};
+export type Update_AvailableInputs = {
+    version: NonNullable<unknown>;
+};
+export type Update_DownloadingInputs = {
+    version: NonNullable<unknown>;
+    progress: NonNullable<unknown>;
+};
+export type Update_ReadyInputs = {
+    version: NonNullable<unknown>;
+};
+export type Update_DownloadInputs = {};
+export type Update_Openreleasepage2Inputs = {};
+export type Update_Replacemanually1Inputs = {};
+export type Update_Restartandinstall2Inputs = {};
+export type Update_Updatedto1Inputs = {
+    version: NonNullable<unknown>;
+};
+export type Update_UnsupportedInputs = {};
+export type Update_Errorcheck1Inputs = {
+    message: NonNullable<unknown>;
+};
+export type Update_Errordownload1Inputs = {
+    message: NonNullable<unknown>;
+};
+export type Update_Erroractivejob2Inputs = {};

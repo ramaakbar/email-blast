@@ -19,8 +19,9 @@ import { Button } from "@/components/ui/button";
 import { useLocale } from "@/lib/locale";
 import { errorMessage } from "@/lib/error-message";
 import { WelcomeScreen } from "@/components/welcome-screen";
+import { UpdateBanner } from "@/components/update-banner";
 import { SETTING_KEYS } from "../../../shared/settings";
-import type { SendJobSummary } from "../../../shared/ipc";
+import type { SendJobSummary, UpdateState } from "../../../shared/ipc";
 
 // The workspace split (ticket 05): Generate and Send replace the old
 // Compose wizard (retired in ticket 07). Generate opens the offline
@@ -136,6 +137,29 @@ function RootLayout() {
     [queryClient, refreshBanner],
   );
 
+  // Ticket 21's update banner (ADR-0011): the updater lives in the main
+  // process, which owns the state, so the shell keeps a mirror of it -
+  // fetched once at mount, then replaced by every push (a check finding a
+  // version, download progress, an install becoming ready). Best-effort
+  // like the launch banner: a failed fetch must never block the shell, and
+  // Settings reports the same state on its own.
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.api.update
+      .getState()
+      .then((next) => {
+        if (!cancelled) setUpdateState(next);
+      })
+      .catch(() => {});
+    const offState = window.api.update.onState((next) => setUpdateState(next));
+    return () => {
+      cancelled = true;
+      offState();
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     window.api.settings
@@ -240,6 +264,7 @@ function RootLayout() {
             </button>
           </div>
         )}
+        {updateState !== null && <UpdateBanner state={updateState} onState={setUpdateState} />}
         <Outlet />
       </main>
       <Toaster position="bottom-right" richColors />

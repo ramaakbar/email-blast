@@ -31,7 +31,7 @@ import {
 } from "../../../shared/settings";
 import { normalizeIdentity } from "../../../shared/sender-identity";
 import { validateSmtpProfile } from "../../../shared/smtp-validation";
-import type { SmtpProfile } from "../../../shared/ipc";
+import type { SmtpProfile, UpdateState } from "../../../shared/ipc";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -51,11 +51,44 @@ function rateLabel(ms: number): string {
     : m["settingsPage.ratePerSecondOther"]({ rate });
 }
 
+/**
+ * The About row's status line. `idle` reports nothing - a fresh launch has
+ * nothing to say yet, and a dismissed version is deliberately quiet - while
+ * `error` shows the message the main process already localized for it.
+ */
+function updateStatusLabel(state: UpdateState): string | null {
+  const version = state.availableVersion ?? state.currentVersion;
+  switch (state.status) {
+    case "checking":
+      return m["update.checking"]();
+    case "up-to-date":
+      return m["update.upToDate"]();
+    case "available":
+      return m["update.available"]({ version });
+    case "downloading":
+      return m["update.downloading"]({ version, progress: Math.round(state.progress ?? 0) });
+    case "ready":
+      return m["update.ready"]({ version });
+    case "unsupported":
+      return m["update.unsupported"]();
+    case "error":
+      return state.error;
+    default:
+      return null;
+  }
+}
+
 function SettingsPage() {
   const [rateMs, setRateMs] = useState<number | null>(null);
   const [templatesDir, setTemplatesDir] = useState<string | null>(null);
   const [outputDir, setOutputDir] = useState<string | null>(null);
   const [appInfo, setAppInfo] = useState<{ name: string; version: string } | null>(null);
+  // The update row (ticket 21): the main process owns the updater, so this
+  // is a mirror of its state - read at mount, then replaced by every push
+  // (a check, download progress, an install becoming ready).
+  const [updateState, setUpdateState] = useState<UpdateState | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const locale = useLocale();
@@ -84,6 +117,35 @@ function SettingsPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.update
+      .getState()
+      .then((next) => {
+        if (!cancelled) setUpdateState(next);
+      })
+      .catch(() => {});
+    const offState = window.api.update.onState((next) => setUpdateState(next));
+    return () => {
+      cancelled = true;
+      offState();
+    };
+  }, []);
+
+  const checkForUpdates = useCallback((): void => {
+    setUpdateBusy(true);
+    setUpdateError(null);
+    void window.api.update
+      .check()
+      .then(setUpdateState)
+      .catch((err: unknown) => {
+        // A check that never reached the main process leaves nothing in the
+        // state, so the row has to report that one itself.
+        setUpdateError(errorMessage(err, m["update.checkFailed"]()));
+      })
+      .finally(() => setUpdateBusy(false));
   }, []);
 
   // Clear any pending writes on unmount.
@@ -165,6 +227,14 @@ function SettingsPage() {
     },
     [persist],
   );
+
+  const updateStatus = updateState === null ? null : updateStatusLabel(updateState);
+  // A `ready` state can still carry the refusal from a failed install click
+  // (the main process clears it on the next check), so it is reported
+  // beside the status rather than folded into it.
+  const updateErrorText =
+    updateError ??
+    (updateState !== null && updateState.status !== "error" ? updateState.error : null);
 
   return (
     <div className="mx-auto max-w-2xl space-y-8 p-6">
@@ -297,6 +367,26 @@ function SettingsPage() {
                 <dt className="text-muted-foreground">{m["settingsPage.version"]()}</dt>
                 <dd className="font-medium">{appInfo?.version ?? "…"}</dd>
               </div>
+              <div className="flex items-start justify-between gap-3 py-1">
+                <dt className="text-muted-foreground">{m["update.title"]()}</dt>
+                <dd className="flex flex-col items-end gap-1.5 text-right">
+                  {updateStatus !== null && (
+                    <span className="text-muted-foreground">{updateStatus}</span>
+                  )}
+                  {updateErrorText !== null && (
+                    <span className="text-destructive">{updateErrorText}</span>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={updateBusy}
+                    onClick={checkForUpdates}
+                  >
+                    {updateBusy && <Loader2 className="size-4 animate-spin" />}
+                    {m["update.checkNow"]()}
+                  </Button>
+                </dd>
+              </div>
               <div className="flex justify-between py-1">
                 <dt className="text-muted-foreground">{m["settingsPage.data"]()}</dt>
                 <dd className="font-medium">{m["settingsPage.storedLocally"]()}</dd>
@@ -383,7 +473,11 @@ function SmtpProfilesSection() {
       toast.success(m["smtp.connectionOk"]());
     },
     onError: (err, profileId) => {
-      setTestState({ kind: "error", profileId, message: errorMessage(err, m["smtp.connectionFailed"]()) });
+      setTestState({
+        kind: "error",
+        profileId,
+        message: errorMessage(err, m["smtp.connectionFailed"]()),
+      });
     },
   });
 
@@ -452,7 +546,9 @@ function SmtpProfilesSection() {
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed p-8 text-center">
           <Mail className="size-8 text-muted-foreground" />
           <p className="text-sm font-medium">{m["smtp.noProfilesYet"]()}</p>
-          <p className="max-w-sm text-xs text-muted-foreground">{m["smtp.noProfilesDescription"]()}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">
+            {m["smtp.noProfilesDescription"]()}
+          </p>
           <Button
             size="sm"
             className="mt-1"
@@ -641,7 +737,9 @@ function ProfileFormDialog({
   const [senderAddress, setSenderAddress] = useState(
     form.kind === "create" ? "" : (form.profile.senderAddress ?? ""),
   );
-  const [replyTo, setReplyTo] = useState(form.kind === "create" ? "" : (form.profile.replyTo ?? ""));
+  const [replyTo, setReplyTo] = useState(
+    form.kind === "create" ? "" : (form.profile.replyTo ?? ""),
+  );
   const isCreate = form.kind === "create";
   const password = isCreate ? passwordInput : passwordInput === "" ? null : passwordInput;
 
@@ -664,7 +762,9 @@ function ProfileFormDialog({
         <header className="flex items-start justify-between gap-3 border-b px-6 py-4">
           <div>
             <h2 id="smtp-form-title" className="text-lg font-semibold">
-              {isCreate ? m["smtp.addProfileTitle"]() : m["smtp.editProfileTitle"]({ name: form.profile.name })}
+              {isCreate
+                ? m["smtp.addProfileTitle"]()
+                : m["smtp.editProfileTitle"]({ name: form.profile.name })}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {isCreate ? m["smtp.createHint"]() : m["smtp.editHint"]()}

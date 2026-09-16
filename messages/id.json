@@ -658,5 +658,23 @@
     "startDisabledPattern": "Perbaiki pola nama berkas - pola merujuk slot yang tidak dideklarasikan salah satu template.",
     "allBlankValues": "Semua penerima terpilih memiliki nilai {column} kosong - semua memakai template default.",
     "unassignedSummaryOne": "{count} penerima memiliki nilai kolom template yang belum ditetapkan ke template mana pun."
+  },
+  "update": {
+    "checkNow": "Periksa pembaruan",
+    "checking": "Memeriksa pembaruan…",
+    "checkFailed": "Gagal memeriksa pembaruan.",
+    "upToDate": "Anda memakai versi terbaru.",
+    "available": "Versi {version} tersedia.",
+    "downloading": "Mengunduh versi {version}… {progress}%",
+    "ready": "Versi {version} siap dipasang.",
+    "download": "Unduh",
+    "openReleasePage": "Buka halaman unduhan",
+    "replaceManually": "Unduh build-nya, lalu ganti aplikasi di folder Applications.",
+    "restartAndInstall": "Mulai ulang & pasang",
+    "updatedTo": "Sudah diperbarui ke versi {version}.",
+    "unsupported": "Build ini tidak bisa memperbarui dirinya sendiri. Pembaruan berjalan di build rilis yang sudah terpasang.",
+    "errorCheck": "Gagal memeriksa pembaruan: {message}",
+    "errorDownload": "Gagal mengunduh pembaruan: {message}",
+    "errorActiveJob": "Tidak bisa memulai ulang selagi ada pekerjaan pengiriman. Selesaikan atau jeda dulu, lalu pasang pembaruannya."
   }
 }

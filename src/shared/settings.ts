@@ -12,6 +12,15 @@ export const SETTING_KEYS = {
   outputDir: "output_dir",
   libreofficeChecked: "libreoffice_checked",
   language: "language",
+  // The update domain's bookkeeping (ADR-0011). Owned by the update
+  // service, which reads and writes them through SqliteRepo directly -
+  // nothing outside that module reads these rows.
+  /** The version the profile last launched on - a change means it just updated. */
+  lastRunVersion: "last_run_version",
+  /** The version to announce in the one-time "what's new" notice, until dismissed. */
+  updateNoticeVersion: "update_notice_version",
+  /** The available version whose banner the user dismissed (a newer one re-nags). */
+  updateDismissedVersion: "update_dismissed_version",
 } as const;
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
 

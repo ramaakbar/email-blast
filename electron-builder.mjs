@@ -30,6 +30,30 @@ export default {
   // a rebuild would need a native toolchain for every target platform and
   // would replace a working prebuild with a compiled one.
   npmRebuild: false,
+  // Where the installers go, and where the auto-update metadata comes from
+  // (ADR-0003). electron-builder writes the same block into the packaged app
+  // as `resources/app-update.yml`, which is what electron-updater reads at
+  // runtime; it also emits the `latest*.yml` feed next to the artifacts.
+  // The repository is public on purpose: the GitHub provider has no other way
+  // to reach the feed from a colleague's machine without shipping a token
+  // (ADR-0010).
+  publish: [
+    {
+      provider: "github",
+      owner: "ramaakbar",
+      repo: "email-blast",
+      // A draft release: the artifacts land on GitHub but nothing is visible
+      // to colleagues until the draft is reviewed and published by hand.
+      // `EP_PRE_RELEASE=true` overrides this to a pre-release, which is the
+      // test channel - shipped builds ignore pre-releases.
+      releaseType: "draft",
+    },
+  ],
+  // No `electronUpdaterCompatibility`: electron-builder 26.15.3 already
+  // applies its own ">=2.15" default in `out/publish/updateInfoBuilder.js`
+  // before the update feed is written, which is what electron-updater 6.8.9
+  // wants. Setting it explicitly changes nothing (verified by packaging the
+  // same app with and without the key: byte-identical feed shape).
   // Icons are declared explicitly rather than left to the default
   // buildResources directory (build/), which held a stale 512px set from the
   // pre-Forge scaffold: auto-discovery would silently package that instead of
@@ -37,11 +61,13 @@ export default {
   mac: {
     icon: "resources/icon.icns",
     target: ["dmg", "zip"],
-    // Unsigned local builds still need a signature to launch at all on
-    // Apple Silicon: "-" is the ad-hoc identity. electron-builder does not
-    // ad-hoc sign by default (unlike @electron/packager). Real signing and
-    // notarization are deferred until distribution (ADR-0003); macOS
-    // auto-update will require them from the first shipped version.
+    // Unsigned builds still need a signature to launch at all on Apple
+    // Silicon: "-" is the ad-hoc identity. electron-builder does not ad-hoc
+    // sign by default (unlike @electron/packager). This is the shipped
+    // signature too (ADR-0011: no Developer ID for now), which is why macOS
+    // cannot self-update - Squirrel.Mac checks a downloaded bundle against
+    // the running app's designated requirement, and an ad-hoc signature is a
+    // fresh hash in every build. macOS releases are a manual re-download.
     // electron-builder warns that ad-hoc signing with hardenedRuntime may
     // need com.apple.security.cs.disable-library-validation; the unpacked
     // better-sqlite3 binary is signed by the same ad-hoc pass, so it loads

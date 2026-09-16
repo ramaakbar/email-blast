@@ -616,6 +616,23 @@ import { getLocale, experimentalStaticLocale } from "../runtime.js"
 /** @typedef {{}} Generate_Startdisabledpattern2Inputs */
 /** @typedef {{ column: NonNullable<unknown> }} Generate_Allblankvalues2Inputs */
 /** @typedef {{ count: NonNullable<unknown> }} Generate_Unassignedsummaryone2Inputs */
+/** @typedef {{}} Update_TitleInputs */
+/** @typedef {{}} Update_Checknow1Inputs */
+/** @typedef {{}} Update_CheckingInputs */
+/** @typedef {{}} Update_Checkfailed1Inputs */
+/** @typedef {{}} Update_Uptodate2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_AvailableInputs */
+/** @typedef {{ version: NonNullable<unknown>, progress: NonNullable<unknown> }} Update_DownloadingInputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_ReadyInputs */
+/** @typedef {{}} Update_DownloadInputs */
+/** @typedef {{}} Update_Openreleasepage2Inputs */
+/** @typedef {{}} Update_Replacemanually1Inputs */
+/** @typedef {{}} Update_Restartandinstall2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_Updatedto1Inputs */
+/** @typedef {{}} Update_UnsupportedInputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errorcheck1Inputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errordownload1Inputs */
+/** @typedef {{}} Update_Erroractivejob2Inputs */
 import * as __en from "./en.js"
 import * as __id from "./id.js"
 /**
@@ -9828,3 +9845,258 @@ const generate_unassignedsummaryone2 = /** @type {((inputs: Generate_Unassigneds
 	return __en.generate_unassignedsummaryone2(inputs)
 });
 export { generate_unassignedsummaryone2 as "generate.unassignedSummaryOne" }
+/**
+* | output |
+* | --- |
+* | "Updates" |
+*
+* @param {Update_TitleInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_title = /** @type {((inputs?: Update_TitleInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_TitleInputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_title(inputs)
+	return __en.update_title(inputs)
+});
+export { update_title as "update.title" }
+/**
+* | output |
+* | --- |
+* | "Check for updates" |
+*
+* @param {Update_Checknow1Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_checknow1 = /** @type {((inputs?: Update_Checknow1Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Checknow1Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_checknow1(inputs)
+	return __en.update_checknow1(inputs)
+});
+export { update_checknow1 as "update.checkNow" }
+/**
+* | output |
+* | --- |
+* | "Checking for updates…" |
+*
+* @param {Update_CheckingInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_checking = /** @type {((inputs?: Update_CheckingInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_CheckingInputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_checking(inputs)
+	return __en.update_checking(inputs)
+});
+export { update_checking as "update.checking" }
+/**
+* | output |
+* | --- |
+* | "Could not check for updates." |
+*
+* @param {Update_Checkfailed1Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_checkfailed1 = /** @type {((inputs?: Update_Checkfailed1Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Checkfailed1Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_checkfailed1(inputs)
+	return __en.update_checkfailed1(inputs)
+});
+export { update_checkfailed1 as "update.checkFailed" }
+/**
+* | output |
+* | --- |
+* | "You're on the latest version." |
+*
+* @param {Update_Uptodate2Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_uptodate2 = /** @type {((inputs?: Update_Uptodate2Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Uptodate2Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_uptodate2(inputs)
+	return __en.update_uptodate2(inputs)
+});
+export { update_uptodate2 as "update.upToDate" }
+/**
+* | output |
+* | --- |
+* | "Version {version} is available." |
+*
+* @param {Update_AvailableInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_available = /** @type {((inputs: Update_AvailableInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_AvailableInputs, { locale?: "en" | "id" }, {}>} */ ((inputs, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_available(inputs)
+	return __en.update_available(inputs)
+});
+export { update_available as "update.available" }
+/**
+* | output |
+* | --- |
+* | "Downloading version {version}… {progress}%" |
+*
+* @param {Update_DownloadingInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_downloading = /** @type {((inputs: Update_DownloadingInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_DownloadingInputs, { locale?: "en" | "id" }, {}>} */ ((inputs, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_downloading(inputs)
+	return __en.update_downloading(inputs)
+});
+export { update_downloading as "update.downloading" }
+/**
+* | output |
+* | --- |
+* | "Version {version} is ready to install." |
+*
+* @param {Update_ReadyInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_ready = /** @type {((inputs: Update_ReadyInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_ReadyInputs, { locale?: "en" | "id" }, {}>} */ ((inputs, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_ready(inputs)
+	return __en.update_ready(inputs)
+});
+export { update_ready as "update.ready" }
+/**
+* | output |
+* | --- |
+* | "Download" |
+*
+* @param {Update_DownloadInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_download = /** @type {((inputs?: Update_DownloadInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_DownloadInputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_download(inputs)
+	return __en.update_download(inputs)
+});
+export { update_download as "update.download" }
+/**
+* | output |
+* | --- |
+* | "Open download page" |
+*
+* @param {Update_Openreleasepage2Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_openreleasepage2 = /** @type {((inputs?: Update_Openreleasepage2Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Openreleasepage2Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_openreleasepage2(inputs)
+	return __en.update_openreleasepage2(inputs)
+});
+export { update_openreleasepage2 as "update.openReleasePage" }
+/**
+* | output |
+* | --- |
+* | "Download the build and replace the app in Applications." |
+*
+* @param {Update_Replacemanually1Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_replacemanually1 = /** @type {((inputs?: Update_Replacemanually1Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Replacemanually1Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_replacemanually1(inputs)
+	return __en.update_replacemanually1(inputs)
+});
+export { update_replacemanually1 as "update.replaceManually" }
+/**
+* | output |
+* | --- |
+* | "Restart & install" |
+*
+* @param {Update_Restartandinstall2Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_restartandinstall2 = /** @type {((inputs?: Update_Restartandinstall2Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Restartandinstall2Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_restartandinstall2(inputs)
+	return __en.update_restartandinstall2(inputs)
+});
+export { update_restartandinstall2 as "update.restartAndInstall" }
+/**
+* | output |
+* | --- |
+* | "Updated to version {version}." |
+*
+* @param {Update_Updatedto1Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_updatedto1 = /** @type {((inputs: Update_Updatedto1Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Updatedto1Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_updatedto1(inputs)
+	return __en.update_updatedto1(inputs)
+});
+export { update_updatedto1 as "update.updatedTo" }
+/**
+* | output |
+* | --- |
+* | "This build cannot update itself. Updates work in an installed release build." |
+*
+* @param {Update_UnsupportedInputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_unsupported = /** @type {((inputs?: Update_UnsupportedInputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_UnsupportedInputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_unsupported(inputs)
+	return __en.update_unsupported(inputs)
+});
+export { update_unsupported as "update.unsupported" }
+/**
+* | output |
+* | --- |
+* | "Could not check for updates: {message}" |
+*
+* @param {Update_Errorcheck1Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_errorcheck1 = /** @type {((inputs: Update_Errorcheck1Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Errorcheck1Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_errorcheck1(inputs)
+	return __en.update_errorcheck1(inputs)
+});
+export { update_errorcheck1 as "update.errorCheck" }
+/**
+* | output |
+* | --- |
+* | "Could not download the update: {message}" |
+*
+* @param {Update_Errordownload1Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_errordownload1 = /** @type {((inputs: Update_Errordownload1Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Errordownload1Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_errordownload1(inputs)
+	return __en.update_errordownload1(inputs)
+});
+export { update_errordownload1 as "update.errorDownload" }
+/**
+* | output |
+* | --- |
+* | "Cannot restart while a send job is running. Finish or pause it, then install the update." |
+*
+* @param {Update_Erroractivejob2Inputs} inputs
+* @param {{ locale?: "en" | "id" }} options
+* @returns {LocalizedString}
+*/
+const update_erroractivejob2 = /** @type {((inputs?: Update_Erroractivejob2Inputs, options?: { locale?: "en" | "id" }) => LocalizedString) & import('../runtime.js').MessageMetadata<Update_Erroractivejob2Inputs, { locale?: "en" | "id" }, {}>} */ ((inputs = {}, options = {}) => {
+	const locale = experimentalStaticLocale ?? options.locale ?? getLocale()
+	if (locale === "id") return __id.update_erroractivejob2(inputs)
+	return __en.update_erroractivejob2(inputs)
+});
+export { update_erroractivejob2 as "update.errorActiveJob" }

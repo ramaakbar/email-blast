@@ -1,6 +1,6 @@
 # ADR-0003: Auto-update via electron-updater with GitHub Releases
 
-**Status:** Accepted
+**Status:** Accepted; amended by [ADR-0011](./0011-unsigned-distribution-and-platform-split-updates.md) — the app now ships **unsigned**, so its signing requirement below is dropped and macOS cannot self-update (Windows still can).
 
 **Date:** 2026-08-04
 

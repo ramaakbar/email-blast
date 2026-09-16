@@ -13,10 +13,12 @@
     "dev": "node scripts/dev.mjs",
     "start": "node scripts/dev.mjs",
     "build": "vite build --config vite.main.config.mjs && vite build --config vite.preload.config.mjs && vite build --config vite.renderer.config.mjs",
-    "package": "npm run build && electron-builder --config electron-builder.mjs --dir",
-    "make": "npm run build && electron-builder --config electron-builder.mjs",
-    "make:mac": "npm run build && electron-builder --config electron-builder.mjs --mac",
-    "make:win": "npm run build && electron-builder --config electron-builder.mjs --win",
+    "package": "npm run build && electron-builder --config electron-builder.mjs --dir --publish never",
+    "make": "npm run build && electron-builder --config electron-builder.mjs --publish never",
+    "make:mac": "npm run build && electron-builder --config electron-builder.mjs --mac --publish never",
+    "make:win": "npm run build && electron-builder --config electron-builder.mjs --win --publish never",
+    "make:mac:publish": "npm run build && electron-builder --config electron-builder.mjs --mac --publish always",
+    "make:win:publish": "npm run build && electron-builder --config electron-builder.mjs --win --publish always",
     "compile": "npm run typecheck && npm run make",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
@@ -33,7 +35,8 @@
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
     "@e965/xlsx": "0.20.3",

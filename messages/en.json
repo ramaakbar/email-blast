@@ -658,5 +658,24 @@
     "startDisabledPattern": "Fix the output pattern - it references a slot that one of the templates does not declare.",
     "allBlankValues": "All selected recipients have a blank {column} value - everyone uses the default template.",
     "unassignedSummaryOne": "{count} recipient has a template-column value that is not assigned to any template."
+  },
+  "update": {
+    "title": "Updates",
+    "checkNow": "Check for updates",
+    "checking": "Checking for updates…",
+    "checkFailed": "Could not check for updates.",
+    "upToDate": "You're on the latest version.",
+    "available": "Version {version} is available.",
+    "downloading": "Downloading version {version}… {progress}%",
+    "ready": "Version {version} is ready to install.",
+    "download": "Download",
+    "openReleasePage": "Open download page",
+    "replaceManually": "Download the build and replace the app in Applications.",
+    "restartAndInstall": "Restart & install",
+    "updatedTo": "Updated to version {version}.",
+    "unsupported": "This build cannot update itself. Updates work in an installed release build.",
+    "errorCheck": "Could not check for updates: {message}",
+    "errorDownload": "Could not download the update: {message}",
+    "errorActiveJob": "Cannot restart while a send job is running. Finish or pause it, then install the update."
   }
 }

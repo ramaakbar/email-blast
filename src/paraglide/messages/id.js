@@ -614,6 +614,23 @@
 /** @typedef {{}} Generate_Startdisabledpattern2Inputs */
 /** @typedef {{ column: NonNullable<unknown> }} Generate_Allblankvalues2Inputs */
 /** @typedef {{ count: NonNullable<unknown> }} Generate_Unassignedsummaryone2Inputs */
+/** @typedef {{}} Update_TitleInputs */
+/** @typedef {{}} Update_Checknow1Inputs */
+/** @typedef {{}} Update_CheckingInputs */
+/** @typedef {{}} Update_Checkfailed1Inputs */
+/** @typedef {{}} Update_Uptodate2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_AvailableInputs */
+/** @typedef {{ version: NonNullable<unknown>, progress: NonNullable<unknown> }} Update_DownloadingInputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_ReadyInputs */
+/** @typedef {{}} Update_DownloadInputs */
+/** @typedef {{}} Update_Openreleasepage2Inputs */
+/** @typedef {{}} Update_Replacemanually1Inputs */
+/** @typedef {{}} Update_Restartandinstall2Inputs */
+/** @typedef {{ version: NonNullable<unknown> }} Update_Updatedto1Inputs */
+/** @typedef {{}} Update_UnsupportedInputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errorcheck1Inputs */
+/** @typedef {{ message: NonNullable<unknown> }} Update_Errordownload1Inputs */
+/** @typedef {{}} Update_Erroractivejob2Inputs */
 
 
 export const common_back = /** @type {(inputs: Common_BackInputs) => LocalizedString} */ () => {
@@ -3071,4 +3088,69 @@ export const generate_allblankvalues2 = /** @type {(inputs: Generate_Allblankval
 
 export const generate_unassignedsummaryone2 = /** @type {(inputs: Generate_Unassignedsummaryone2Inputs) => LocalizedString} */ (i) => {
 	return /** @type {LocalizedString} */ (`${i?.count} penerima memiliki nilai kolom template yang belum ditetapkan ke template mana pun.`)
+};
+export { update_title } from "./en.js"
+
+export const update_checknow1 = /** @type {(inputs: Update_Checknow1Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Periksa pembaruan`)
+};
+
+export const update_checking = /** @type {(inputs: Update_CheckingInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Memeriksa pembaruan…`)
+};
+
+export const update_checkfailed1 = /** @type {(inputs: Update_Checkfailed1Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Gagal memeriksa pembaruan.`)
+};
+
+export const update_uptodate2 = /** @type {(inputs: Update_Uptodate2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Anda memakai versi terbaru.`)
+};
+
+export const update_available = /** @type {(inputs: Update_AvailableInputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Versi ${i?.version} tersedia.`)
+};
+
+export const update_downloading = /** @type {(inputs: Update_DownloadingInputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Mengunduh versi ${i?.version}… ${i?.progress}%`)
+};
+
+export const update_ready = /** @type {(inputs: Update_ReadyInputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Versi ${i?.version} siap dipasang.`)
+};
+
+export const update_download = /** @type {(inputs: Update_DownloadInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Unduh`)
+};
+
+export const update_openreleasepage2 = /** @type {(inputs: Update_Openreleasepage2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Buka halaman unduhan`)
+};
+
+export const update_replacemanually1 = /** @type {(inputs: Update_Replacemanually1Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Unduh build-nya, lalu ganti aplikasi di folder Applications.`)
+};
+
+export const update_restartandinstall2 = /** @type {(inputs: Update_Restartandinstall2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Mulai ulang & pasang`)
+};
+
+export const update_updatedto1 = /** @type {(inputs: Update_Updatedto1Inputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Sudah diperbarui ke versi ${i?.version}.`)
+};
+
+export const update_unsupported = /** @type {(inputs: Update_UnsupportedInputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Build ini tidak bisa memperbarui dirinya sendiri. Pembaruan berjalan di build rilis yang sudah terpasang.`)
+};
+
+export const update_errorcheck1 = /** @type {(inputs: Update_Errorcheck1Inputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Gagal memeriksa pembaruan: ${i?.message}`)
+};
+
+export const update_errordownload1 = /** @type {(inputs: Update_Errordownload1Inputs) => LocalizedString} */ (i) => {
+	return /** @type {LocalizedString} */ (`Gagal mengunduh pembaruan: ${i?.message}`)
+};
+
+export const update_erroractivejob2 = /** @type {(inputs: Update_Erroractivejob2Inputs) => LocalizedString} */ () => {
+	return /** @type {LocalizedString} */ (`Tidak bisa memulai ulang selagi ada pekerjaan pengiriman. Selesaikan atau jeda dulu, lalu pasang pembaruannya.`)
 };

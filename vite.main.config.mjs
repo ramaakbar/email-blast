@@ -50,6 +50,11 @@ export default defineConfig({
       external: [
         "electron",
         "better-sqlite3",
+        // electron-updater stays external too (ADR-0011): it resolves its
+        // own `app-update.yml` at runtime and is required from node_modules
+        // inside the asar - electron-builder's module collector copies it
+        // from `dependencies`, exactly like better-sqlite3.
+        "electron-updater",
         ...builtinModules,
         ...builtinModules.map((m) => `node:${m}`),
       ],

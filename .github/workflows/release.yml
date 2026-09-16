@@ -1,0 +1,68 @@
+# Cuts a GitHub Release from a `v*` tag (ADR-0003, ADR-0011).
+#
+# One job for both platforms: GitHub's standard runners are free for public
+# repositories, and electron-builder's NSIS target needs neither wine nor
+# Rosetta on Apple Silicon (ticket 26), so this single macOS runner produces
+# the dmg/zip and the Setup.exe. A separate Windows job would add a second
+# cache, a second Electron download and a second uploader racing on the same
+# draft release, for nothing.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# electron-builder uploads the installers and the `latest*.yml` feed with the
+# workflow token; the default token is read-only and the upload would 403.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # --ignore-scripts skips the root `prepare` hook, which clones the
+      # Effect repository into .repos/effect for a development skill - a large
+      # download this job never reads. No package build is needed either:
+      # electron-builder fetches its own Electron distribution, better-sqlite3
+      # ships every platform's Node-API prebuild inside the tarball, and
+      # vite/esbuild resolve their binaries from optional dependencies.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # The publisher derives the release tag as `v` + package.json version
+      # (electron-publish's GitHubPublisher), and only reuses an existing
+      # draft with that tag - so a stale tag would attach the artifacts to the
+      # wrong release, or to no release at all.
+      - name: Tag matches package.json version
+        run: |
+          expected="v$(node -p 'require("./package.json").version')"
+          if [ "$GITHUB_REF_NAME" != "$expected" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $expected"
+            exit 1
+          fi
+
+      # Both runs publish into the same draft release: the publisher reuses a
+      # draft whose tag matches, so the Windows run adds its assets to the one
+      # the macOS run created. Review the draft at
+      # https://github.com/ramaakbar/email-blast/releases and publish it by
+      # hand - colleagues see nothing before that.
+      - name: Package and upload macOS
+        run: pnpm make:mac:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package and upload Windows
+        run: pnpm make:win:publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
